@@ -1,0 +1,178 @@
+// Mock数据
+
+export const PROJECTS = [
+  { id: 1, name: '电信云数据中心A区', short: 'A区', phase: '施工中', status: 'normal', longitude: 116.397428, latitude: 39.909204, address: '北京市东城区天安门广场东侧' },
+  { id: 2, name: '电信云数据中心B区', short: 'B区', phase: '收尾中', status: 'warning', longitude: 121.473701, latitude: 31.230416, address: '上海市黄浦区人民大道1号' },
+  { id: 3, name: '电信云园区基础设施', short: '园区', phase: '施工中', status: 'normal', longitude: 113.331520, latitude: 23.126272, address: '广州市天河区珠江新城华夏路8号' },
+];
+
+export const PROJECT_INFO = {
+  1: {
+    name: '电信云数据中心A区',
+    short: 'A区',
+    area: '42,000 ㎡',
+    period: '2025-03-01 ~ 2027-06-30',
+    phase: '施工中',
+    projectStatus: '正常',
+    safetyGoal: '零事故、零伤亡',
+    qualityGoal: '确保优良工程',
+    manager: '周建军',
+    contractor: '中建三局第一建设有限公司',
+    desc: '承担电信云区域核心数据中心建设，包含主机房、辅助用房及配套设施建设。',
+  },
+  2: {
+    name: '电信云数据中心B区',
+    short: 'B区',
+    area: '38,500 ㎡',
+    period: '2024-11-01 ~ 2026-12-31',
+    phase: '收尾中',
+    projectStatus: '延期',
+    safetyGoal: '零事故、零伤亡',
+    qualityGoal: '确保优良工程',
+    manager: '陈海涛',
+    contractor: '中铁建工集团有限公司',
+    desc: '数据中心B区扩建项目，包含机房扩容、网络基础设施及安全系统完善工程。',
+  },
+  3: {
+    name: '电信云园区基础设施',
+    short: '园区',
+    area: '15,200 ㎡',
+    period: '2025-06-01 ~ 2026-10-31',
+    phase: '施工中',
+    projectStatus: '正常',
+    safetyGoal: '零事故',
+    qualityGoal: '精品工程',
+    manager: '黄丽华',
+    contractor: '中建八局',
+    desc: '园区内道路、管廊、绿化、安防及能源保障系统综合建设项目。',
+  },
+};
+
+export const DATA_BY_PROJECT = {
+  1: {
+    cameras: [
+      { id: 1, name: '大门入口', area: '出入口', online: true },
+      { id: 2, name: '施工区A', area: '主施工区', online: true },
+      { id: 3, name: '材料仓库', area: '仓储区', online: false },
+      { id: 4, name: '塔吊1号位', area: '起重区', online: true },
+      { id: 5, name: '施工区B', area: '主施工区', online: true },
+      { id: 6, name: '地下室入口', area: '地下区域', online: true },
+      { id: 7, name: '配电房外', area: '设备区', online: false },
+      { id: 8, name: '办公区门口', area: '生活区', online: true },
+      { id: 9, name: '消防通道', area: '安全区', online: true },
+      { id: 10, name: '塔吊2号位', area: '起重区', online: true },
+      { id: 11, name: '围墙东侧', area: '周界', online: false },
+      { id: 12, name: '钢筋加工区', area: '加工区', online: true },
+      { id: 13, name: '围墙西侧', area: '周界', online: true },
+      { id: 14, name: '北侧施工区', area: '主施工区', online: true },
+      { id: 15, name: '材料存放区', area: '仓储区', online: true },
+      { id: 16, name: '南大门', area: '出入口', online: true },
+    ],
+    personnel: [
+      { id: 1, name: '陈建国', gender: '男', idcard: '110101199003151234', phone: '138****8901', unit: '第一建设班组', role: '普工', entryTime: '2026-04-20 08:30', status: '已教育', note: '' },
+      { id: 2, name: '李明辉', gender: '男', idcard: '330106198507224567', phone: '139****2345', unit: '第一建设班组', role: '焊工', entryTime: '2026-04-21 09:00', status: '已教育', note: '' },
+      { id: 3, name: '王小红', gender: '女', idcard: '440301200001013456', phone: '137****5678', unit: '安装班组', role: '电工', entryTime: '2026-04-22 08:00', status: '待教育', note: '' },
+      { id: 4, name: '张伟', gender: '男', idcard: '110102198812309012', phone: '136****7890', unit: '安装班组', role: '管工', entryTime: '2026-04-23 10:00', status: '待教育', note: '' },
+      { id: 5, name: '刘芳', gender: '女', idcard: '210201199206180123', phone: '135****1234', unit: '防水班组', role: '普工', entryTime: '2026-04-24 08:00', status: '待教育', note: '' },
+      { id: 6, name: '赵强', gender: '男', idcard: '320102198901012345', phone: '134****5678', unit: '第一建设班组', role: '架子工', entryTime: '2026-04-19 08:30', status: '已离场', note: '' },
+    ],
+    trainings: [
+      { id: 1, name: '2026年4月第一批安全三级教育', eduType: '临时人员安全三级教育', time: '2026-04-21 14:00', place: '项目部会议室', trainer: '王安全', personIds: [1, 2], status: '已完成', note: '' },
+      { id: 2, name: '2026年4月第二批安全三级教育', eduType: '临时人员安全三级教育', time: '2026-04-24 14:00', place: '项目部培训室', trainer: '刘安全', personIds: [3, 4, 5], status: '进行中', note: '' },
+    ],
+    files: [
+      { id: 1, name: '第一批培训资料.pdf', fileType: '培训资料', batchName: '2026年4月第一批', batchId: 1, uploader: '王安全', time: '2026-04-21 16:00' },
+      { id: 2, name: '第一批工人签字表.pdf', fileType: '签字文件', batchName: '2026年4月第一批', batchId: 1, uploader: '王安全', time: '2026-04-21 16:30' },
+      { id: 3, name: '特种作业证-焊工李明辉.jpg', fileType: '证书', batchName: '2026年4月第一批', batchId: 1, uploader: '刘安全', time: '2026-04-22 09:00' },
+    ],
+    devices: [
+      { id: 1, name: '1号塔吊', code: 'TC-001', type: '塔吊', status: '运行中', lastReport: '2026-04-24 11:30', height: '45m', maxLoad: '8t', note: '' },
+      { id: 2, name: '2号塔吊', code: 'TC-002', type: '塔吊', status: '停机', lastReport: '2026-04-24 09:00', height: '38m', maxLoad: '6t', note: '计划检修' },
+      { id: 3, name: '施工电梯A', code: 'EL-001', type: '施工电梯', status: '运行中', lastReport: '2026-04-24 11:25', height: '30m', maxLoad: '2t', note: '' },
+      { id: 4, name: '混凝土泵车', code: 'PC-001', type: '泵车', status: '异常', lastReport: '2026-04-24 08:15', height: '-', maxLoad: '-', note: '液压系统警报' },
+    ],
+    docs: [
+      { id: 1, name: 'A区-安全培训资料-第一批.pdf', type: '培训资料', businessRef: '2026年4月第一批安全教育', uploader: '张工', time: '2026-04-23 14:32', status: '已归档', note: '' },
+      { id: 2, name: 'A区-施工日志-0423.docx', type: '施工日志', businessRef: '日常施工记录', uploader: '李工', time: '2026-04-23 18:05', status: '已上传', note: '含主体结构进度' },
+      { id: 3, name: '工人签字确认表-B组.pdf', type: '签字文件', businessRef: '2026年4月第二批安全教育', uploader: '王安全', time: '2026-04-24 09:11', status: '待确认', note: '' },
+      { id: 4, name: '会议纪要-4月例会.docx', type: '会议纪要', businessRef: '4月月度例会', uploader: '张工', time: '2026-04-24 10:30', status: '已上传', note: '' },
+      { id: 5, name: '特种作业证书-焊工.jpg', type: '凭证文件', businessRef: '李明辉-焊工', uploader: '刘安全', time: '2026-04-24 11:00', status: '已归档', note: '有效期至2027-08' },
+    ],
+    stats: { onsite: 128, todayNewOnsite: 12, progressPercent: 63 },
+  },
+  p2: {
+    cameras: [
+      { id: 1, name: 'B区大门', area: '出入口', online: true },
+      { id: 2, name: 'B区机房入口', area: '主施工区', online: true },
+      { id: 3, name: 'B区塔吊位', area: '起重区', online: false },
+      { id: 4, name: 'B区材料区', area: '仓储区', online: true },
+      { id: 5, name: 'B区办公楼', area: '生活区', online: true },
+      { id: 6, name: 'B区东围墙', area: '周界', online: true },
+      { id: 7, name: 'B区西围墙', area: '周界', online: true },
+      { id: 8, name: 'B区消防通道', area: '安全区', online: false },
+    ],
+    personnel: [
+      { id: 101, name: '周志明', gender: '男', idcard: '110105197508121234', phone: '138****3344', unit: 'B区主班组', role: '项目经理', entryTime: '2024-11-10 08:00', status: '已教育', note: '' },
+      { id: 102, name: '孙丽', gender: '女', idcard: '330108199212105432', phone: '139****5566', unit: '机电安装班组', role: '电工', entryTime: '2025-08-15 09:00', status: '已教育', note: '' },
+      { id: 103, name: '吴强', gender: '男', idcard: '500105198601059876', phone: '137****7788', unit: '装饰班组', role: '普工', entryTime: '2026-02-20 08:30', status: '待教育', note: '补充教育' },
+    ],
+    trainings: [
+      { id: 11, name: '2026年3月B区复工安全教育', eduType: '复工教育', time: '2026-03-15 10:00', place: 'B区项目部', trainer: '陈安全', personIds: [101, 102], status: '已完成', note: '' },
+    ],
+    files: [
+      { id: 11, name: 'B区-复工培训资料.pdf', fileType: '培训资料', batchName: '2026年3月复工', batchId: 11, uploader: '陈安全', time: '2026-03-15 14:00' },
+      { id: 12, name: 'B区-复工签字表.pdf', fileType: '签字文件', batchName: '2026年3月复工', batchId: 11, uploader: '陈安全', time: '2026-03-15 14:30' },
+    ],
+    devices: [
+      { id: 11, name: 'B区塔吊', code: 'TC-B01', type: '塔吊', status: '停机', lastReport: '2026-04-24 07:00', height: '42m', maxLoad: '7t', note: '收尾阶段已停用' },
+      { id: 12, name: 'B区施工电梯', code: 'EL-B01', type: '施工电梯', status: '运行中', lastReport: '2026-04-24 11:20', height: '28m', maxLoad: '2t', note: '' },
+      { id: 13, name: 'B区配电柜', code: 'PD-B01', type: '配电设备', status: '异常', lastReport: '2026-04-24 10:05', height: '-', maxLoad: '-', note: '电压波动告警' },
+    ],
+    docs: [
+      { id: 11, name: 'B区-竣工资料-机电部分.pdf', type: '施工日志', businessRef: '竣工验收', uploader: '周志明', time: '2026-04-22 16:00', status: '已归档', note: '' },
+      { id: 12, name: 'B区-消防验收报告.pdf', type: '凭证文件', businessRef: '消防验收', uploader: '王安全', time: '2026-04-23 10:00', status: '已归档', note: '' },
+      { id: 13, name: 'B区-验收会议纪要.docx', type: '会议纪要', businessRef: '4月验收例会', uploader: '周志明', time: '2026-04-24 09:00', status: '待确认', note: '' },
+    ],
+    stats: { onsite: 23, todayNewOnsite: 0, progressPercent: 92 },
+  },
+  p3: {
+    cameras: [
+      { id: 1, name: '园区北门', area: '出入口', online: true },
+      { id: 2, name: '园区南门', area: '出入口', online: true },
+      { id: 3, name: '主干道中段', area: '主施工区', online: true },
+      { id: 4, name: '管廊施工段', area: '主施工区', online: true },
+      { id: 5, name: '绿化施工区', area: '主施工区', online: false },
+      { id: 6, name: '配电房工地', area: '设备区', online: true },
+      { id: 7, name: '材料存放区', area: '仓储区', online: true },
+      { id: 8, name: '东侧围挡', area: '周界', online: true },
+      { id: 9, name: '西侧围挡', area: '周界', online: true },
+      { id: 10, name: '北侧围挡', area: '周界', online: true },
+    ],
+    personnel: [
+      { id: 201, name: '黄志伟', gender: '男', idcard: '440106198203056543', phone: '138****9911', unit: '道路班组', role: '推土机操作', entryTime: '2025-06-10 08:00', status: '已教育', note: '' },
+      { id: 202, name: '赵敏', gender: '女', idcard: '320101199408081234', phone: '139****2233', unit: '绿化班组', role: '普工', entryTime: '2025-09-20 08:30', status: '已教育', note: '' },
+      { id: 203, name: '钱海', gender: '男', idcard: '110108198712015678', phone: '137****4455', unit: '管廊班组', role: '管工', entryTime: '2026-03-01 09:00', status: '待教育', note: '' },
+      { id: 204, name: '林峰', gender: '男', idcard: '450102199505224321', phone: '136****6677', unit: '安装班组', role: '电工', entryTime: '2026-04-15 08:00', status: '待教育', note: '' },
+    ],
+    trainings: [
+      { id: 21, name: '2025年6月园区开工教育', eduType: '临时人员安全三级教育', time: '2025-06-11 14:00', place: '园区临时办公区', trainer: '郑安全', personIds: [201, 202], status: '已完成', note: '' },
+      { id: 22, name: '2026年5月园区第二期培训', eduType: '专项教育', time: '2026-05-05 14:00', place: '园区项目部', trainer: '郑安全', personIds: [203, 204], status: '未开始', note: '计划开展' },
+    ],
+    files: [
+      { id: 21, name: '园区-开工教育资料.pdf', fileType: '培训资料', batchName: '2025年6月开工', batchId: 21, uploader: '郑安全', time: '2025-06-12 09:00' },
+      { id: 22, name: '园区-开工签字表.pdf', fileType: '签字文件', batchName: '2025年6月开工', batchId: 21, uploader: '郑安全', time: '2025-06-12 10:00' },
+    ],
+    devices: [
+      { id: 21, name: '推土机#1', code: 'BL-001', type: '推土机', status: '运行中', lastReport: '2026-04-24 10:15', height: '-', maxLoad: '-', note: '' },
+      { id: 22, name: '压路机#1', code: 'RL-001', type: '压路机', status: '运行中', lastReport: '2026-04-24 10:30', height: '-', maxLoad: '-', note: '' },
+      { id: 23, name: '挖掘机#1', code: 'EX-001', type: '挖掘机', status: '停机', lastReport: '2026-04-24 07:45', height: '-', maxLoad: '-', note: '午休时段' },
+    ],
+    docs: [
+      { id: 21, name: '园区-道路施工日志.docx', type: '施工日志', businessRef: '道路工程', uploader: '黄志伟', time: '2026-04-23 17:00', status: '已上传', note: '' },
+      { id: 22, name: '园区-管廊施工方案.pdf', type: '施工日志', businessRef: '管廊工程', uploader: '钱海', time: '2026-04-22 15:00', status: '已归档', note: '' },
+      { id: 23, name: '园区-设备入场证明.pdf', type: '凭证文件', businessRef: '设备入场', uploader: '黄志伟', time: '2026-04-18 11:00', status: '已归档', note: '' },
+      { id: 24, name: '园区-月度会议纪要.docx', type: '会议纪要', businessRef: '4月月会', uploader: '郑安全', time: '2026-04-24 08:30', status: '已上传', note: '' },
+    ],
+    stats: { onsite: 42, todayNewOnsite: 2, progressPercent: 38 },
+  },
+};

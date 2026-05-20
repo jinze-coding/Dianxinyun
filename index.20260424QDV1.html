@@ -1,0 +1,2164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>电信云平台项目现场综合管理系统</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.3); border-radius: 3px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  button { font-family: inherit; }
+  input, select { font-family: inherit; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+
+// ─── 主题定义（深 → 浅） ───────────────────────────────
+const ALL_THEMES = [
+  {
+    id: 'T1', name: '深海蓝', brightness: '最深',
+    pageBg: '#060f1e', navBg: '#07101f', cardBg: '#0c1a30',
+    surface2: '#0a1525', modalBg: '#0e1e38', dropdownBg: '#0c1a30',
+    activeItemBg: 'rgba(22,119,255,0.14)', hoverBg: 'rgba(255,255,255,0.04)', tagBg: 'rgba(255,255,255,0.06)',
+    borderColor: '#1a2f50',
+    accent: '#1677ff', accent2: '#36a3f7',
+    success: '#22c55e', warning: '#f59e0b', danger: '#ef4444',
+    textPrimary: '#e2edff', textSecondary: '#9bbde0', textMuted: '#4d6d9a',
+    navHeight: '54px', radius: '8px',
+  },
+  {
+    id: 'T2', name: '暗紫星云', brightness: '极深',
+    pageBg: '#0c0814', navBg: '#0f0b18', cardBg: '#160f22',
+    surface2: '#110c1c', modalBg: '#1a1228', dropdownBg: '#160f22',
+    activeItemBg: 'rgba(139,92,246,0.15)', hoverBg: 'rgba(255,255,255,0.04)', tagBg: 'rgba(255,255,255,0.06)',
+    borderColor: '#2a1a45',
+    accent: '#8b5cf6', accent2: '#c084fc',
+    success: '#22c55e', warning: '#f59e0b', danger: '#ef4444',
+    textPrimary: '#ede9ff', textSecondary: '#a992d4', textMuted: '#5b4580',
+    navHeight: '54px', radius: '8px',
+  },
+  {
+    id: 'T3', name: '碳黑科技', brightness: '深',
+    pageBg: '#0e0e0e', navBg: '#111111', cardBg: '#181818',
+    surface2: '#131313', modalBg: '#1e1e1e', dropdownBg: '#181818',
+    activeItemBg: 'rgba(99,102,241,0.14)', hoverBg: 'rgba(255,255,255,0.04)', tagBg: 'rgba(255,255,255,0.07)',
+    borderColor: '#282828',
+    accent: '#6366f1', accent2: '#818cf8',
+    success: '#10b981', warning: '#f59e0b', danger: '#ef4444',
+    textPrimary: '#f2f2f2', textSecondary: '#a0a0a0', textMuted: '#505050',
+    navHeight: '54px', radius: '6px',
+  },
+  {
+    id: 'T4', name: '深青数字', brightness: '中深',
+    pageBg: '#071412', navBg: '#081816', cardBg: '#0e211e',
+    surface2: '#0b1b18', modalBg: '#122824', dropdownBg: '#0e211e',
+    activeItemBg: 'rgba(16,185,129,0.14)', hoverBg: 'rgba(255,255,255,0.04)', tagBg: 'rgba(255,255,255,0.06)',
+    borderColor: '#163530',
+    accent: '#10b981', accent2: '#34d399',
+    success: '#22c55e', warning: '#f59e0b', danger: '#ef4444',
+    textPrimary: '#d8f5ef', textSecondary: '#7abfb0', textMuted: '#3a6b62',
+    navHeight: '54px', radius: '8px',
+  },
+  {
+    id: 'T5', name: '暮色蓝灰', brightness: '中',
+    pageBg: '#1a1f2e', navBg: '#1e2438', cardBg: '#242c3f',
+    surface2: '#1e2436', modalBg: '#2a3349', dropdownBg: '#242c3f',
+    activeItemBg: 'rgba(59,130,246,0.15)', hoverBg: 'rgba(255,255,255,0.05)', tagBg: 'rgba(255,255,255,0.08)',
+    borderColor: '#303a52',
+    accent: '#3b82f6', accent2: '#60a5fa',
+    success: '#22c55e', warning: '#f59e0b', danger: '#ef4444',
+    textPrimary: '#dde6f8', textSecondary: '#8fa4c8', textMuted: '#4f6080',
+    navHeight: '54px', radius: '8px',
+  },
+  {
+    id: 'T6', name: '浅雾商务', brightness: '浅',
+    pageBg: '#f0f4f9', navBg: '#ffffff', cardBg: '#ffffff',
+    surface2: '#f5f8fc', modalBg: '#ffffff', dropdownBg: '#ffffff',
+    activeItemBg: 'rgba(22,119,255,0.08)', hoverBg: 'rgba(0,0,0,0.03)', tagBg: 'rgba(0,0,0,0.05)',
+    borderColor: '#dce5f0',
+    accent: '#1677ff', accent2: '#36a3f7',
+    success: '#16a34a', warning: '#d97706', danger: '#dc2626',
+    textPrimary: '#0f1a2e', textSecondary: '#3a5070', textMuted: '#8aa0bc',
+    navHeight: '54px', radius: '8px',
+  },
+];
+
+// ─── 项目 ─────────────────────────────────────────────
+const PROJECTS = [
+  { id: 'p1', name: '电信云数据中心A区', short: 'A区', phase: '施工中', status: 'normal' },
+  { id: 'p2', name: '电信云数据中心B区', short: 'B区', phase: '收尾中', status: 'warning' },
+  { id: 'p3', name: '电信云园区基础设施', short: '园区', phase: '施工中', status: 'normal' },
+];
+
+// ─── Mock 数据 ────────────────────────────────────────
+const PROJECT_INFO = {
+  p1: { name: '电信云数据中心A区', short: 'A区', area: '42,000 ㎡', period: '2025-03-01 ~ 2027-06-30', phase: '施工中', projectStatus: '正常', safetyGoal: '零事故、零伤亡', qualityGoal: '确保优良工程', manager: '周建军', contractor: '中建三局第一建设有限公司', desc: '承担电信云区域核心数据中心建设，包含主机房、辅助用房及配套设施建设。' },
+  p2: { name: '电信云数据中心B区', short: 'B区', area: '38,500 ㎡', period: '2024-11-01 ~ 2026-12-31', phase: '收尾中', projectStatus: '延期', safetyGoal: '零事故、零伤亡', qualityGoal: '确保优良工程', manager: '陈海涛', contractor: '中铁建工集团有限公司', desc: '数据中心B区扩建项目，包含机房扩容、网络基础设施及安全系统完善工程。' },
+  p3: { name: '电信云园区基础设施', short: '园区', area: '15,200 ㎡', period: '2025-06-01 ~ 2026-10-31', phase: '施工中', projectStatus: '正常', safetyGoal: '零事故', qualityGoal: '精品工程', manager: '黄丽华', contractor: '中建八局', desc: '园区内道路、管廊、绿化、安防及能源保障系统综合建设项目。' },
+};
+
+// ─── 按项目划分的全量业务数据 ───────────────────────
+const DATA_BY_PROJECT = {
+  // p1: A 区 — 主数据中心，数据最全
+  p1: {
+    cameras: [
+      { id: 1, name: '大门入口', area: '出入口', online: true },
+      { id: 2, name: '施工区A', area: '主施工区', online: true },
+      { id: 3, name: '材料仓库', area: '仓储区', online: false },
+      { id: 4, name: '塔吊1号位', area: '起重区', online: true },
+      { id: 5, name: '施工区B', area: '主施工区', online: true },
+      { id: 6, name: '地下室入口', area: '地下区域', online: true },
+      { id: 7, name: '配电房外', area: '设备区', online: false },
+      { id: 8, name: '办公区门口', area: '生活区', online: true },
+      { id: 9, name: '消防通道', area: '安全区', online: true },
+      { id: 10, name: '塔吊2号位', area: '起重区', online: true },
+      { id: 11, name: '围墙东侧', area: '周界', online: false },
+      { id: 12, name: '钢筋加工区', area: '加工区', online: true },
+      { id: 13, name: '围墙西侧', area: '周界', online: true },
+      { id: 14, name: '北侧施工区', area: '主施工区', online: true },
+      { id: 15, name: '材料存放区', area: '仓储区', online: true },
+      { id: 16, name: '南大门', area: '出入口', online: true },
+    ],
+    personnel: [
+      { id: 1, name: '陈建国', gender: '男', idcard: '110101199003151234', phone: '138****8901', unit: '第一建设班组', role: '普工', entryTime: '2026-04-20 08:30', status: '已教育', note: '' },
+      { id: 2, name: '李明辉', gender: '男', idcard: '330106198507224567', phone: '139****2345', unit: '第一建设班组', role: '焊工', entryTime: '2026-04-21 09:00', status: '已教育', note: '' },
+      { id: 3, name: '王小红', gender: '女', idcard: '440301200001013456', phone: '137****5678', unit: '安装班组', role: '电工', entryTime: '2026-04-22 08:00', status: '待教育', note: '' },
+      { id: 4, name: '张伟', gender: '男', idcard: '110102198812309012', phone: '136****7890', unit: '安装班组', role: '管工', entryTime: '2026-04-23 10:00', status: '待教育', note: '' },
+      { id: 5, name: '刘芳', gender: '女', idcard: '210201199206180123', phone: '135****1234', unit: '防水班组', role: '普工', entryTime: '2026-04-24 08:00', status: '待教育', note: '' },
+      { id: 6, name: '赵强', gender: '男', idcard: '320102198901012345', phone: '134****5678', unit: '第一建设班组', role: '架子工', entryTime: '2026-04-19 08:30', status: '已离场', note: '' },
+    ],
+    trainings: [
+      { id: 1, name: '2026年4月第一批安全三级教育', eduType: '临时人员安全三级教育', time: '2026-04-21 14:00', place: '项目部会议室', trainer: '王安全', personIds: [1, 2], status: '已完成', note: '' },
+      { id: 2, name: '2026年4月第二批安全三级教育', eduType: '临时人员安全三级教育', time: '2026-04-24 14:00', place: '项目部培训室', trainer: '刘安全', personIds: [3, 4, 5], status: '进行中', note: '' },
+    ],
+    files: [
+      { id: 1, name: '第一批培训资料.pdf', fileType: '培训资料', batchName: '2026年4月第一批', batchId: 1, uploader: '王安全', time: '2026-04-21 16:00' },
+      { id: 2, name: '第一批工人签字表.pdf', fileType: '签字文件', batchName: '2026年4月第一批', batchId: 1, uploader: '王安全', time: '2026-04-21 16:30' },
+      { id: 3, name: '特种作业证-焊工李明辉.jpg', fileType: '证书', batchName: '2026年4月第一批', batchId: 1, uploader: '刘安全', time: '2026-04-22 09:00' },
+    ],
+    devices: [
+      { id: 1, name: '1号塔吊', code: 'TC-001', type: '塔吊', status: '运行中', lastReport: '2026-04-24 11:30', height: '45m', maxLoad: '8t', note: '' },
+      { id: 2, name: '2号塔吊', code: 'TC-002', type: '塔吊', status: '停机', lastReport: '2026-04-24 09:00', height: '38m', maxLoad: '6t', note: '计划检修' },
+      { id: 3, name: '施工电梯A', code: 'EL-001', type: '施工电梯', status: '运行中', lastReport: '2026-04-24 11:25', height: '30m', maxLoad: '2t', note: '' },
+      { id: 4, name: '混凝土泵车', code: 'PC-001', type: '泵车', status: '异常', lastReport: '2026-04-24 08:15', height: '-', maxLoad: '-', note: '液压系统警报' },
+    ],
+    docs: [
+      { id: 1, name: 'A区-安全培训资料-第一批.pdf', type: '培训资料', businessRef: '2026年4月第一批安全教育', uploader: '张工', time: '2026-04-23 14:32', status: '已归档', note: '' },
+      { id: 2, name: 'A区-施工日志-0423.docx', type: '施工日志', businessRef: '日常施工记录', uploader: '李工', time: '2026-04-23 18:05', status: '已上传', note: '含主体结构进度' },
+      { id: 3, name: '工人签字确认表-B组.pdf', type: '签字文件', businessRef: '2026年4月第二批安全教育', uploader: '王安全', time: '2026-04-24 09:11', status: '待确认', note: '' },
+      { id: 4, name: '会议纪要-4月例会.docx', type: '会议纪要', businessRef: '4月月度例会', uploader: '张工', time: '2026-04-24 10:30', status: '已上传', note: '' },
+      { id: 5, name: '特种作业证书-焊工.jpg', type: '凭证文件', businessRef: '李明辉-焊工', uploader: '刘安全', time: '2026-04-24 11:00', status: '已归档', note: '有效期至2027-08' },
+    ],
+    stats: { onsite: 128, todayNewOnsite: 12, progressPercent: 63 },
+  },
+  // p2: B 区 — 收尾中，人员减少
+  p2: {
+    cameras: [
+      { id: 1, name: 'B区大门', area: '出入口', online: true },
+      { id: 2, name: 'B区机房入口', area: '主施工区', online: true },
+      { id: 3, name: 'B区塔吊位', area: '起重区', online: false },
+      { id: 4, name: 'B区材料区', area: '仓储区', online: true },
+      { id: 5, name: 'B区办公楼', area: '生活区', online: true },
+      { id: 6, name: 'B区东围墙', area: '周界', online: true },
+      { id: 7, name: 'B区西围墙', area: '周界', online: true },
+      { id: 8, name: 'B区消防通道', area: '安全区', online: false },
+    ],
+    personnel: [
+      { id: 101, name: '周志明', gender: '男', idcard: '110105197508121234', phone: '138****3344', unit: 'B区主班组', role: '项目经理', entryTime: '2024-11-10 08:00', status: '已教育', note: '' },
+      { id: 102, name: '孙丽', gender: '女', idcard: '330108199212105432', phone: '139****5566', unit: '机电安装班组', role: '电工', entryTime: '2025-08-15 09:00', status: '已教育', note: '' },
+      { id: 103, name: '吴强', gender: '男', idcard: '500105198601059876', phone: '137****7788', unit: '装饰班组', role: '普工', entryTime: '2026-02-20 08:30', status: '待教育', note: '补充教育' },
+    ],
+    trainings: [
+      { id: 11, name: '2026年3月B区复工安全教育', eduType: '复工教育', time: '2026-03-15 10:00', place: 'B区项目部', trainer: '陈安全', personIds: [101, 102], status: '已完成', note: '' },
+    ],
+    files: [
+      { id: 11, name: 'B区-复工培训资料.pdf', fileType: '培训资料', batchName: '2026年3月复工', batchId: 11, uploader: '陈安全', time: '2026-03-15 14:00' },
+      { id: 12, name: 'B区-复工签字表.pdf', fileType: '签字文件', batchName: '2026年3月复工', batchId: 11, uploader: '陈安全', time: '2026-03-15 14:30' },
+    ],
+    devices: [
+      { id: 11, name: 'B区塔吊', code: 'TC-B01', type: '塔吊', status: '停机', lastReport: '2026-04-24 07:00', height: '42m', maxLoad: '7t', note: '收尾阶段已停用' },
+      { id: 12, name: 'B区施工电梯', code: 'EL-B01', type: '施工电梯', status: '运行中', lastReport: '2026-04-24 11:20', height: '28m', maxLoad: '2t', note: '' },
+      { id: 13, name: 'B区配电柜', code: 'PD-B01', type: '配电设备', status: '异常', lastReport: '2026-04-24 10:05', height: '-', maxLoad: '-', note: '电压波动告警' },
+    ],
+    docs: [
+      { id: 11, name: 'B区-竣工资料-机电部分.pdf', type: '施工日志', businessRef: '竣工验收', uploader: '周志明', time: '2026-04-22 16:00', status: '已归档', note: '' },
+      { id: 12, name: 'B区-消防验收报告.pdf', type: '凭证文件', businessRef: '消防验收', uploader: '王安全', time: '2026-04-23 10:00', status: '已归档', note: '' },
+      { id: 13, name: 'B区-验收会议纪要.docx', type: '会议纪要', businessRef: '4月验收例会', uploader: '周志明', time: '2026-04-24 09:00', status: '待确认', note: '' },
+    ],
+    stats: { onsite: 23, todayNewOnsite: 0, progressPercent: 92 },
+  },
+  // p3: 园区 — 基础设施建设
+  p3: {
+    cameras: [
+      { id: 1, name: '园区北门', area: '出入口', online: true },
+      { id: 2, name: '园区南门', area: '出入口', online: true },
+      { id: 3, name: '主干道中段', area: '主施工区', online: true },
+      { id: 4, name: '管廊施工段', area: '主施工区', online: true },
+      { id: 5, name: '绿化施工区', area: '主施工区', online: false },
+      { id: 6, name: '配电房工地', area: '设备区', online: true },
+      { id: 7, name: '材料存放区', area: '仓储区', online: true },
+      { id: 8, name: '东侧围挡', area: '周界', online: true },
+      { id: 9, name: '西侧围挡', area: '周界', online: true },
+      { id: 10, name: '北侧围挡', area: '周界', online: true },
+    ],
+    personnel: [
+      { id: 201, name: '黄志伟', gender: '男', idcard: '440106198203056543', phone: '138****9911', unit: '道路班组', role: '推土机操作', entryTime: '2025-06-10 08:00', status: '已教育', note: '' },
+      { id: 202, name: '赵敏', gender: '女', idcard: '320101199408081234', phone: '139****2233', unit: '绿化班组', role: '普工', entryTime: '2025-09-20 08:30', status: '已教育', note: '' },
+      { id: 203, name: '钱海', gender: '男', idcard: '110108198712015678', phone: '137****4455', unit: '管廊班组', role: '管工', entryTime: '2026-03-01 09:00', status: '待教育', note: '' },
+      { id: 204, name: '林峰', gender: '男', idcard: '450102199505224321', phone: '136****6677', unit: '安装班组', role: '电工', entryTime: '2026-04-15 08:00', status: '待教育', note: '' },
+    ],
+    trainings: [
+      { id: 21, name: '2025年6月园区开工教育', eduType: '临时人员安全三级教育', time: '2025-06-11 14:00', place: '园区临时办公区', trainer: '郑安全', personIds: [201, 202], status: '已完成', note: '' },
+      { id: 22, name: '2026年5月园区第二期培训', eduType: '专项教育', time: '2026-05-05 14:00', place: '园区项目部', trainer: '郑安全', personIds: [203, 204], status: '未开始', note: '计划开展' },
+    ],
+    files: [
+      { id: 21, name: '园区-开工教育资料.pdf', fileType: '培训资料', batchName: '2025年6月开工', batchId: 21, uploader: '郑安全', time: '2025-06-12 09:00' },
+      { id: 22, name: '园区-开工签字表.pdf', fileType: '签字文件', batchName: '2025年6月开工', batchId: 21, uploader: '郑安全', time: '2025-06-12 10:00' },
+    ],
+    devices: [
+      { id: 21, name: '推土机#1', code: 'BL-001', type: '推土机', status: '运行中', lastReport: '2026-04-24 10:15', height: '-', maxLoad: '-', note: '' },
+      { id: 22, name: '压路机#1', code: 'RL-001', type: '压路机', status: '运行中', lastReport: '2026-04-24 10:30', height: '-', maxLoad: '-', note: '' },
+      { id: 23, name: '挖掘机#1', code: 'EX-001', type: '挖掘机', status: '停机', lastReport: '2026-04-24 07:45', height: '-', maxLoad: '-', note: '午休时段' },
+    ],
+    docs: [
+      { id: 21, name: '园区-道路施工日志.docx', type: '施工日志', businessRef: '道路工程', uploader: '黄志伟', time: '2026-04-23 17:00', status: '已上传', note: '' },
+      { id: 22, name: '园区-管廊施工方案.pdf', type: '施工日志', businessRef: '管廊工程', uploader: '钱海', time: '2026-04-22 15:00', status: '已归档', note: '' },
+      { id: 23, name: '园区-设备入场证明.pdf', type: '凭证文件', businessRef: '设备入场', uploader: '黄志伟', time: '2026-04-18 11:00', status: '已归档', note: '' },
+      { id: 24, name: '园区-月度会议纪要.docx', type: '会议纪要', businessRef: '4月月会', uploader: '郑安全', time: '2026-04-24 08:30', status: '已上传', note: '' },
+    ],
+    stats: { onsite: 42, todayNewOnsite: 2, progressPercent: 38 },
+  },
+};
+
+// ─── 顶部导航（含内置主题选择） ───────────────────────
+function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, theme, themeId, onThemeChange, compactMode, onCompactChange }) {
+  const [showProjects, setShowProjects] = React.useState(false);
+  const [showThemePicker, setShowThemePicker] = React.useState(false);
+  const [time, setTime] = React.useState(new Date());
+
+  React.useEffect(() => {
+    const timer = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  React.useEffect(() => {
+    const close = () => { setShowProjects(false); setShowThemePicker(false); };
+    if (showProjects || showThemePicker) {
+      document.addEventListener('click', close);
+      return () => document.removeEventListener('click', close);
+    }
+  }, [showProjects, showThemePicker]);
+
+  const fmt = (d) => {
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  };
+
+  const navItems = [
+    { id: 'overview', label: '项目概况' },
+    { id: 'personnel', label: '人员与安全' },
+    { id: 'monitor', label: '设备与监控' },
+  ];
+
+  const T = theme;
+  const proj = PROJECTS.find(p => p.id === currentProject) || PROJECTS[0];
+
+  return (
+    <header style={{
+      height: T.navHeight, background: T.navBg,
+      borderBottom: `1px solid ${T.borderColor}`,
+      display: 'flex', alignItems: 'center', padding: '0 20px',
+      position: 'relative', zIndex: 100, flexShrink: 0,
+    }}>
+      {/* Logo */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 260 }}>
+        <div style={{
+          width: 32, height: 32, borderRadius: 6,
+          background: `linear-gradient(135deg, ${T.accent}, ${T.accent2})`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 16, fontWeight: 700, color: '#fff', flexShrink: 0,
+        }}>云</div>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: T.textPrimary, letterSpacing: 1, lineHeight: 1.2 }}>电信云平台</div>
+          <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: 0.5 }}>项目现场综合管理系统</div>
+        </div>
+      </div>
+
+      {/* 项目切换 */}
+      <div style={{ position: 'relative', marginLeft: 16 }}>
+        <button
+          onClick={e => { e.stopPropagation(); setShowProjects(!showProjects); setShowThemePicker(false); }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: T.cardBg, border: `1px solid ${T.borderColor}`,
+            borderRadius: 6, padding: '5px 12px', cursor: 'pointer', color: T.textPrimary,
+            fontSize: 13, minWidth: 200,
+          }}
+        >
+          <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: proj.status === 'normal' ? T.success : T.warning }}></span>
+          <span style={{ flex: 1, textAlign: 'left' }}>{proj.name}</span>
+          <span style={{ color: T.textMuted, fontSize: 10 }}>▼</span>
+        </button>
+        {showProjects && (
+          <div style={{
+            position: 'absolute', top: '100%', left: 0, marginTop: 4,
+            background: T.dropdownBg, border: `1px solid ${T.borderColor}`,
+            borderRadius: 8, overflow: 'hidden', minWidth: 220, zIndex: 200,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+          }} onClick={e => e.stopPropagation()}>
+            {PROJECTS.map(p => (
+              <div
+                key={p.id}
+                onClick={() => { onProjectChange(p.id); setShowProjects(false); }}
+                style={{
+                  padding: '10px 14px', cursor: 'pointer', display: 'flex',
+                  alignItems: 'center', gap: 8, fontSize: 13, color: T.textPrimary,
+                  background: p.id === currentProject ? T.activeItemBg : 'transparent',
+                  transition: 'background 0.15s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = T.hoverBg}
+                onMouseLeave={e => e.currentTarget.style.background = p.id === currentProject ? T.activeItemBg : 'transparent'}
+              >
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: p.status === 'normal' ? T.success : T.warning, flexShrink: 0 }}></span>
+                <span style={{ flex: 1 }}>{p.name}</span>
+                <span style={{ fontSize: 10, color: T.textMuted, background: T.tagBg, padding: '1px 6px', borderRadius: 3 }}>{p.phase}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 主导航 */}
+      <nav style={{ display: 'flex', gap: 2, marginLeft: 32, flex: 1, justifyContent: 'center' }}>
+        {navItems.map(item => {
+          const active = currentPage === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => onPageChange(item.id)}
+              style={{
+                padding: '6px 24px', border: 'none', cursor: 'pointer', borderRadius: 6,
+                fontSize: 14, fontWeight: active ? 600 : 400,
+                color: active ? '#fff' : T.textSecondary,
+                background: active ? T.accent : 'transparent',
+                transition: 'all 0.2s', letterSpacing: 0.5,
+              }}
+              onMouseEnter={e => { if (!active) e.currentTarget.style.background = T.hoverBg; }}
+              onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+            >
+              {item.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* 右侧 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 340, justifyContent: 'flex-end' }}>
+        <div style={{ fontSize: 12, color: T.textMuted, fontVariantNumeric: 'tabular-nums', letterSpacing: 0.5 }}>
+          {fmt(time)}
+        </div>
+
+        {/* 主题切换按钮 */}
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={e => { e.stopPropagation(); setShowThemePicker(!showThemePicker); setShowProjects(false); }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: T.cardBg, border: `1px solid ${T.borderColor}`,
+              borderRadius: 6, padding: '5px 10px', cursor: 'pointer',
+              color: T.textSecondary, fontSize: 12,
+            }}
+            title="主题配色"
+          >
+            <span style={{
+              width: 12, height: 12, borderRadius: '50%',
+              background: `linear-gradient(135deg, ${T.accent}, ${T.accent2})`,
+              border: `1px solid ${T.borderColor}`, flexShrink: 0,
+            }}></span>
+            <span>主题</span>
+            <span style={{ color: T.textMuted, fontSize: 10 }}>▼</span>
+          </button>
+          {showThemePicker && (
+            <div style={{
+              position: 'absolute', top: '100%', right: 0, marginTop: 6,
+              background: T.dropdownBg, border: `1px solid ${T.borderColor}`,
+              borderRadius: 10, width: 320, zIndex: 200, padding: 14,
+              boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+            }} onClick={e => e.stopPropagation()}>
+              <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 10, letterSpacing: 0.5 }}>
+                配色方案 &nbsp;·&nbsp; 深色 → 浅色
+              </div>
+              <div style={{
+                height: 4, borderRadius: 2, marginBottom: 12,
+                background: 'linear-gradient(to right, #060f1e, #0c0814, #0e0e0e, #071412, #1a1f2e, #f0f4f9)',
+                border: `1px solid ${T.borderColor}`,
+              }}></div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
+                {ALL_THEMES.map(th => {
+                  const active = themeId === th.id;
+                  return (
+                    <button key={th.id} onClick={() => onThemeChange(th.id)} style={{
+                      padding: '10px 6px 8px', borderRadius: 8, cursor: 'pointer',
+                      border: `2px solid ${active ? th.accent : 'transparent'}`,
+                      background: th.pageBg, outline: active ? `1px solid ${th.accent}` : 'none',
+                      outlineOffset: 1, transition: 'all 0.15s', position: 'relative',
+                    }}>
+                      <div style={{ marginBottom: 6 }}>
+                        <div style={{ height: 4, borderRadius: 1, background: th.navBg, border: `1px solid ${th.borderColor}`, marginBottom: 3 }}></div>
+                        <div style={{ display: 'flex', gap: 2 }}>
+                          <div style={{ width: '35%', height: 22, background: th.cardBg, borderRadius: 2, border: `1px solid ${th.borderColor}` }}></div>
+                          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <div style={{ height: 10, background: th.cardBg, borderRadius: 2, border: `1px solid ${th.borderColor}` }}></div>
+                            <div style={{ height: 10, background: th.cardBg, borderRadius: 2, border: `1px solid ${th.borderColor}` }}></div>
+                          </div>
+                        </div>
+                        <div style={{ width: 10, height: 3, background: th.accent, borderRadius: 1, margin: '3px auto 0' }}></div>
+                      </div>
+                      <div style={{ fontSize: 10, color: th.textPrimary, fontWeight: active ? 700 : 400, lineHeight: 1.3 }}>{th.name}</div>
+                      <div style={{ fontSize: 8, color: th.textMuted, marginTop: 1 }}>{th.brightness}</div>
+                      {active && (
+                        <div style={{ position: 'absolute', top: 4, right: 4, width: 6, height: 6, borderRadius: '50%', background: th.accent }}></div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ height: 1, background: T.borderColor, marginBottom: 10 }}></div>
+              <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 6, letterSpacing: 0.5 }}>信息密度</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {[{ label: '舒适型', v: false }, { label: '紧凑型', v: true }].map(opt => (
+                  <button key={opt.label} onClick={() => onCompactChange(opt.v)} style={{
+                    flex: 1, padding: '6px', borderRadius: 5, cursor: 'pointer', fontSize: 11,
+                    border: `1px solid ${compactMode === opt.v ? T.accent : T.borderColor}`,
+                    background: compactMode === opt.v ? T.activeItemBg : 'transparent',
+                    color: compactMode === opt.v ? T.accent : T.textMuted,
+                  }}>{opt.label}</button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: T.textSecondary }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: '50%', background: T.accent,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 11, color: '#fff', fontWeight: 600,
+          }}>管</div>
+          <span>平台管理员</span>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+// ─── 通用小组件 ───────────────────────────────────────
+function StatCard({ label, value, sub, color, theme: T }) {
+  return (
+    <div style={{
+      background: T.cardBg, border: `1px solid ${T.borderColor}`,
+      borderRadius: T.radius, padding: '14px 16px', flex: 1,
+    }}>
+      <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 700, color: color || T.textPrimary, lineHeight: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function VideoCell({ cam, theme: T, onFullscreen, fullscreen }) {
+  const baseStyle = fullscreen
+    ? { width: '100%', height: '100%' }
+    : { aspectRatio: '16/9' };
+  return (
+    <div style={{
+      background: '#060e1c', border: `1px solid ${T.borderColor}`, borderRadius: 6,
+      overflow: 'hidden', position: 'relative', ...baseStyle,
+    }}>
+      {cam.online ? (
+        <>
+          <div style={{
+            width: '100%', height: '100%',
+            background: 'linear-gradient(135deg, #060e1c 0%, #0a1a2e 40%, #071520 100%)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <div style={{ textAlign: 'center', opacity: 0.3 }}>
+              <svg width={fullscreen ? 64 : 32} height={fullscreen ? 64 : 32} viewBox="0 0 24 24" fill="none" stroke={T.accent} strokeWidth="1.5">
+                <path d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.889L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
+              </svg>
+              <div style={{ fontSize: fullscreen ? 14 : 10, color: T.textMuted, marginTop: 4 }}>实时视频流</div>
+            </div>
+          </div>
+          <div style={{
+            position: 'absolute', top: 6, left: 6,
+            display: 'flex', alignItems: 'center', gap: 4,
+            background: 'rgba(0,0,0,0.6)', padding: '2px 6px', borderRadius: 3,
+          }}>
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: T.success, display: 'block' }}></span>
+            <span style={{ fontSize: 10, color: '#fff' }}>LIVE</span>
+          </div>
+        </>
+      ) : (
+        <div style={{
+          width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 6, background: '#08111e',
+        }}>
+          <svg width={fullscreen ? 48 : 24} height={fullscreen ? 48 : 24} viewBox="0 0 24 24" fill="none" stroke="#444" strokeWidth="1.5">
+            <line x1="1" y1="1" x2="23" y2="23"/><path d="M16.5 16.5A7 7 0 0 1 5.5 5.5M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h4"/>
+          </svg>
+          <span style={{ fontSize: fullscreen ? 14 : 10, color: '#444' }}>离线</span>
+        </div>
+      )}
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0,
+        background: 'linear-gradient(transparent, rgba(0,0,0,0.7))',
+        padding: '8px 6px 4px',
+        fontSize: fullscreen ? 13 : 10, color: 'rgba(255,255,255,0.7)',
+        display: 'flex', justifyContent: 'space-between',
+      }}>
+        <span>{cam.name}</span>
+        <span style={{ color: T.textMuted }}>{cam.area}</span>
+      </div>
+      {!fullscreen && (
+        <button onClick={onFullscreen} title="全屏" style={{
+          position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.5)',
+          border: 'none', borderRadius: 3, padding: '2px 5px', cursor: 'pointer', color: '#ccc', fontSize: 10,
+        }}>⛶</button>
+      )}
+    </div>
+  );
+}
+
+function StatusBadge({ status, theme: T }) {
+  const map = {
+    '已教育': T.success, '待教育': T.warning, '已离场': T.textMuted,
+    '已完成': T.success, '进行中': T.accent, '未开始': T.textMuted,
+  };
+  return (
+    <span style={{
+      fontSize: 10, padding: '2px 7px', borderRadius: 3,
+      border: `1px solid ${map[status] || T.borderColor}`,
+      color: map[status] || T.textMuted, background: 'transparent',
+    }}>{status}</span>
+  );
+}
+
+function SectionCard({ title, children, action, theme: T }) {
+  return (
+    <div style={{
+      background: T.cardBg, border: `1px solid ${T.borderColor}`,
+      borderRadius: T.radius, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      height: '100%',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '12px 16px', borderBottom: `1px solid ${T.borderColor}`, flexShrink: 0,
+      }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary }}>{title}</span>
+        {action}
+      </div>
+      <div style={{ flex: 1, overflow: 'auto', padding: 12 }}>{children}</div>
+    </div>
+  );
+}
+
+// ─── 页面1：项目概况 ────────────────────────────────
+function PageOverview({ project, theme: T }) {
+  const projectData = DATA_BY_PROJECT[project] || DATA_BY_PROJECT.p1;
+  const projectCameras = projectData.cameras;
+  const projectStats = projectData.stats;
+
+  // 筛选：应用态 vs 草稿态（支持「查询/重置」）
+  const [draftSearch, setDraftSearch] = React.useState('');
+  const [draftType, setDraftType] = React.useState('全部');
+  const [appliedSearch, setAppliedSearch] = React.useState('');
+  const [appliedType, setAppliedType] = React.useState('全部');
+
+  const [showUploadModal, setShowUploadModal] = React.useState(false);
+  const [showDetailModal, setShowDetailModal] = React.useState(false);
+  const [videoLayout, setVideoLayout] = React.useState(4);
+  const [fullscreenCam, setFullscreenCam] = React.useState(null);
+  const [refreshTick, setRefreshTick] = React.useState(0);
+  // 资料数据：按项目独立 localStorage
+  const [docs, setDocs] = React.useState(() => {
+    const saved = localStorage.getItem(`app_docs_${project}`);
+    return saved ? JSON.parse(saved) : projectData.docs;
+  });
+  const [uploadForm, setUploadForm] = React.useState({ name: '', type: '培训资料', businessRef: '', note: '' });
+
+  // 项目切换时重置筛选、全屏、资料
+  React.useEffect(() => {
+    setDraftSearch(''); setDraftType('全部');
+    setAppliedSearch(''); setAppliedType('全部');
+    setFullscreenCam(null);
+    const saved = localStorage.getItem(`app_docs_${project}`);
+    setDocs(saved ? JSON.parse(saved) : projectData.docs);
+  }, [project]);
+
+  React.useEffect(() => {
+    localStorage.setItem(`app_docs_${project}`, JSON.stringify(docs));
+  }, [docs, project]);
+
+  const info = PROJECT_INFO[project] || PROJECT_INFO.p1;
+
+  const docTypes = ['全部', '培训资料', '施工日志', '签字文件', '会议纪要', '凭证文件'];
+  const filteredDocs = docs.filter(d => {
+    const matchType = appliedType === '全部' || d.type === appliedType;
+    const matchName = !appliedSearch || d.name.includes(appliedSearch);
+    return matchType && matchName;
+  });
+
+  const statusColor = (s) => {
+    if (s === '已归档') return T.success;
+    if (s === '待确认') return T.warning;
+    return T.accent;
+  };
+
+  const projectStatusStyle = (s) => {
+    if (s === '正常') return { bg: `${T.success}22`, color: T.success };
+    if (s === '延期') return { bg: `${T.warning}22`, color: T.warning };
+    if (s === '停工') return { bg: `${T.danger}22`, color: T.danger };
+    return { bg: T.tagBg, color: T.textMuted };
+  };
+  const psStyle = projectStatusStyle(info.projectStatus);
+
+  const layoutOptions = [
+    { n: 1, label: '单屏' }, { n: 4, label: '四宫格' },
+    { n: 8, label: '八窗口' }, { n: 16, label: '十六窗口' },
+  ];
+  const gridConfig1 = { 1: { cols: 1, rows: 1 }, 4: { cols: 2, rows: 2 }, 8: { cols: 4, rows: 2 }, 16: { cols: 4, rows: 4 } };
+  const { cols: gridCols } = gridConfig1[videoLayout] || gridConfig1[4];
+  // 按项目摄像头列表取前 N 个；不足时只显示实际数量
+  const actualCount = Math.min(videoLayout, projectCameras.length);
+  const displayCams = projectCameras.slice(0, actualCount).map((c, i) => ({ ...c, _slot: i, id: `${c.id}-${i}` }));
+  const overviewOnline = projectCameras.filter(c => c.online).length;
+  const overviewTotal = projectCameras.length;
+
+  const handleQuery = () => { setAppliedSearch(draftSearch); setAppliedType(draftType); };
+  const handleReset = () => { setDraftSearch(''); setDraftType('全部'); setAppliedSearch(''); setAppliedType('全部'); };
+
+  const handleArchive = (id) => {
+    setDocs(prev => prev.map(d => d.id === id ? { ...d, status: '已归档' } : d));
+  };
+  const handleDelete = (id) => {
+    if (window.confirm('确认删除此资料？此操作不可撤销。')) {
+      setDocs(prev => prev.filter(d => d.id !== id));
+    }
+  };
+  const handleUploadSubmit = () => {
+    if (!uploadForm.name.trim()) { alert('请填写资料名称'); return; }
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const timeStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    setDocs(prev => [
+      { id: Date.now(), name: uploadForm.name, type: uploadForm.type, businessRef: uploadForm.businessRef, uploader: '平台管理员', time: timeStr, status: '已上传', note: uploadForm.note },
+      ...prev,
+    ]);
+    setUploadForm({ name: '', type: '培训资料', businessRef: '', note: '' });
+    setShowUploadModal(false);
+  };
+
+  const handleRefreshVideo = () => { setRefreshTick(t => t + 1); };
+
+  // 混合动态流
+  const activities = [
+    { type: 'upload', color: T.accent, text: '04-24 11:00  刘安全 上传了《特种作业证书-焊工.jpg》' },
+    { type: 'alert', color: T.danger, text: '04-24 10:42  [告警] 材料仓库摄像头离线' },
+    { type: 'flow', color: T.success, text: '04-24 10:15  《第一批培训资料.pdf》已归档' },
+    { type: 'upload', color: T.accent, text: '04-24 09:11  王安全 上传了《工人签字确认表-B组.pdf》' },
+    { type: 'alert', color: T.warning, text: '04-24 08:15  [告警] 混凝土泵车液压系统异常' },
+    { type: 'flow', color: T.success, text: '04-23 18:30  《施工日志-0423.docx》待确认 → 已上传' },
+    { type: 'upload', color: T.accent, text: '04-23 14:32  张工 上传了《安全培训资料-第一批.pdf》' },
+  ];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 12, padding: 16, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', gap: 10, flexShrink: 0 }}>
+        <StatCard label="在场人员" value={projectStats.onsite} sub={`今日新增 ${projectStats.todayNewOnsite} 人`} color={T.accent} theme={T} />
+        <StatCard label="摄像头在线" value={`${overviewOnline}/${overviewTotal}`} sub={`${overviewTotal - overviewOnline} 路离线`} color={T.success} theme={T} />
+        <StatCard label="今日资料" value={docs.length} sub={`待确认 ${docs.filter(d=>d.status==='待确认').length} 份`} color={T.warning} theme={T} />
+        <StatCard label="项目进度" value={`${projectStats.progressPercent}%`} sub={info.phase} color={T.accent2} theme={T} />
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, flex: 1, minHeight: 0 }}>
+        {/* 左：项目基础信息 */}
+        <div style={{
+          width: 220, flexShrink: 0, background: T.cardBg,
+          border: `1px solid ${T.borderColor}`, borderRadius: T.radius,
+          padding: 16, overflow: 'auto',
+          display: 'flex', flexDirection: 'column', gap: 12,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: `1px solid ${T.borderColor}`, paddingBottom: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary }}>项目基础信息</span>
+            <span style={{
+              fontSize: 10, padding: '2px 8px', borderRadius: 10,
+              background: psStyle.bg, color: psStyle.color, fontWeight: 600,
+            }}>{info.projectStatus}</span>
+          </div>
+          {[
+            ['项目名称', info.name], ['建筑面积', info.area], ['工期', info.period],
+            ['当前阶段', info.phase], ['安全目标', info.safetyGoal], ['质量目标', info.qualityGoal],
+          ].map(([k, v]) => (
+            <div key={k}>
+              <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>{k}</div>
+              <div style={{ fontSize: 12, color: T.textSecondary, lineHeight: 1.4 }}>{v}</div>
+            </div>
+          ))}
+          <div>
+            <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 4 }}>项目简介</div>
+            <div style={{ fontSize: 11, color: T.textMuted, lineHeight: 1.6 }}>{info.desc}</div>
+          </div>
+          <button onClick={() => setShowDetailModal(true)} style={{
+            padding: '6px 0', background: 'transparent', border: `1px solid ${T.borderColor}`,
+            borderRadius: 5, color: T.textSecondary, fontSize: 12, cursor: 'pointer',
+          }}>查看详情 →</button>
+
+          <div style={{
+            marginTop: 4, background: T.surface2, border: `1px solid ${T.borderColor}`,
+            borderRadius: 6, padding: 10,
+          }}>
+            <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 6 }}>原人员管理系统</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: T.success }}></span>
+              <span style={{ fontSize: 11, color: T.success }}>系统可用</span>
+            </div>
+            <button style={{
+              width: '100%', padding: '7px 0',
+              background: `linear-gradient(135deg, ${T.accent}, ${T.accent2})`,
+              border: 'none', borderRadius: 5, color: '#fff', fontSize: 12,
+              cursor: 'pointer', fontWeight: 500,
+            }}>进入人员管理系统 →</button>
+          </div>
+        </div>
+
+        {/* 中：视频总览 */}
+        <div style={{
+          flex: 1, background: T.cardBg, border: `1px solid ${T.borderColor}`,
+          borderRadius: T.radius, padding: 14,
+          display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, flexWrap: 'wrap', gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary }}>视频总览</span>
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+              {layoutOptions.map(opt => (
+                <button key={opt.n} onClick={() => { setVideoLayout(opt.n); setFullscreenCam(null); }} style={{
+                  padding: '3px 10px', fontSize: 11, borderRadius: 4, cursor: 'pointer',
+                  border: `1px solid ${videoLayout === opt.n && !fullscreenCam ? T.accent : T.borderColor}`,
+                  background: videoLayout === opt.n && !fullscreenCam ? T.accent : 'transparent',
+                  color: videoLayout === opt.n && !fullscreenCam ? '#fff' : T.textMuted,
+                }}>{opt.label}</button>
+              ))}
+              <div style={{ width: 1, height: 16, background: T.borderColor, margin: '0 2px' }}></div>
+              <button onClick={handleRefreshVideo} title="刷新视频" style={{
+                padding: '3px 10px', fontSize: 11, borderRadius: 4, cursor: 'pointer',
+                border: `1px solid ${T.borderColor}`, background: 'transparent', color: T.textMuted,
+              }}>↻ 刷新</button>
+            </div>
+          </div>
+          {fullscreenCam ? (
+            <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+              <VideoCell key={`fs-${refreshTick}`} cam={fullscreenCam} theme={T} onFullscreen={() => setFullscreenCam(null)} fullscreen />
+              <button onClick={() => setFullscreenCam(null)} style={{
+                position: 'absolute', top: 10, right: 10,
+                padding: '4px 10px', fontSize: 11, borderRadius: 4,
+                background: 'rgba(0,0,0,0.6)', border: `1px solid ${T.borderColor}`,
+                color: '#fff', cursor: 'pointer',
+              }}>✕ 退出全屏</button>
+            </div>
+          ) : (
+            <div style={{
+              flex: 1, display: 'grid',
+              gridTemplateColumns: `repeat(${gridCols}, 1fr)`,
+              gap: 8, minHeight: 0, overflow: 'auto', alignContent: 'start',
+            }}>
+              {displayCams.map(cam => (
+                <VideoCell
+                  key={`${cam.id}-${refreshTick}`}
+                  cam={cam}
+                  theme={T}
+                  onFullscreen={() => setFullscreenCam(cam)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 右：资料管理 */}
+        <div style={{
+          width: 320, flexShrink: 0, background: T.cardBg,
+          border: `1px solid ${T.borderColor}`, borderRadius: T.radius,
+          padding: 14, display: 'flex', flexDirection: 'column', gap: 10, overflow: 'hidden',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary }}>资料管理</span>
+            <button onClick={() => setShowUploadModal(true)} style={{
+              padding: '4px 12px', fontSize: 11, borderRadius: 5, cursor: 'pointer',
+              background: T.accent, border: 'none', color: '#fff',
+            }}>+ 上传资料</button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <input
+                placeholder="搜索文件名称..."
+                value={draftSearch}
+                onChange={e => setDraftSearch(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleQuery(); }}
+                style={{
+                  flex: 1, background: T.surface2, border: `1px solid ${T.borderColor}`,
+                  borderRadius: 5, padding: '5px 10px', fontSize: 12, color: T.textPrimary, outline: 'none',
+                }}
+              />
+              <button onClick={handleQuery} style={{
+                padding: '5px 10px', fontSize: 11, borderRadius: 4, cursor: 'pointer',
+                background: T.accent, border: 'none', color: '#fff',
+              }}>查询</button>
+              <button onClick={handleReset} style={{
+                padding: '5px 10px', fontSize: 11, borderRadius: 4, cursor: 'pointer',
+                background: 'transparent', border: `1px solid ${T.borderColor}`, color: T.textMuted,
+              }}>重置</button>
+            </div>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {docTypes.map(t => (
+                <button key={t} onClick={() => { setDraftType(t); setAppliedType(t); }} style={{
+                  padding: '2px 8px', fontSize: 10, borderRadius: 3, cursor: 'pointer',
+                  border: `1px solid ${draftType === t ? T.accent : T.borderColor}`,
+                  background: draftType === t ? T.accent : 'transparent',
+                  color: draftType === t ? '#fff' : T.textMuted,
+                }}>{t}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {filteredDocs.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 10px', color: T.textMuted, fontSize: 12 }}>
+                暂无符合条件的资料
+              </div>
+            ) : filteredDocs.map(doc => (
+              <div key={doc.id} style={{
+                background: T.surface2, border: `1px solid ${T.borderColor}`,
+                borderRadius: 6, padding: '8px 10px',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                  <span style={{ fontSize: 12, color: T.textPrimary, flex: 1, marginRight: 6, lineHeight: 1.3 }}>{doc.name}</span>
+                  <span style={{
+                    fontSize: 9, padding: '1px 5px', borderRadius: 3,
+                    background: 'transparent', border: `1px solid ${statusColor(doc.status)}`,
+                    color: statusColor(doc.status), flexShrink: 0,
+                  }}>{doc.status}</span>
+                </div>
+                <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>{doc.type} · {doc.uploader}</div>
+                {doc.businessRef && <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>关联：{doc.businessRef}</div>}
+                <div style={{ fontSize: 9, color: T.textMuted, marginBottom: 4 }}>{doc.time}</div>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                  <button style={{ fontSize: 10, color: T.accent, background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px' }}>查看</button>
+                  <button style={{ fontSize: 10, color: T.textSecondary, background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px' }}>下载</button>
+                  {doc.status !== '已归档' && (
+                    <button onClick={() => handleArchive(doc.id)} style={{ fontSize: 10, color: T.success, background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px' }}>归档</button>
+                  )}
+                  <button onClick={() => handleDelete(doc.id)} style={{ fontSize: 10, color: T.danger, background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px' }}>删除</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* 底部动态 — 混合流 */}
+      <div style={{
+        flexShrink: 0, background: T.cardBg, border: `1px solid ${T.borderColor}`,
+        borderRadius: T.radius, padding: '10px 16px',
+        display: 'flex', gap: 16, alignItems: 'center', overflow: 'hidden',
+      }}>
+        <span style={{ fontSize: 11, color: T.accent, fontWeight: 600, flexShrink: 0 }}>最新动态</span>
+        <div style={{ display: 'flex', gap: 20, overflow: 'hidden', flex: 1 }}>
+          {activities.map((item, i) => (
+            <span key={i} style={{ fontSize: 11, color: T.textMuted, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: item.color, flexShrink: 0 }}></span>
+              {item.text}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* 上传弹窗 */}
+      {showUploadModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }} onClick={() => setShowUploadModal(false)}>
+          <div style={{
+            background: T.modalBg, border: `1px solid ${T.borderColor}`,
+            borderRadius: 12, padding: 24, width: 480, maxWidth: '90vw',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: T.textPrimary, marginBottom: 20 }}>上传资料</div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, color: T.textSecondary, marginBottom: 5 }}>资料名称 *</div>
+              <input placeholder="请输入资料名称"
+                value={uploadForm.name}
+                onChange={e => setUploadForm({ ...uploadForm, name: e.target.value })}
+                style={{
+                  width: '100%', background: T.surface2, border: `1px solid ${T.borderColor}`,
+                  borderRadius: 6, padding: '8px 10px', fontSize: 13, color: T.textPrimary, outline: 'none',
+                }}/>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 12, color: T.textSecondary, marginBottom: 5 }}>资料类型</div>
+                <select
+                  value={uploadForm.type}
+                  onChange={e => setUploadForm({ ...uploadForm, type: e.target.value })}
+                  style={{
+                    width: '100%', background: T.surface2, border: `1px solid ${T.borderColor}`,
+                    borderRadius: 6, padding: '8px 10px', fontSize: 13, color: T.textPrimary, outline: 'none',
+                  }}>
+                  {['培训资料','施工日志','签字文件','会议纪要','凭证文件','其他'].map(t => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: T.textSecondary, marginBottom: 5 }}>关联业务</div>
+                <input placeholder="如：批次名称/人员"
+                  value={uploadForm.businessRef}
+                  onChange={e => setUploadForm({ ...uploadForm, businessRef: e.target.value })}
+                  style={{
+                    width: '100%', background: T.surface2, border: `1px solid ${T.borderColor}`,
+                    borderRadius: 6, padding: '8px 10px', fontSize: 13, color: T.textPrimary, outline: 'none',
+                  }}/>
+              </div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, color: T.textSecondary, marginBottom: 5 }}>备注</div>
+              <input placeholder="可选"
+                value={uploadForm.note}
+                onChange={e => setUploadForm({ ...uploadForm, note: e.target.value })}
+                style={{
+                  width: '100%', background: T.surface2, border: `1px solid ${T.borderColor}`,
+                  borderRadius: 6, padding: '8px 10px', fontSize: 13, color: T.textPrimary, outline: 'none',
+                }}/>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 12, color: T.textSecondary, marginBottom: 5 }}>上传附件</div>
+              <div style={{
+                border: `2px dashed ${T.borderColor}`, borderRadius: 6, padding: '20px',
+                textAlign: 'center', color: T.textMuted, fontSize: 12, cursor: 'pointer',
+              }}>点击或拖拽文件至此处上传</div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowUploadModal(false)} style={{
+                padding: '8px 20px', borderRadius: 6, border: `1px solid ${T.borderColor}`,
+                background: 'none', color: T.textSecondary, cursor: 'pointer', fontSize: 13,
+              }}>取消</button>
+              <button onClick={handleUploadSubmit} style={{
+                padding: '8px 20px', borderRadius: 6, border: 'none',
+                background: T.accent, color: '#fff', cursor: 'pointer', fontSize: 13,
+              }}>确认上传</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 项目详情弹窗 */}
+      {showDetailModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }} onClick={() => setShowDetailModal(false)}>
+          <div style={{
+            background: T.modalBg, border: `1px solid ${T.borderColor}`,
+            borderRadius: 12, padding: 28, width: 560, maxWidth: '92vw', maxHeight: '86vh', overflow: 'auto',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+              <span style={{ fontSize: 16, fontWeight: 700, color: T.textPrimary }}>{info.name}</span>
+              <span style={{
+                fontSize: 11, padding: '3px 10px', borderRadius: 12,
+                background: psStyle.bg, color: psStyle.color, fontWeight: 600,
+              }}>{info.projectStatus}</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 20px', marginBottom: 16 }}>
+              {[
+                ['项目简称', info.short], ['建筑面积', info.area],
+                ['工期', info.period], ['当前阶段', info.phase],
+                ['项目经理', info.manager], ['承建单位', info.contractor],
+                ['安全目标', info.safetyGoal], ['质量目标', info.qualityGoal],
+              ].map(([k, v]) => (
+                <div key={k}>
+                  <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 3 }}>{k}</div>
+                  <div style={{ fontSize: 13, color: T.textPrimary, lineHeight: 1.4 }}>{v}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4 }}>项目简介</div>
+              <div style={{ fontSize: 13, color: T.textSecondary, lineHeight: 1.7 }}>{info.desc}</div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowDetailModal(false)} style={{
+                padding: '8px 24px', borderRadius: 6, border: 'none',
+                background: T.accent, color: '#fff', cursor: 'pointer', fontSize: 13,
+              }}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── 页面2：人员与安全 ──────────────────────────────
+// 身份证号校验（18 位数字或 17 位数字+X）
+const ID_CARD_REGEX = /^\d{17}[\dXx]$/;
+// 手机号校验
+const PHONE_REGEX = /^1[3-9]\d{9}$/;
+
+const EMPTY_FORM = { name: '', gender: '男', idcard: '', phone: '', unit: '', role: '普工', note: '' };
+
+function PagePersonnel({ project, theme: T }) {
+  const projectData = DATA_BY_PROJECT[project] || DATA_BY_PROJECT.p1;
+
+  // 人员数据（按项目隔离）
+  const [personnel, setPersonnel] = React.useState(() => {
+    const saved = localStorage.getItem(`app_personnel_${project}`);
+    return saved ? JSON.parse(saved) : projectData.personnel;
+  });
+  const [trainings, setTrainings] = React.useState(() => {
+    const saved = localStorage.getItem(`app_trainings_${project}`);
+    return saved ? JSON.parse(saved) : projectData.trainings;
+  });
+  const [files, setFiles] = React.useState(() => {
+    const saved = localStorage.getItem(`app_files_${project}`);
+    return saved ? JSON.parse(saved) : projectData.files;
+  });
+
+  // 项目切换时重载
+  React.useEffect(() => {
+    const savedP = localStorage.getItem(`app_personnel_${project}`);
+    const savedT = localStorage.getItem(`app_trainings_${project}`);
+    const savedF = localStorage.getItem(`app_files_${project}`);
+    setPersonnel(savedP ? JSON.parse(savedP) : projectData.personnel);
+    setTrainings(savedT ? JSON.parse(savedT) : projectData.trainings);
+    setFiles(savedF ? JSON.parse(savedF) : projectData.files);
+  }, [project]);
+
+  React.useEffect(() => { localStorage.setItem(`app_personnel_${project}`, JSON.stringify(personnel)); }, [personnel, project]);
+  React.useEffect(() => { localStorage.setItem(`app_trainings_${project}`, JSON.stringify(trainings)); }, [trainings, project]);
+  React.useEffect(() => { localStorage.setItem(`app_files_${project}`, JSON.stringify(files)); }, [files, project]);
+
+  // 筛选（草稿/应用分离）
+  const [draftSearch, setDraftSearch] = React.useState('');
+  const [draftStatus, setDraftStatus] = React.useState('全部');
+  const [appliedSearch, setAppliedSearch] = React.useState('');
+  const [appliedStatus, setAppliedStatus] = React.useState('全部');
+
+  const [showAddModal, setShowAddModal] = React.useState(false);
+  const [addForm, setAddForm] = React.useState(EMPTY_FORM);
+  const [editingPerson, setEditingPerson] = React.useState(null);
+  const [selectedPerson, setSelectedPerson] = React.useState(null);
+
+  const [showTrainingModal, setShowTrainingModal] = React.useState(false);
+  const [trainingForm, setTrainingForm] = React.useState({ name: '', eduType: '临时人员安全三级教育', time: '', place: '', trainer: '', personIds: [], note: '' });
+  const [trainingRecordView, setTrainingRecordView] = React.useState(null);
+
+  const [fileTypeFilter, setFileTypeFilter] = React.useState('全部');
+  const [previewFile, setPreviewFile] = React.useState(null);
+
+  const statusFilters = ['全部', '待教育', '已教育', '已离场'];
+  const fileTypes = ['全部', '培训资料', '签字文件', '证书'];
+
+  const filteredPersonnel = personnel.filter(p => {
+    const matchStatus = appliedStatus === '全部' || p.status === appliedStatus;
+    const matchName = !appliedSearch || p.name.includes(appliedSearch) || p.idcard.includes(appliedSearch);
+    return matchStatus && matchName;
+  });
+
+  const filteredFiles = fileTypeFilter === '全部' ? files : files.filter(f => f.fileType === fileTypeFilter);
+
+  const eduRate = personnel.length === 0 ? 0 : Math.round((personnel.filter(p => p.status === '已教育').length / personnel.length) * 100);
+  const todayNew = personnel.filter(p => p.entryTime?.startsWith('2026-04-24')).length;
+  const todayEducated = personnel.filter(p => p.status === '已教育').length;
+  const pendingCount = personnel.filter(p => p.status === '待教育').length;
+
+  const handleQueryPersonnel = () => { setAppliedSearch(draftSearch); setAppliedStatus(draftStatus); };
+  const handleResetPersonnel = () => { setDraftSearch(''); setDraftStatus('全部'); setAppliedSearch(''); setAppliedStatus('全部'); };
+
+  const handleExportCSV = () => {
+    const header = ['姓名', '性别', '身份证号', '手机号', '所属单位', '工种', '入场时间', '状态'];
+    const rows = filteredPersonnel.map(p => [p.name, p.gender, p.idcard, p.phone, p.unit, p.role, p.entryTime, p.status]);
+    const csv = '﻿' + [header, ...rows].map(r => r.map(c => `"${c ?? ''}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `临时人员_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const validateForm = (f) => {
+    if (!f.name?.trim()) return '请填写姓名';
+    if (!ID_CARD_REGEX.test(f.idcard)) return '身份证号格式不正确（18位数字，最后一位可为X）';
+    if (!PHONE_REGEX.test(f.phone)) return '手机号格式不正确';
+    return null;
+  };
+
+  const handleAddPerson = () => {
+    const err = validateForm(addForm);
+    if (err) { alert(err); return; }
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const entryTime = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    const id = Math.max(0, ...personnel.map(p => p.id)) + 1;
+    setPersonnel([...personnel, {
+      id, ...addForm, phone: addForm.phone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2'),
+      entryTime, status: '待教育',
+    }]);
+    setAddForm(EMPTY_FORM);
+    setShowAddModal(false);
+  };
+
+  const handleEditPerson = () => {
+    const err = validateForm(editingPerson);
+    if (err) { alert(err); return; }
+    setPersonnel(personnel.map(p => p.id === editingPerson.id ? editingPerson : p));
+    setEditingPerson(null);
+  };
+
+  const handleDeletePerson = (p) => {
+    if (window.confirm(`确认删除 ${p.name}？此操作不可撤销。`)) {
+      setPersonnel(personnel.filter(x => x.id !== p.id));
+    }
+  };
+
+  const handleCreateTraining = () => {
+    if (!trainingForm.name.trim()) { alert('请填写批次名称'); return; }
+    if (trainingForm.personIds.length === 0) { alert('请至少关联一位人员'); return; }
+    const id = Math.max(0, ...trainings.map(t => t.id)) + 1;
+    setTrainings([...trainings, {
+      id, ...trainingForm,
+      count: trainingForm.personIds.length,
+      status: '进行中', type: trainingForm.eduType,
+    }]);
+    setTrainingForm({ name: '', eduType: '临时人员安全三级教育', time: '', place: '', trainer: '', personIds: [], note: '' });
+    setShowTrainingModal(false);
+  };
+
+  // 核心：标记完成 → 关联人员自动转"已教育"
+  const handleMarkComplete = (training) => {
+    if (!window.confirm(`确认标记「${training.name}」为已完成？\n关联的 ${training.personIds.length} 人状态将自动更新为"已教育"`)) return;
+    setTrainings(trainings.map(t => t.id === training.id ? { ...t, status: '已完成' } : t));
+    setPersonnel(personnel.map(p => training.personIds.includes(p.id) ? { ...p, status: '已教育' } : p));
+  };
+
+  const eligiblePersonnel = personnel.filter(p => p.status === '待教育');
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: 16, gap: 12, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', gap: 10, flexShrink: 0 }}>
+        {[
+          { label: '今日新增人员', value: todayNew, color: T.accent },
+          { label: '已完成教育', value: todayEducated, color: T.success },
+          { label: '待教育人员', value: pendingCount, color: T.warning },
+          { label: '教育完成率', value: `${eduRate}%`, color: T.accent2 },
+        ].map(s => (
+          <div key={s.label} style={{
+            flex: 1, background: T.cardBg, border: `1px solid ${T.borderColor}`,
+            borderRadius: T.radius, padding: '14px 16px',
+          }}>
+            <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4 }}>{s.label}</div>
+            <div style={{ fontSize: 26, fontWeight: 700, color: s.color, lineHeight: 1 }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, flex: 1, minHeight: 0 }}>
+        {/* 左：临时人员管理 */}
+        <div style={{ flex: 1.2, minWidth: 0 }}>
+          <SectionCard
+            title="临时人员管理"
+            theme={T}
+            action={
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={handleExportCSV} style={{
+                  padding: '4px 10px', fontSize: 11, borderRadius: 5, cursor: 'pointer',
+                  background: 'transparent', border: `1px solid ${T.borderColor}`, color: T.textSecondary,
+                }}>导出</button>
+                <button onClick={() => setShowAddModal(true)} style={{
+                  padding: '4px 12px', fontSize: 11, borderRadius: 5, cursor: 'pointer',
+                  background: T.accent, border: 'none', color: '#fff',
+                }}>+ 新增人员</button>
+              </div>
+            }
+          >
+            <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+              <input
+                placeholder="搜索姓名/身份证..."
+                value={draftSearch}
+                onChange={e => setDraftSearch(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleQueryPersonnel(); }}
+                style={{
+                  flex: 1, minWidth: 120, background: T.surface2, border: `1px solid ${T.borderColor}`,
+                  borderRadius: 5, padding: '5px 8px', fontSize: 12, color: T.textPrimary, outline: 'none',
+                }}
+              />
+              <button onClick={handleQueryPersonnel} style={{
+                padding: '4px 10px', fontSize: 11, borderRadius: 4, cursor: 'pointer',
+                background: T.accent, border: 'none', color: '#fff',
+              }}>查询</button>
+              <button onClick={handleResetPersonnel} style={{
+                padding: '4px 10px', fontSize: 11, borderRadius: 4, cursor: 'pointer',
+                background: 'transparent', border: `1px solid ${T.borderColor}`, color: T.textMuted,
+              }}>重置</button>
+            </div>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
+              {statusFilters.map(f => (
+                <button key={f} onClick={() => { setDraftStatus(f); setAppliedStatus(f); }} style={{
+                  padding: '3px 10px', fontSize: 10, borderRadius: 3, cursor: 'pointer',
+                  border: `1px solid ${draftStatus === f ? T.accent : T.borderColor}`,
+                  background: draftStatus === f ? T.accent : 'transparent',
+                  color: draftStatus === f ? '#fff' : T.textMuted,
+                }}>{f}</button>
+              ))}
+            </div>
+            <div style={{ overflow: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr>
+                    {['姓名', '工种', '所属单位', '入场时间', '状态', '操作'].map(h => (
+                      <th key={h} style={{
+                        textAlign: 'left', padding: '6px 8px', color: T.textMuted,
+                        borderBottom: `1px solid ${T.borderColor}`, fontWeight: 500, whiteSpace: 'nowrap',
+                      }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredPersonnel.length === 0 ? (
+                    <tr><td colSpan={6} style={{ padding: '30px 0', textAlign: 'center', color: T.textMuted }}>暂无数据</td></tr>
+                  ) : filteredPersonnel.map((p, i) => (
+                    <tr key={p.id} style={{ background: i % 2 === 0 ? 'transparent' : T.surface2 }}>
+                      <td style={{ padding: '7px 8px', color: T.textPrimary }}>{p.name}</td>
+                      <td style={{ padding: '7px 8px', color: T.textSecondary }}>{p.role}</td>
+                      <td style={{ padding: '7px 8px', color: T.textMuted, fontSize: 11 }}>{p.unit}</td>
+                      <td style={{ padding: '7px 8px', color: T.textMuted, fontSize: 11 }}>{p.entryTime.split(' ')[0]}</td>
+                      <td style={{ padding: '7px 8px' }}><StatusBadge status={p.status} theme={T} /></td>
+                      <td style={{ padding: '7px 8px' }}>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button onClick={() => setSelectedPerson(p)} style={{ fontSize: 10, color: T.accent, background: 'none', border: 'none', cursor: 'pointer' }}>详情</button>
+                          <button onClick={() => setEditingPerson({ ...p })} style={{ fontSize: 10, color: T.textSecondary, background: 'none', border: 'none', cursor: 'pointer' }}>编辑</button>
+                          <button onClick={() => handleDeletePerson(p)} style={{ fontSize: 10, color: T.danger, background: 'none', border: 'none', cursor: 'pointer' }}>删除</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </SectionCard>
+        </div>
+
+        {/* 中：安全三级教育 */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <SectionCard
+            title="安全三级教育"
+            theme={T}
+            action={
+              <button onClick={() => setShowTrainingModal(true)} style={{
+                padding: '4px 12px', fontSize: 11, borderRadius: 5, cursor: 'pointer',
+                background: T.accent, border: 'none', color: '#fff',
+              }}>+ 新建培训</button>
+            }
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {trainings.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '40px 0', color: T.textMuted, fontSize: 12 }}>暂无培训批次</div>
+              )}
+              {trainings.map(t => {
+                const linkedNames = t.personIds.map(id => personnel.find(p => p.id === id)?.name).filter(Boolean);
+                return (
+                  <div key={t.id} style={{
+                    background: T.surface2, border: `1px solid ${T.borderColor}`,
+                    borderRadius: 6, padding: 12,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: T.textPrimary, lineHeight: 1.3, flex: 1, marginRight: 8 }}>{t.name}</span>
+                      <StatusBadge status={t.status} theme={T} />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 0', fontSize: 11, color: T.textMuted }}>
+                      <span>时间：{t.time}</span>
+                      <span>地点：{t.place}</span>
+                      <span>讲师：{t.trainer}</span>
+                      <span>人数：{t.personIds.length} 人</span>
+                    </div>
+                    {linkedNames.length > 0 && (
+                      <div style={{ marginTop: 6, fontSize: 10, color: T.textSecondary, lineHeight: 1.4 }}>
+                        关联：{linkedNames.slice(0, 4).join('、')}{linkedNames.length > 4 ? ` 等 ${linkedNames.length} 人` : ''}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+                      <button onClick={() => setTrainingRecordView(t)} style={{ fontSize: 10, color: T.accent, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>查看记录</button>
+                      {t.status !== '已完成' && (
+                        <button onClick={() => handleMarkComplete(t)} style={{ fontSize: 10, color: T.success, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>标记完成</button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </SectionCard>
+        </div>
+
+        {/* 右：培训资料 + 最近动态 */}
+        <div style={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10, overflow: 'hidden' }}>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <SectionCard title="培训资料上传" theme={T} action={
+              <button style={{
+                padding: '4px 10px', fontSize: 10, borderRadius: 4, cursor: 'pointer',
+                background: T.surface2, border: `1px solid ${T.borderColor}`, color: T.textSecondary,
+              }}>上传文件</button>
+            }>
+              <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 8 }}>
+                {fileTypes.map(f => (
+                  <button key={f} onClick={() => setFileTypeFilter(f)} style={{
+                    padding: '2px 7px', fontSize: 10, borderRadius: 3, cursor: 'pointer',
+                    border: `1px solid ${fileTypeFilter === f ? T.accent : T.borderColor}`,
+                    background: fileTypeFilter === f ? T.accent : 'transparent',
+                    color: fileTypeFilter === f ? '#fff' : T.textMuted,
+                  }}>{f}</button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {filteredFiles.map(f => (
+                  <div key={f.id} style={{
+                    background: T.surface2, border: `1px solid ${T.borderColor}`,
+                    borderRadius: 5, padding: '8px 10px',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                      <span style={{ fontSize: 11, color: T.textPrimary, flex: 1, marginRight: 4, lineHeight: 1.3 }}>{f.name}</span>
+                      <span style={{ fontSize: 9, color: T.accent, flexShrink: 0 }}>{f.fileType}</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: T.textMuted }}>{f.batchName}</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                      <span style={{ fontSize: 10, color: T.textMuted }}>{f.uploader} · {f.time.split(' ')[0]}</span>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => setPreviewFile(f)} style={{ fontSize: 10, color: T.accent, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>预览</button>
+                        <button style={{ fontSize: 10, color: T.textMuted, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>下载</button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <div style={{
+                  border: `2px dashed ${T.borderColor}`, borderRadius: 6, padding: '12px',
+                  textAlign: 'center', cursor: 'pointer',
+                }}>
+                  <div style={{ fontSize: 11, color: T.textMuted }}>点击或拖拽上传</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, marginTop: 2 }}>支持 PDF / Word / JPG / PNG</div>
+                </div>
+              </div>
+            </SectionCard>
+          </div>
+
+          {/* 最近动态 mini */}
+          <div style={{
+            background: T.cardBg, border: `1px solid ${T.borderColor}`,
+            borderRadius: T.radius, padding: '10px 12px', flexShrink: 0,
+          }}>
+            <div style={{ fontSize: 11, color: T.accent, fontWeight: 600, marginBottom: 6 }}>最近动态</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {trainings.slice(-2).reverse().map(t => (
+                <div key={`t-${t.id}`} style={{ fontSize: 10, color: T.textMuted, lineHeight: 1.4 }}>
+                  <span style={{ color: T.accent }}>·</span> {t.time?.split(' ')[0]} 新建《{t.name}》
+                </div>
+              ))}
+              {files.slice(-2).map(f => (
+                <div key={`f-${f.id}`} style={{ fontSize: 10, color: T.textMuted, lineHeight: 1.4 }}>
+                  <span style={{ color: T.success }}>·</span> {f.time?.split(' ')[0]} 上传《{f.name}》
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 新增人员弹窗 */}
+      {showAddModal && (
+        <PersonFormModal
+          title="新增临时人员" form={addForm} setForm={setAddForm}
+          onCancel={() => { setAddForm(EMPTY_FORM); setShowAddModal(false); }}
+          onConfirm={handleAddPerson} confirmLabel="确认添加" theme={T}
+        />
+      )}
+
+      {/* 编辑人员弹窗 */}
+      {editingPerson && (
+        <PersonFormModal
+          title="编辑人员" form={editingPerson} setForm={setEditingPerson}
+          onCancel={() => setEditingPerson(null)} onConfirm={handleEditPerson}
+          confirmLabel="保存" theme={T}
+        />
+      )}
+
+      {/* 人员详情弹窗 */}
+      {selectedPerson && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }} onClick={() => setSelectedPerson(null)}>
+          <div style={{
+            background: T.modalBg, border: `1px solid ${T.borderColor}`,
+            borderRadius: 12, padding: 24, width: 420,
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
+              <span style={{ fontSize: 15, fontWeight: 600, color: T.textPrimary }}>人员详情</span>
+              <StatusBadge status={selectedPerson.status} theme={T} />
+            </div>
+            {[
+              ['姓名', selectedPerson.name], ['性别', selectedPerson.gender],
+              ['身份证号', selectedPerson.idcard], ['手机号', selectedPerson.phone],
+              ['所属单位', selectedPerson.unit], ['工种', selectedPerson.role],
+              ['入场时间', selectedPerson.entryTime], ['备注', selectedPerson.note || '—'],
+            ].map(([k, v]) => (
+              <div key={k} style={{ display: 'flex', padding: '7px 0', borderBottom: `1px solid ${T.borderColor}` }}>
+                <span style={{ width: 80, fontSize: 12, color: T.textMuted }}>{k}</span>
+                <span style={{ fontSize: 12, color: T.textPrimary, flex: 1 }}>{v}</span>
+              </div>
+            ))}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+              <button onClick={() => setSelectedPerson(null)} style={{
+                padding: '8px 20px', borderRadius: 6, border: 'none',
+                background: T.accent, color: '#fff', cursor: 'pointer', fontSize: 13,
+              }}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 新建培训批次弹窗 */}
+      {showTrainingModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }} onClick={() => setShowTrainingModal(false)}>
+          <div style={{
+            background: T.modalBg, border: `1px solid ${T.borderColor}`,
+            borderRadius: 12, padding: 24, width: 560, maxWidth: '92vw', maxHeight: '88vh', overflow: 'auto',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: T.textPrimary, marginBottom: 20 }}>新建培训批次</div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, color: T.textSecondary, marginBottom: 5 }}>批次名称 *</div>
+              <input placeholder="例如：2026年4月第三批安全三级教育"
+                value={trainingForm.name}
+                onChange={e => setTrainingForm({ ...trainingForm, name: e.target.value })}
+                style={{
+                  width: '100%', background: T.surface2, border: `1px solid ${T.borderColor}`,
+                  borderRadius: 6, padding: '8px 10px', fontSize: 13, color: T.textPrimary, outline: 'none',
+                }}/>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 12, color: T.textSecondary, marginBottom: 5 }}>教育类型</div>
+                <select
+                  value={trainingForm.eduType}
+                  onChange={e => setTrainingForm({ ...trainingForm, eduType: e.target.value })}
+                  style={{
+                    width: '100%', background: T.surface2, border: `1px solid ${T.borderColor}`,
+                    borderRadius: 6, padding: '8px 10px', fontSize: 13, color: T.textPrimary, outline: 'none',
+                  }}>
+                  {['临时人员安全三级教育', '复工教育', '专项教育', '其他'].map(t => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: T.textSecondary, marginBottom: 5 }}>培训时间</div>
+                <input type="datetime-local"
+                  value={trainingForm.time}
+                  onChange={e => setTrainingForm({ ...trainingForm, time: e.target.value.replace('T', ' ') })}
+                  style={{
+                    width: '100%', background: T.surface2, border: `1px solid ${T.borderColor}`,
+                    borderRadius: 6, padding: '7px 10px', fontSize: 13, color: T.textPrimary, outline: 'none',
+                  }}/>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 12, color: T.textSecondary, marginBottom: 5 }}>培训地点</div>
+                <input placeholder="项目部会议室"
+                  value={trainingForm.place}
+                  onChange={e => setTrainingForm({ ...trainingForm, place: e.target.value })}
+                  style={{
+                    width: '100%', background: T.surface2, border: `1px solid ${T.borderColor}`,
+                    borderRadius: 6, padding: '8px 10px', fontSize: 13, color: T.textPrimary, outline: 'none',
+                  }}/>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: T.textSecondary, marginBottom: 5 }}>培训讲师</div>
+                <input placeholder="姓名"
+                  value={trainingForm.trainer}
+                  onChange={e => setTrainingForm({ ...trainingForm, trainer: e.target.value })}
+                  style={{
+                    width: '100%', background: T.surface2, border: `1px solid ${T.borderColor}`,
+                    borderRadius: 6, padding: '8px 10px', fontSize: 13, color: T.textPrimary, outline: 'none',
+                  }}/>
+              </div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, color: T.textSecondary, marginBottom: 5 }}>
+                关联人员 * <span style={{ color: T.textMuted }}>（共 {eligiblePersonnel.length} 人待教育，已选 {trainingForm.personIds.length}）</span>
+              </div>
+              {eligiblePersonnel.length === 0 ? (
+                <div style={{
+                  background: T.surface2, border: `1px solid ${T.borderColor}`, borderRadius: 6,
+                  padding: 14, textAlign: 'center', color: T.textMuted, fontSize: 12,
+                }}>暂无待教育人员</div>
+              ) : (
+                <div style={{
+                  background: T.surface2, border: `1px solid ${T.borderColor}`, borderRadius: 6,
+                  padding: 8, maxHeight: 160, overflow: 'auto',
+                  display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 4,
+                }}>
+                  {eligiblePersonnel.map(p => {
+                    const selected = trainingForm.personIds.includes(p.id);
+                    return (
+                      <label key={p.id} style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        padding: '5px 8px', borderRadius: 4, cursor: 'pointer',
+                        background: selected ? T.activeItemBg : 'transparent',
+                      }}>
+                        <input type="checkbox" checked={selected} onChange={() => {
+                          setTrainingForm({
+                            ...trainingForm,
+                            personIds: selected
+                              ? trainingForm.personIds.filter(x => x !== p.id)
+                              : [...trainingForm.personIds, p.id],
+                          });
+                        }} />
+                        <span style={{ fontSize: 12, color: T.textPrimary, flex: 1 }}>{p.name}</span>
+                        <span style={{ fontSize: 10, color: T.textMuted }}>{p.role}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {eligiblePersonnel.length > 0 && (
+                <div style={{ display: 'flex', gap: 8, marginTop: 5 }}>
+                  <button onClick={() => setTrainingForm({ ...trainingForm, personIds: eligiblePersonnel.map(p => p.id) })} style={{
+                    fontSize: 10, padding: '3px 8px', borderRadius: 3, cursor: 'pointer',
+                    background: 'transparent', border: `1px solid ${T.borderColor}`, color: T.textSecondary,
+                  }}>全选</button>
+                  <button onClick={() => setTrainingForm({ ...trainingForm, personIds: [] })} style={{
+                    fontSize: 10, padding: '3px 8px', borderRadius: 3, cursor: 'pointer',
+                    background: 'transparent', border: `1px solid ${T.borderColor}`, color: T.textSecondary,
+                  }}>清空</button>
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowTrainingModal(false)} style={{
+                padding: '8px 20px', borderRadius: 6, border: `1px solid ${T.borderColor}`,
+                background: 'none', color: T.textSecondary, cursor: 'pointer', fontSize: 13,
+              }}>取消</button>
+              <button onClick={handleCreateTraining} style={{
+                padding: '8px 20px', borderRadius: 6, border: 'none',
+                background: T.accent, color: '#fff', cursor: 'pointer', fontSize: 13,
+              }}>创建批次</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 培训记录查看弹窗 */}
+      {trainingRecordView && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }} onClick={() => setTrainingRecordView(null)}>
+          <div style={{
+            background: T.modalBg, border: `1px solid ${T.borderColor}`,
+            borderRadius: 12, padding: 24, width: 480, maxWidth: '92vw', maxHeight: '86vh', overflow: 'auto',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+              <span style={{ fontSize: 15, fontWeight: 600, color: T.textPrimary }}>培训记录</span>
+              <StatusBadge status={trainingRecordView.status} theme={T} />
+            </div>
+            <div style={{ fontSize: 13, color: T.textPrimary, fontWeight: 600, marginBottom: 10 }}>{trainingRecordView.name}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: 12, color: T.textSecondary, marginBottom: 14 }}>
+              <div><span style={{ color: T.textMuted }}>类型：</span>{trainingRecordView.eduType || trainingRecordView.type}</div>
+              <div><span style={{ color: T.textMuted }}>时间：</span>{trainingRecordView.time}</div>
+              <div><span style={{ color: T.textMuted }}>地点：</span>{trainingRecordView.place}</div>
+              <div><span style={{ color: T.textMuted }}>讲师：</span>{trainingRecordView.trainer}</div>
+            </div>
+            <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 6 }}>关联人员（{trainingRecordView.personIds.length}）</div>
+            <div style={{
+              background: T.surface2, borderRadius: 6, padding: 10,
+              display: 'flex', flexWrap: 'wrap', gap: 6,
+            }}>
+              {trainingRecordView.personIds.map(id => {
+                const p = personnel.find(x => x.id === id);
+                if (!p) return null;
+                return (
+                  <span key={id} style={{
+                    fontSize: 11, padding: '3px 10px', borderRadius: 12,
+                    background: T.cardBg, border: `1px solid ${T.borderColor}`, color: T.textPrimary,
+                  }}>{p.name} · {p.role}</span>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+              <button onClick={() => setTrainingRecordView(null)} style={{
+                padding: '8px 20px', borderRadius: 6, border: 'none',
+                background: T.accent, color: '#fff', cursor: 'pointer', fontSize: 13,
+              }}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 文件预览弹窗 */}
+      {previewFile && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }} onClick={() => setPreviewFile(null)}>
+          <div style={{
+            background: T.modalBg, border: `1px solid ${T.borderColor}`,
+            borderRadius: 12, padding: 20, width: 560, maxWidth: '92vw',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: T.textPrimary }}>{previewFile.name}</span>
+              <button onClick={() => setPreviewFile(null)} style={{
+                background: 'none', border: 'none', color: T.textMuted, fontSize: 20, cursor: 'pointer',
+              }}>×</button>
+            </div>
+            <div style={{
+              background: T.surface2, border: `1px solid ${T.borderColor}`,
+              borderRadius: 8, height: 320, display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center', gap: 10,
+            }}>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke={T.accent} strokeWidth="1.2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+              </svg>
+              <div style={{ fontSize: 13, color: T.textPrimary }}>{previewFile.fileType}</div>
+              <div style={{ fontSize: 11, color: T.textMuted }}>{previewFile.batchName}</div>
+              <div style={{ fontSize: 10, color: T.textMuted, marginTop: 10 }}>文件预览占位 · 实际集成后此处显示 PDF/图片内容</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 复用：人员表单弹窗（新增/编辑共用）
+function PersonFormModal({ title, form, setForm, onCancel, onConfirm, confirmLabel, theme: T }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+    }} onClick={onCancel}>
+      <div style={{
+        background: T.modalBg, border: `1px solid ${T.borderColor}`,
+        borderRadius: 12, padding: 24, width: 520, maxWidth: '92vw',
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: T.textPrimary, marginBottom: 20 }}>{title}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <Field label="姓名 *" theme={T}>
+            <input value={form.name || ''} onChange={e => setForm({ ...form, name: e.target.value })}
+              placeholder="请输入姓名" style={fieldInput(T)} />
+          </Field>
+          <Field label="性别" theme={T}>
+            <select value={form.gender || '男'} onChange={e => setForm({ ...form, gender: e.target.value })} style={fieldInput(T)}>
+              <option>男</option><option>女</option>
+            </select>
+          </Field>
+          <Field label="身份证号 *" theme={T}>
+            <input value={form.idcard || ''} onChange={e => setForm({ ...form, idcard: e.target.value })}
+              placeholder="18位" style={fieldInput(T)} maxLength={18} />
+          </Field>
+          <Field label="手机号 *" theme={T}>
+            <input value={form.phone || ''} onChange={e => setForm({ ...form, phone: e.target.value })}
+              placeholder="11位" style={fieldInput(T)} maxLength={11} />
+          </Field>
+          <Field label="所属单位" theme={T}>
+            <input value={form.unit || ''} onChange={e => setForm({ ...form, unit: e.target.value })}
+              placeholder="班组/公司" style={fieldInput(T)} />
+          </Field>
+          <Field label="工种" theme={T}>
+            <select value={form.role || '普工'} onChange={e => setForm({ ...form, role: e.target.value })} style={fieldInput(T)}>
+              {['普工','焊工','电工','管工','架子工','其他'].map(r => <option key={r}>{r}</option>)}
+            </select>
+          </Field>
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <Field label="备注" theme={T}>
+            <input value={form.note || ''} onChange={e => setForm({ ...form, note: e.target.value })}
+              placeholder="可选" style={fieldInput(T)} />
+          </Field>
+        </div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+          <button onClick={onCancel} style={{
+            padding: '8px 20px', borderRadius: 6, border: `1px solid ${T.borderColor}`,
+            background: 'none', color: T.textSecondary, cursor: 'pointer', fontSize: 13,
+          }}>取消</button>
+          <button onClick={onConfirm} style={{
+            padding: '8px 20px', borderRadius: 6, border: 'none',
+            background: T.accent, color: '#fff', cursor: 'pointer', fontSize: 13,
+          }}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children, theme: T }) {
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: T.textSecondary, marginBottom: 5 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+const fieldInput = (T) => ({
+  width: '100%', background: T.surface2, border: `1px solid ${T.borderColor}`,
+  borderRadius: 6, padding: '7px 10px', fontSize: 12, color: T.textPrimary, outline: 'none',
+  boxSizing: 'border-box',
+});
+
+// ─── 页面3：设备与监控 ──────────────────────────────
+function CameraCell({ cam, theme: T, size, fullscreen, onClick }) {
+  const [hovered, setHovered] = React.useState(false);
+  const camIdNum = typeof cam.id === 'number' ? cam.id : 1;
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={onClick}
+      style={{
+        background: '#060e1c', border: `1px solid ${hovered ? T.accent : T.borderColor}`,
+        borderRadius: 5, overflow: 'hidden', position: 'relative',
+        ...(fullscreen ? { width: '100%', height: '100%' } : { aspectRatio: '16/9' }),
+        transition: 'border-color 0.2s', cursor: 'pointer',
+      }}
+    >
+      {cam.online ? (
+        <div style={{
+          width: '100%', height: '100%',
+          background: `linear-gradient(${135 + camIdNum * 17}deg, #060e1c 0%, #0d1f35 50%, #071a2c 100%)`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          {size !== 'tiny' && (
+            <svg width={fullscreen ? 64 : 20} height={fullscreen ? 64 : 20} viewBox="0 0 24 24" fill="none" stroke={T.accent} strokeWidth="1.5" opacity={fullscreen ? 0.35 : 0.25}>
+              <path d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.889L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
+            </svg>
+          )}
+        </div>
+      ) : (
+        <div style={{
+          width: '100%', height: '100%', background: '#08111e',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <span style={{ fontSize: size === 'tiny' ? 8 : fullscreen ? 18 : 10, color: '#333' }}>离线</span>
+        </div>
+      )}
+      {cam.online && (
+        <div style={{
+          position: 'absolute', top: fullscreen ? 10 : 4, left: fullscreen ? 10 : 4,
+          display: 'flex', alignItems: 'center', gap: 3,
+          background: 'rgba(0,0,0,0.55)', padding: fullscreen ? '3px 8px' : '1px 5px', borderRadius: 2,
+        }}>
+          <span style={{ width: fullscreen ? 6 : 4, height: fullscreen ? 6 : 4, borderRadius: '50%', background: T.success, display: 'block', flexShrink: 0 }}></span>
+          {size !== 'tiny' && <span style={{ fontSize: fullscreen ? 11 : 9, color: '#fff' }}>LIVE</span>}
+        </div>
+      )}
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0,
+        background: 'linear-gradient(transparent, rgba(0,0,0,0.75))',
+        padding: fullscreen ? '12px 12px 8px' : size === 'tiny' ? '4px 4px 2px' : '8px 6px 3px',
+        fontSize: fullscreen ? 13 : size === 'tiny' ? 9 : 10, color: 'rgba(255,255,255,0.75)',
+        display: 'flex', justifyContent: 'space-between',
+      }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cam.name} · {cam.area}</span>
+        {size !== 'tiny' && <span style={{ color: 'rgba(255,255,255,0.4)', flexShrink: 0 }}>#{cam.id}</span>}
+      </div>
+    </div>
+  );
+}
+
+function PageMonitor({ project, theme: T }) {
+  const projectData = DATA_BY_PROJECT[project] || DATA_BY_PROJECT.p1;
+  const ALL_CAMERAS = projectData.cameras;
+
+  const [layout, setLayout] = React.useState(8);
+  const [selectedDevice, setSelectedDevice] = React.useState(null);
+  const [camListFilter, setCamListFilter] = React.useState('全部');
+  const [fullscreenCam, setFullscreenCam] = React.useState(null);
+  const [refreshTick, setRefreshTick] = React.useState(0);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [deviceStatusFilter, setDeviceStatusFilter] = React.useState('全部');
+  const [devices, setDevices] = React.useState(projectData.devices);
+
+  // 项目切换：重置状态 + 重载设备
+  React.useEffect(() => {
+    setDevices(projectData.devices);
+    setSelectedDevice(null);
+    setFullscreenCam(null);
+    setCamListFilter('全部');
+    setDeviceStatusFilter('全部');
+    // 若当前布局超过项目摄像头数，降级
+    if (layout > projectData.cameras.length && projectData.cameras.length > 0) {
+      const fallback = [1, 4, 8, 16].find(n => n <= projectData.cameras.length) || 1;
+      setLayout(fallback);
+    }
+  }, [project]);
+
+  // 单屏/4/8/16（8 宫格 4×2）
+  const layoutOptions = [
+    { n: 1, label: '单屏' },
+    { n: 4, label: '4宫格' },
+    { n: 8, label: '8窗口' },
+    { n: 16, label: '16窗口' },
+  ];
+
+  const gridConfig = {
+    1: { cols: 1, rows: 1 },
+    4: { cols: 2, rows: 2 },
+    8: { cols: 4, rows: 2 },
+    16: { cols: 4, rows: 4 },
+  };
+  const { cols, rows } = gridConfig[layout] || gridConfig[4];
+  const displayCams = ALL_CAMERAS.slice(0, layout);
+
+  const onlineCount = ALL_CAMERAS.filter(c => c.online).length;
+  const offlineCount = ALL_CAMERAS.length - onlineCount;
+
+  const summary = {
+    total: devices.length,
+    running: devices.filter(d => d.status === '运行中').length,
+    abnormal: devices.filter(d => d.status === '异常').length,
+    stopped: devices.filter(d => d.status === '停机').length,
+    towerCranes: devices.filter(d => d.type === '塔吊').length,
+  };
+
+  // 从项目摄像头中动态提取区域
+  const areaTags = ['全部', ...Array.from(new Set(ALL_CAMERAS.map(c => c.area)))];
+  const filteredListCams = camListFilter === '全部' ? ALL_CAMERAS : ALL_CAMERAS.filter(c => c.area === camListFilter);
+
+  // 设备列表筛选
+  const filteredDevices = deviceStatusFilter === '全部' ? devices : devices.filter(d => d.status === deviceStatusFilter);
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    setRefreshTick(t => t + 1);
+    setTimeout(() => setRefreshing(false), 600);
+  };
+
+  const handleRefreshDevice = (e, dev) => {
+    e.stopPropagation();
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const newTime = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    setDevices(devices.map(d => d.id === dev.id ? { ...d, lastReport: newTime } : d));
+  };
+
+  return (
+    <div style={{ display: 'flex', height: '100%', overflow: 'hidden', gap: 12, padding: 16 }}>
+      {/* 左：统计 + 摄像头列表 */}
+      <div style={{ width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10, overflow: 'hidden' }}>
+        <div style={{ background: T.cardBg, border: `1px solid ${T.borderColor}`, borderRadius: T.radius, padding: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary, marginBottom: 12 }}>摄像头概览</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ flex: 1, textAlign: 'center', background: T.surface2, borderRadius: 6, padding: '8px 4px' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: T.accent }}>{onlineCount}</div>
+              <div style={{ fontSize: 10, color: T.textMuted }}>在线</div>
+            </div>
+            <div style={{ flex: 1, textAlign: 'center', background: T.surface2, borderRadius: 6, padding: '8px 4px' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: T.textMuted }}>{offlineCount}</div>
+              <div style={{ fontSize: 10, color: T.textMuted }}>离线</div>
+            </div>
+            <div style={{ flex: 1, textAlign: 'center', background: T.surface2, borderRadius: 6, padding: '8px 4px' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: T.textPrimary }}>{ALL_CAMERAS.length}</div>
+              <div style={{ fontSize: 10, color: T.textMuted }}>总计</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ background: T.cardBg, border: `1px solid ${T.borderColor}`, borderRadius: T.radius, padding: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary }}>设备状态</span>
+            <span style={{
+              fontSize: 9, padding: '2px 6px', borderRadius: 3,
+              background: `${T.accent2}22`, color: T.accent2,
+            }}>塔吊 {summary.towerCranes}</span>
+          </div>
+          {[
+            { label: '设备总数', val: summary.total, color: T.textPrimary, filter: '全部' },
+            { label: '运行中', val: summary.running, color: T.success, filter: '运行中' },
+            { label: '停机', val: summary.stopped, color: T.textMuted, filter: '停机' },
+            { label: '异常', val: summary.abnormal, color: T.danger, filter: '异常' },
+          ].map(s => {
+            const active = deviceStatusFilter === s.filter;
+            return (
+              <div key={s.label}
+                onClick={() => setDeviceStatusFilter(s.filter)}
+                title={`点击筛选：${s.filter}`}
+                style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '5px 8px', borderRadius: 4, fontSize: 12,
+                  borderBottom: `1px solid ${T.borderColor}`,
+                  cursor: 'pointer',
+                  background: active ? T.activeItemBg : 'transparent',
+                }}
+              >
+                <span style={{ color: active ? T.accent : T.textMuted }}>{s.label}</span>
+                <span style={{ fontWeight: 600, color: s.color }}>{s.val}</span>
+              </div>
+            );
+          })}
+          {deviceStatusFilter !== '全部' && (
+            <button onClick={() => setDeviceStatusFilter('全部')} style={{
+              marginTop: 8, width: '100%', padding: '4px',
+              background: 'transparent', border: `1px solid ${T.borderColor}`,
+              borderRadius: 4, color: T.textMuted, fontSize: 10, cursor: 'pointer',
+            }}>清除筛选</button>
+          )}
+        </div>
+
+        <div style={{
+          flex: 1, background: T.cardBg, border: `1px solid ${T.borderColor}`,
+          borderRadius: T.radius, padding: 14, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0,
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary, marginBottom: 8 }}>摄像头列表</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 8 }}>
+            {areaTags.map(f => (
+              <button key={f} onClick={() => setCamListFilter(f)} style={{
+                padding: '2px 6px', fontSize: 9, borderRadius: 3, cursor: 'pointer',
+                border: `1px solid ${camListFilter === f ? T.accent : T.borderColor}`,
+                background: camListFilter === f ? T.accent : 'transparent',
+                color: camListFilter === f ? '#fff' : T.textMuted,
+              }}>{f}</button>
+            ))}
+          </div>
+          <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {filteredListCams.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '30px 0', color: T.textMuted, fontSize: 11 }}>暂无摄像头</div>
+            ) : filteredListCams.map(cam => (
+              <div key={cam.id}
+                onClick={() => setFullscreenCam(cam)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '5px 6px',
+                  background: T.surface2, borderRadius: 4, fontSize: 11, cursor: 'pointer',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = T.activeItemBg}
+                onMouseLeave={e => e.currentTarget.style.background = T.surface2}
+              >
+                <span style={{
+                  width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                  background: cam.online ? T.success : T.textMuted,
+                }}></span>
+                <span style={{ flex: 1, color: T.textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cam.name}</span>
+                <span style={{ color: T.textMuted, fontSize: 9 }}>{cam.area}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* 中：实时视频 */}
+      <div style={{
+        flex: 1, minWidth: 0, background: T.cardBg, border: `1px solid ${T.borderColor}`,
+        borderRadius: T.radius, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '10px 14px', borderBottom: `1px solid ${T.borderColor}`, flexShrink: 0, flexWrap: 'wrap', gap: 6,
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary }}>
+            实时监控 {fullscreenCam && <span style={{ color: T.accent, fontWeight: 400, fontSize: 11 }}>· {fullscreenCam.name}</span>}
+          </span>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+            {layoutOptions.map(opt => (
+              <button key={opt.n} onClick={() => { setLayout(opt.n); setFullscreenCam(null); }} style={{
+                padding: '4px 12px', fontSize: 11, borderRadius: 4, cursor: 'pointer',
+                border: `1px solid ${layout === opt.n && !fullscreenCam ? T.accent : T.borderColor}`,
+                background: layout === opt.n && !fullscreenCam ? T.accent : 'transparent',
+                color: layout === opt.n && !fullscreenCam ? '#fff' : T.textMuted,
+              }}>{opt.label}</button>
+            ))}
+            <div style={{ width: 1, height: 18, background: T.borderColor, margin: '0 4px' }}></div>
+            <button onClick={handleRefresh} style={{
+              padding: '4px 10px', fontSize: 11, borderRadius: 4, cursor: 'pointer',
+              border: `1px solid ${T.borderColor}`, background: 'transparent', color: T.textMuted,
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}>
+              <span style={{
+                display: 'inline-block',
+                animation: refreshing ? 'spin 0.6s linear' : 'none',
+              }}>↻</span>
+              刷新
+            </button>
+          </div>
+        </div>
+        {fullscreenCam ? (
+          <div style={{ flex: 1, position: 'relative', padding: 10, minHeight: 0 }}>
+            <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+              <CameraCell cam={fullscreenCam} theme={T} size="large" fullscreen key={`fs-${refreshTick}`} />
+              <button onClick={() => setFullscreenCam(null)} style={{
+                position: 'absolute', top: 10, right: 10,
+                padding: '5px 12px', fontSize: 11, borderRadius: 4,
+                background: 'rgba(0,0,0,0.6)', border: `1px solid ${T.borderColor}`,
+                color: '#fff', cursor: 'pointer',
+              }}>✕ 退出全屏</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{
+            flex: 1, padding: 10, overflow: 'auto', opacity: refreshing ? 0.5 : 1,
+            transition: 'opacity 0.2s',
+            display: 'grid',
+            gridTemplateColumns: `repeat(${cols}, 1fr)`,
+            gridTemplateRows: `repeat(${rows}, 1fr)`,
+            gap: 6,
+          }}>
+            {displayCams.map(cam => (
+              <CameraCell
+                key={`${cam.id}-${refreshTick}`}
+                cam={cam} theme={T}
+                size={layout >= 16 ? 'tiny' : layout >= 8 ? 'small' : 'normal'}
+                onClick={() => setFullscreenCam(cam)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 右：设备列表 */}
+      <div style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10, overflow: 'hidden' }}>
+        <div style={{
+          flex: 1, background: T.cardBg, border: `1px solid ${T.borderColor}`,
+          borderRadius: T.radius, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}>
+          <div style={{
+            padding: '12px 14px', borderBottom: `1px solid ${T.borderColor}`, flexShrink: 0,
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary }}>设备列表</span>
+            {deviceStatusFilter !== '全部' && (
+              <span style={{ fontSize: 10, color: T.accent, background: T.activeItemBg, padding: '2px 6px', borderRadius: 3 }}>
+                {deviceStatusFilter} ({filteredDevices.length})
+              </span>
+            )}
+          </div>
+          <div style={{ flex: 1, overflow: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {filteredDevices.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: T.textMuted, fontSize: 12 }}>无符合条件设备</div>
+            ) : filteredDevices.map(dev => (
+              <div
+                key={dev.id}
+                onClick={() => setSelectedDevice(selectedDevice?.id === dev.id ? null : dev)}
+                style={{
+                  background: selectedDevice?.id === dev.id ? T.activeItemBg : T.surface2,
+                  border: `1px solid ${selectedDevice?.id === dev.id ? T.accent : T.borderColor}`,
+                  borderRadius: 8, padding: 12, cursor: 'pointer', transition: 'all 0.2s',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary }}>{dev.name}</span>
+                  <span style={{
+                    fontSize: 9, padding: '2px 6px', borderRadius: 3,
+                    border: `1px solid ${dev.status === '运行中' ? T.success : dev.status === '异常' ? T.danger : T.textMuted}`,
+                    color: dev.status === '运行中' ? T.success : dev.status === '异常' ? T.danger : T.textMuted,
+                  }}>{dev.status}</span>
+                </div>
+                <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4 }}>
+                  编号：{dev.code} · {dev.type}
+                </div>
+                <div style={{ fontSize: 10, color: T.textMuted }}>最近上报：{dev.lastReport}</div>
+                {dev.note && (
+                  <div style={{
+                    marginTop: 6, fontSize: 10, color: T.warning,
+                    background: `${T.warning}15`, padding: '3px 6px', borderRadius: 3,
+                  }}>⚠ {dev.note}</div>
+                )}
+                {selectedDevice?.id === dev.id && (
+                  <div style={{ marginTop: 10, borderTop: `1px solid ${T.borderColor}`, paddingTop: 10 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                      {[['额定高度', dev.height], ['额定载荷', dev.maxLoad]].map(([k, v]) => (
+                        <div key={k} style={{ background: T.cardBg, borderRadius: 4, padding: '6px 8px' }}>
+                          <div style={{ fontSize: 9, color: T.textMuted, marginBottom: 2 }}>{k}</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary }}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <button onClick={e => handleRefreshDevice(e, dev)} style={{
+                      marginTop: 8, width: '100%', padding: '6px',
+                      background: T.surface2, border: `1px solid ${T.borderColor}`,
+                      borderRadius: 5, color: T.textSecondary, fontSize: 11, cursor: 'pointer',
+                    }}>↻ 刷新状态</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── 主应用 ──────────────────────────────────────────
+function App() {
+  const [page, setPage] = React.useState(() => localStorage.getItem('app_page') || 'overview');
+  const [project, setProject] = React.useState(() => localStorage.getItem('app_project') || 'p1');
+  const [themeId, setThemeId] = React.useState(() => localStorage.getItem('app_theme') || 'T1');
+  const [compactMode, setCompactMode] = React.useState(() => localStorage.getItem('app_compact') === '1');
+
+  const T = ALL_THEMES.find(t => t.id === themeId) || ALL_THEMES[0];
+
+  const handleThemeChange = (id) => { setThemeId(id); localStorage.setItem('app_theme', id); };
+  const handlePageChange = (p) => { setPage(p); localStorage.setItem('app_page', p); };
+  const handleProjectChange = (p) => { setProject(p); localStorage.setItem('app_project', p); };
+  const handleCompactChange = (v) => { setCompactMode(v); localStorage.setItem('app_compact', v ? '1' : '0'); };
+
+  return (
+    <div style={{
+      width: '100vw', height: '100vh',
+      background: T.pageBg,
+      display: 'flex', flexDirection: 'column',
+      fontFamily: '"PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif',
+      overflow: 'hidden',
+      fontSize: compactMode ? '13px' : '14px',
+    }}>
+      <TopNav
+        currentPage={page}
+        onPageChange={handlePageChange}
+        currentProject={project}
+        onProjectChange={handleProjectChange}
+        theme={T}
+        themeId={themeId}
+        onThemeChange={handleThemeChange}
+        compactMode={compactMode}
+        onCompactChange={handleCompactChange}
+      />
+      <main style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+        {page === 'overview' && <PageOverview project={project} theme={T} />}
+        {page === 'personnel' && <PagePersonnel project={project} theme={T} />}
+        {page === 'monitor' && <PageMonitor project={project} theme={T} />}
+      </main>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+
+</script>
+</body>
+</html>
