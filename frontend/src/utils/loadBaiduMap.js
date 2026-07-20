@@ -4,7 +4,8 @@ export function loadBaiduMap() {
   if (loadPromise) return loadPromise;
 
   const ak = import.meta.env.VITE_BAIDU_MAP_AK;
-  if (!ak || ak === 'YOUR_BAIDU_MAP_AK') {
+  const placeholderAks = ['YOUR_BAIDU_MAP_AK', 'REPLACE_WITH_YOUR_BAIDU_MAP_AK', '请填写你的百度地图浏览器端AK'];
+  if (!ak || placeholderAks.includes(ak)) {
     loadPromise = Promise.reject(new Error('百度地图 AK 未配置，请在 .env 中设置 VITE_BAIDU_MAP_AK'));
     return loadPromise;
   }
@@ -26,7 +27,7 @@ export function loadBaiduMap() {
     };
 
     const script = document.createElement('script');
-    script.src = `https://api.map.baidu.com/api?type=webgl&v=1.0&ak=${ak}&callback=baiduMapLoadCallback`;
+    script.src = `https://api.map.baidu.com/api?type=webgl&v=1.0&ak=${encodeURIComponent(ak)}&callback=baiduMapLoadCallback`;
     script.async = true;
     script.onerror = () => {
       loadPromise = null;

@@ -1,0 +1,39 @@
+{
+  "name": "site-platform-miniprogram",
+  "version": "0.1.0",
+  "description": "电信云平台现场端小程序",
+  "type": "module",
+  "scripts": {
+    "dev:h5:real": "uni -p h5 --mode real",
+    "dev:h5": "uni -p h5 --host 0.0.0.0",
+    "dev:mp-weixin": "uni -p mp-weixin",
+    "dev:mp-weixin:real": "uni -p mp-weixin --mode mp-real",
+    "build:h5": "uni build -p h5",
+    "build:mp-weixin": "uni build -p mp-weixin",
+    "type-check": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@dcloudio/uni-app": "3.0.0-alpha-5010420260626001",
+    "@dcloudio/uni-h5": "3.0.0-alpha-5010420260626001",
+    "@dcloudio/uni-mp-weixin": "3.0.0-alpha-5010420260626001",
+    "jsqr": "^1.4.0",
+    "vue": "^3.5.35"
+  },
+  "devDependencies": {
+    "@dcloudio/types": "^3.4.31",
+    "@dcloudio/vite-plugin-uni": "3.0.0-alpha-5010420260626001",
+    "@vue/tsconfig": "^0.5.1",
+    "typescript": "^5.9.3",
+    "vite": "5.2.8",
+    "vue-tsc": "^3.1.5"
+  },
+  "overrides": {
+    "@babel/core": "7.29.7",
+    "@intlify/core-base": "9.14.5",
+    "@intlify/message-resolver": "9.1.11",
+    "@intlify/vue-devtools": "9.14.5",
+    "jpeg-js": "0.4.4",
+    "phin": "3.7.1",
+    "ws": "8.21.0"
+  }
+}

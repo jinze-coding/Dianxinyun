@@ -1,0 +1,107 @@
+{
+  "pages": [
+    {
+      "path": "pages/login/index",
+      "style": { "navigationStyle": "custom", "disableScroll": true }
+    },
+    {
+      "path": "pages/wechat-bind/index",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "内部人员绑定" }
+    },
+    {
+      "path": "pages/inspection/index",
+      "style": { "navigationStyle": "custom", "disableScroll": true }
+    },
+    {
+      "path": "pages/documents/index",
+      "style": { "navigationStyle": "custom", "disableScroll": true }
+    },
+    {
+      "path": "pages/quality/index",
+      "style": { "navigationStyle": "custom", "disableScroll": true }
+    },
+    {
+      "path": "pages/profile/index",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "我的" }
+    },
+    {
+      "path": "pages/documents/upload",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "上传资料" }
+    },
+    {
+      "path": "pages/documents/detail",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "资料详情" }
+    },
+    {
+      "path": "pages/documents/folders",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "资料目录" }
+    },
+    {
+      "path": "pages/documents/recycle",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "资料回收站" }
+    },
+    {
+      "path": "pages/projects/index",
+      "style": { "navigationBarTitleText": "施工区域" }
+    },
+    {
+      "path": "pages/scan-entry/index",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "电箱巡检" }
+    },
+    {
+      "path": "pages/inspection/form",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/inspection/records",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "巡检记录" }
+    },
+    {
+      "path": "pages/inspection/detail",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "巡检详情" }
+    },
+    {
+      "path": "pages/public/box-monthly",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "电箱月度检查表" }
+    }
+  ],
+  "subPackages": [],
+  "tabBar": {
+    "color": "#7A8491",
+    "selectedColor": "#315F86",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/documents/index",
+        "text": "资料",
+        "iconPath": "static/design-preview-icons/quality-files.png",
+        "selectedIconPath": "static/design-preview-icons/quality-files.png"
+      },
+      {
+        "pagePath": "pages/inspection/index",
+        "text": "巡检",
+        "iconPath": "static/design-preview-icons/nav-safety.png",
+        "selectedIconPath": "static/design-preview-icons/nav-safety-active.png"
+      },
+      {
+        "pagePath": "pages/quality/index",
+        "text": "质量",
+        "iconPath": "static/design-preview-icons/nav-quality.png",
+        "selectedIconPath": "static/design-preview-icons/nav-quality-active.png"
+      },
+      {
+        "pagePath": "pages/profile/index",
+        "text": "我的",
+        "iconPath": "static/design-preview-icons/nav-profile.png",
+        "selectedIconPath": "static/design-preview-icons/nav-profile-active.png"
+      }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "电箱巡检",
+    "navigationBarBackgroundColor": "#F4F6F7",
+    "backgroundColor": "#F4F6F7"
+  }
+}

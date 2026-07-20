@@ -1,21 +1,9 @@
 import React, { useState } from 'react';
+import { DEFAULT_THEME_ID, getThemeById } from '../../constants/themes';
 import { login } from '../../services/auth';
 
-// 深色科技风主题
-const THEME = {
-  pageBg: '#060f1e',
-  cardBg: '#0c1a30',
-  accent: '#1677ff',
-  accent2: '#36a3f7',
-  borderColor: '#1a2f50',
-  textPrimary: '#e2edff',
-  textSecondary: '#9bbde0',
-  textMuted: '#4d6d9a',
-  success: '#22c55e',
-  danger: '#ef4444',
-};
-
-export default function LoginPage({ onLogin }) {
+export default function LoginPage({ onLogin, theme }) {
+  const T = theme || getThemeById(DEFAULT_THEME_ID);
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('admin123');
   const [error, setError] = useState('');
@@ -41,10 +29,12 @@ export default function LoginPage({ onLogin }) {
   };
 
   return (
-    <div style={{
+    <div data-theme={T.id} style={{
       width: '100vw',
       height: '100vh',
-      background: THEME.pageBg,
+      padding: 16,
+      boxSizing: 'border-box',
+      background: T.pageBg,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -52,43 +42,24 @@ export default function LoginPage({ onLogin }) {
       position: 'relative',
       overflow: 'hidden',
     }}>
-      {/* 背景装饰 */}
-      <div style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: 'radial-gradient(ellipse at 20% 20%, rgba(22, 119, 255, 0.15) 0%, transparent 50%)',
-        pointerEvents: 'none',
-      }} />
-      <div style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: 'radial-gradient(ellipse at 80% 80%, rgba(54, 163, 247, 0.1) 0%, transparent 50%)',
-        pointerEvents: 'none',
-      }} />
-
       {/* 登录卡片 */}
       <div style={{
         position: 'relative',
-        width: '420px',
-        background: THEME.cardBg,
-        borderRadius: '16px',
-        border: `1px solid ${THEME.borderColor}`,
-        padding: '48px 40px',
-        boxShadow: '0 25px 50px rgba(0, 0, 0, 0.5)',
+        width: 'min(420px, calc(100vw - 32px))',
+        boxSizing: 'border-box',
+        background: T.cardBg,
+        borderRadius: T.radius,
+        border: `1px solid ${T.borderColor}`,
+        padding: '40px',
+        boxShadow: '0 18px 40px rgba(15, 26, 46, 0.10)',
       }}>
         {/* Logo区域 */}
         <div style={{ textAlign: 'center', marginBottom: '40px' }}>
           <div style={{
             width: '72px',
             height: '72px',
-            borderRadius: '16px',
-            background: `linear-gradient(135deg, ${THEME.accent}, ${THEME.accent2})`,
+            borderRadius: T.radius,
+            background: T.accent,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -96,24 +67,24 @@ export default function LoginPage({ onLogin }) {
             fontSize: '32px',
             fontWeight: 'bold',
             color: '#fff',
-            boxShadow: `0 8px 24px rgba(22, 119, 255, 0.4)`,
+            boxShadow: '0 8px 20px rgba(22, 119, 255, 0.22)',
           }}>
             云
           </div>
           <h1 style={{
             fontSize: '28px',
             fontWeight: 'bold',
-            color: THEME.textPrimary,
+            color: T.textPrimary,
             margin: '0 0 8px',
-            letterSpacing: '2px',
+            letterSpacing: 0,
           }}>
             电信云平台
           </h1>
           <p style={{
             fontSize: '14px',
-            color: THEME.textMuted,
+            color: T.textMuted,
             margin: 0,
-            letterSpacing: '1px',
+            letterSpacing: 0,
           }}>
             项目现场综合管理系统
           </p>
@@ -125,7 +96,7 @@ export default function LoginPage({ onLogin }) {
             <label style={{
               display: 'block',
               fontSize: '14px',
-              color: THEME.textSecondary,
+              color: T.textSecondary,
               marginBottom: '10px',
               fontWeight: 500,
             }}>
@@ -138,21 +109,21 @@ export default function LoginPage({ onLogin }) {
               style={{
                 width: '100%',
                 padding: '14px 16px',
-                background: THEME.pageBg,
-                border: `1px solid ${THEME.borderColor}`,
+                background: T.surface2,
+                border: `1px solid ${T.borderColor}`,
                 borderRadius: '8px',
                 fontSize: '15px',
-                color: THEME.textPrimary,
+                color: T.textPrimary,
                 outline: 'none',
                 boxSizing: 'border-box',
                 transition: 'border-color 0.2s, box-shadow 0.2s',
               }}
               onFocus={(e) => {
-                e.target.style.borderColor = THEME.accent;
-                e.target.style.boxShadow = `0 0 0 3px rgba(22, 119, 255, 0.2)`;
+                e.target.style.borderColor = T.accent;
+                e.target.style.boxShadow = `0 0 0 3px ${T.activeItemBg}`;
               }}
               onBlur={(e) => {
-                e.target.style.borderColor = THEME.borderColor;
+                e.target.style.borderColor = T.borderColor;
                 e.target.style.boxShadow = 'none';
               }}
             />
@@ -162,7 +133,7 @@ export default function LoginPage({ onLogin }) {
             <label style={{
               display: 'block',
               fontSize: '14px',
-              color: THEME.textSecondary,
+              color: T.textSecondary,
               marginBottom: '10px',
               fontWeight: 500,
             }}>
@@ -175,21 +146,21 @@ export default function LoginPage({ onLogin }) {
               style={{
                 width: '100%',
                 padding: '14px 16px',
-                background: THEME.pageBg,
-                border: `1px solid ${THEME.borderColor}`,
+                background: T.surface2,
+                border: `1px solid ${T.borderColor}`,
                 borderRadius: '8px',
                 fontSize: '15px',
-                color: THEME.textPrimary,
+                color: T.textPrimary,
                 outline: 'none',
                 boxSizing: 'border-box',
                 transition: 'border-color 0.2s, box-shadow 0.2s',
               }}
               onFocus={(e) => {
-                e.target.style.borderColor = THEME.accent;
-                e.target.style.boxShadow = `0 0 0 3px rgba(22, 119, 255, 0.2)`;
+                e.target.style.borderColor = T.accent;
+                e.target.style.boxShadow = `0 0 0 3px ${T.activeItemBg}`;
               }}
               onBlur={(e) => {
-                e.target.style.borderColor = THEME.borderColor;
+                e.target.style.borderColor = T.borderColor;
                 e.target.style.boxShadow = 'none';
               }}
             />
@@ -198,10 +169,10 @@ export default function LoginPage({ onLogin }) {
           {error && (
             <div style={{
               padding: '12px 16px',
-              background: 'rgba(239, 68, 68, 0.1)',
-              border: `1px solid rgba(239, 68, 68, 0.3)`,
+              background: 'rgba(220, 38, 38, 0.06)',
+              border: '1px solid rgba(220, 38, 38, 0.22)',
               borderRadius: '8px',
-              color: THEME.danger,
+              color: T.danger,
               fontSize: '14px',
               marginBottom: '20px',
               display: 'flex',
@@ -221,7 +192,7 @@ export default function LoginPage({ onLogin }) {
               padding: '16px',
               background: loading
                 ? 'rgba(22, 119, 255, 0.5)'
-                : `linear-gradient(135deg, ${THEME.accent}, ${THEME.accent2})`,
+                : T.accent,
               color: '#fff',
               border: 'none',
               borderRadius: '8px',
@@ -229,17 +200,17 @@ export default function LoginPage({ onLogin }) {
               fontWeight: '600',
               cursor: loading ? 'not-allowed' : 'pointer',
               transition: 'transform 0.2s, box-shadow 0.2s',
-              boxShadow: loading ? 'none' : `0 8px 24px rgba(22, 119, 255, 0.3)`,
+              boxShadow: loading ? 'none' : '0 8px 20px rgba(22, 119, 255, 0.22)',
             }}
             onMouseOver={(e) => {
               if (!loading) {
                 e.target.style.transform = 'translateY(-2px)';
-                e.target.style.boxShadow = '0 12px 32px rgba(22, 119, 255, 0.4)';
+                e.target.style.boxShadow = '0 10px 24px rgba(22, 119, 255, 0.28)';
               }
             }}
             onMouseOut={(e) => {
               e.target.style.transform = 'translateY(0)';
-              e.target.style.boxShadow = loading ? 'none' : '0 8px 24px rgba(22, 119, 255, 0.3)';
+              e.target.style.boxShadow = loading ? 'none' : '0 8px 20px rgba(22, 119, 255, 0.22)';
             }}
           >
             {loading ? (
@@ -263,13 +234,13 @@ export default function LoginPage({ onLogin }) {
         <div style={{
           marginTop: '32px',
           padding: '16px',
-          background: THEME.pageBg,
+          background: T.surface2,
           borderRadius: '8px',
-          border: `1px solid ${THEME.borderColor}`,
+          border: `1px solid ${T.borderColor}`,
         }}>
           <div style={{
             fontSize: '13px',
-            color: THEME.textMuted,
+            color: T.textMuted,
             marginBottom: '8px',
             fontWeight: 500,
           }}>
@@ -279,7 +250,7 @@ export default function LoginPage({ onLogin }) {
             display: 'flex',
             justifyContent: 'space-between',
             fontSize: '13px',
-            color: THEME.textSecondary,
+            color: T.textSecondary,
           }}>
             <span>用户名：admin</span>
             <span>密码：admin123</span>

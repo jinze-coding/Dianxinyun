@@ -76,13 +76,15 @@ export const PAGE_IDS = {
   MAP_DASHBOARD: 'map_dashboard',
   OVERVIEW: 'overview',
   PERSONNEL: 'personnel',
-  MONITOR: 'monitor',
+  PERSON_MANAGEMENT: 'person_management',
+  QUALITY_MANAGEMENT: 'quality_management',
+  DOCUMENT_MANAGEMENT: 'document_management',
+  ELECTRIC_INSPECTION: 'electric_inspection',
 };
 
 // 导航菜单
 export const NAV_ITEMS = [
-  { id: PAGE_IDS.MAP_DASHBOARD, label: '地图总览' },
-  { id: PAGE_IDS.OVERVIEW, label: '项目概况' },
-  { id: PAGE_IDS.PERSONNEL, label: '人员与安全' },
-  { id: PAGE_IDS.MONITOR, label: '设备与监控' },
+  { id: PAGE_IDS.DOCUMENT_MANAGEMENT, label: '资料管理' },
+  { id: PAGE_IDS.ELECTRIC_INSPECTION, label: '巡检管理' },
+  { id: PAGE_IDS.QUALITY_MANAGEMENT, label: '质量管理' },
 ];

@@ -22,6 +22,7 @@
         <mybatis-plus.version>3.5.6</mybatis-plus.version>
         <jwt.version>0.11.5</jwt.version>
         <knife4j.version>4.5.0</knife4j.version>
+        <minio.version>9.0.3</minio.version>
     </properties>
 
     <dependencies>
@@ -103,10 +104,31 @@
             <artifactId>commons-lang3</artifactId>
         </dependency>
 
+        <!-- Excel export -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.2.5</version>
+        </dependency>
+
+        <!-- QR code generation -->
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>core</artifactId>
+            <version>3.5.3</version>
+        </dependency>
+
         <!-- Spring Boot AOP -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+
+        <!-- S3 compatible object storage -->
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>${minio.version}</version>
         </dependency>
     </dependencies>
 

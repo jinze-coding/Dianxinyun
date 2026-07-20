@@ -3,8 +3,13 @@ package com.example.siteplatform.project.controller;
 import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.auth.service.AuthService;
 import com.example.siteplatform.common.Result;
+import com.example.siteplatform.project.dto.MiniProgramProjectVO;
+import com.example.siteplatform.project.dto.MiniProgramWorkspaceOverviewVO;
+import com.example.siteplatform.project.dto.ProjectLocationUpdateRequest;
+import com.example.siteplatform.project.dto.ProjectMapPointVO;
 import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.service.ProjectService;
+import com.example.siteplatform.project.service.MiniProgramWorkspaceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +28,9 @@ public class ProjectController {
     @Autowired
     private AuthService authService;
 
+    @Autowired
+    private MiniProgramWorkspaceService miniProgramWorkspaceService;
+
     @Operation(summary = "获取项目列表")
     @GetMapping
     public Result<List<ProjectInfo>> getProjectList(
@@ -30,6 +38,32 @@ public class ProjectController {
         SysUser currentUser = authService.getCurrentUser(token);
         List<ProjectInfo> projects = projectService.getProjectList(currentUser);
         return Result.success(projects);
+    }
+
+    @Operation(summary = "获取小程序项目概览列表")
+    @GetMapping("/mini-program/list")
+    public Result<List<MiniProgramProjectVO>> getMiniProgramProjectList(
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(projectService.getMiniProgramProjectList(currentUser));
+    }
+
+    @Operation(summary = "获取小程序项目概览详情")
+    @GetMapping("/mini-program/{projectId}")
+    public Result<MiniProgramProjectVO> getMiniProgramProjectById(
+            @PathVariable Long projectId,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(projectService.getMiniProgramProjectById(projectId, currentUser));
+    }
+
+    @Operation(summary = "获取小程序施工区域概况")
+    @GetMapping("/mini-program/{projectId}/workspace-overview")
+    public Result<MiniProgramWorkspaceOverviewVO> getMiniProgramWorkspaceOverview(
+            @PathVariable Long projectId,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(miniProgramWorkspaceService.getOverview(projectId, currentUser));
     }
 
     @Operation(summary = "获取项目详情")
@@ -40,6 +74,36 @@ public class ProjectController {
         SysUser currentUser = authService.getCurrentUser(token);
         ProjectInfo project = projectService.getProjectById(projectId, currentUser);
         return Result.success(project);
+    }
+
+    @Operation(summary = "获取项目地图点位")
+    @GetMapping("/map-points")
+    public Result<List<ProjectMapPointVO>> getProjectMapPoints(
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        List<ProjectMapPointVO> points = projectService.getProjectMapPoints(currentUser);
+        return Result.success(points);
+    }
+
+    @Operation(summary = "获取项目地图详情")
+    @GetMapping("/{projectId}/map-detail")
+    public Result<ProjectMapPointVO> getProjectMapDetail(
+            @PathVariable Long projectId,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        ProjectMapPointVO project = projectService.getProjectMapDetail(projectId, currentUser);
+        return Result.success(project);
+    }
+
+    @Operation(summary = "更新项目定位信息")
+    @PutMapping("/{projectId}/location")
+    public Result<ProjectMapPointVO> updateProjectLocation(
+            @PathVariable Long projectId,
+            @RequestBody ProjectLocationUpdateRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        ProjectMapPointVO updated = projectService.updateProjectLocation(projectId, request, currentUser);
+        return Result.success(updated);
     }
 
     @Operation(summary = "添加项目")

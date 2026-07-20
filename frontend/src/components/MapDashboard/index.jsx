@@ -1,5 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { addProject, deleteProject, getProjectList, updateProject } from '../../services/project';
+import {
+  addProject,
+  deleteProject,
+  getProjectMapPoints,
+  updateProjectLocation,
+} from '../../services/project';
 import { loadBaiduMap } from '../../utils/loadBaiduMap';
 
 const STATUS_COLORS = {
@@ -22,13 +27,19 @@ const emptyProjectForm = {
 function normalizeProjects(list) {
   return list.map((p) => ({
     ...p,
-    id: p.id,
+    id: p.id || p.projectId,
     projectName: p.projectName || p.name,
     shortName: p.shortName || p.short,
     projectStatus: p.projectStatus || p.status || 'normal',
+    phase: p.phase || p.currentStage,
     longitude: p.longitude,
     latitude: p.latitude,
+    province: p.province,
+    city: p.city,
+    district: p.district,
     address: p.address,
+    coordinateType: p.coordinateType || 'BD09',
+    hasLocation: p.hasLocation ?? Boolean(p.longitude && p.latitude),
   }));
 }
 
@@ -74,7 +85,15 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
   const [error, setError] = useState(null);
   const [activeProjectId, setActiveProjectId] = useState(null);
   const [editingProject, setEditingProject] = useState(null);
-  const [locationForm, setLocationForm] = useState({ address: '', longitude: '', latitude: '' });
+  const [locationForm, setLocationForm] = useState({
+    province: '',
+    city: '',
+    district: '',
+    address: '',
+    longitude: '',
+    latitude: '',
+    coordinateType: 'BD09',
+  });
   const [locationMessage, setLocationMessage] = useState('');
   const [savingLocation, setSavingLocation] = useState(false);
   const [showProjectManage, setShowProjectManage] = useState(false);
@@ -84,7 +103,7 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
   const [projectForm, setProjectForm] = useState(emptyProjectForm);
   const [projectMessage, setProjectMessage] = useState('');
   const [savingProject, setSavingProject] = useState(false);
-  const [mapMode, setMapMode] = useState('satellite');
+  const [mapMode, setMapMode] = useState('normal');
   const [mapReady, setMapReady] = useState(false);
 
   const mapRef = useRef(null);
@@ -139,13 +158,14 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
   const getSatelliteMapType = () => window.BMAP_SATELLITE_MAP || window.BMAP_EARTH_MAP;
 
   const refreshProjectData = useCallback(async () => {
-    const res = await getProjectList();
+    const res = await getProjectMapPoints();
     if (res.code === 200 && Array.isArray(res.data)) {
       const nextProjects = normalizeProjects(res.data);
       setProjects(nextProjects);
+      setError(null);
       return nextProjects;
     }
-    return [];
+    throw new Error(res.message || '获取项目列表失败，请确认后端服务和登录状态正常');
   }, []);
 
   useEffect(() => {
@@ -153,14 +173,13 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
 
     if (projectList.length > 0) {
       setProjects(normalizeProjects(projectList));
-      setLoading(false);
-      return () => { cancelled = true; };
+      setError(null);
     }
 
     setLoading(true);
     refreshProjectData()
       .catch((e) => {
-        if (!cancelled) {
+        if (!cancelled && projectList.length === 0) {
           setProjects([]);
           setError('获取项目列表失败，请确认后端服务和登录状态正常');
         }
@@ -173,6 +192,23 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
     return () => { cancelled = true; };
   }, [projectList, refreshProjectData]);
 
+  const handleRetry = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      if (typeof onRefreshProjects === 'function') {
+        await onRefreshProjects();
+      }
+      await refreshProjectData();
+    } catch (e) {
+      setProjects([]);
+      setError(e?.message || '获取项目列表失败，请确认后端服务和登录状态正常');
+      console.error('获取项目列表失败', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     loadBaiduMap()
@@ -181,11 +217,8 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
         const map = new BMapGL.Map(mapContainerRef.current, { enableMapClick: true });
         map.centerAndZoom(new BMapGL.Point(116.404, 39.915), 5);
         map.enableScrollWheelZoom(true);
-        const satelliteMapType = getSatelliteMapType();
-        if (satelliteMapType) {
-          map.setMapType(satelliteMapType);
-        } else {
-          setMapMode('normal');
+        if (window.BMAP_NORMAL_MAP) {
+          map.setMapType(window.BMAP_NORMAL_MAP);
         }
         mapRef.current = map;
         setMapReady(true);
@@ -247,9 +280,13 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
     event.stopPropagation();
     setEditingProject(project);
     setLocationForm({
+      province: project.province || '',
+      city: project.city || '',
+      district: project.district || '',
       address: project.address || '',
       longitude: project.longitude || '',
       latitude: project.latitude || '',
+      coordinateType: project.coordinateType || 'BD09',
     });
     setLocationMessage('');
   };
@@ -319,10 +356,14 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
     const latitude = Number(locationForm.latitude);
 
     try {
-      const res = await updateProject(editingProject.id, {
+      const res = await updateProjectLocation(editingProject.id, {
         longitude: longitude.toFixed(6),
         latitude: latitude.toFixed(6),
+        province: locationForm.province.trim(),
+        city: locationForm.city.trim(),
+        district: locationForm.district.trim(),
         address: locationForm.address.trim(),
+        coordinateType: locationForm.coordinateType || 'BD09',
       });
       if (res.code !== 200) {
         setLocationMessage(res.message || '保存失败');
@@ -333,7 +374,11 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
         ...editingProject,
         longitude: longitude.toFixed(6),
         latitude: latitude.toFixed(6),
+        province: locationForm.province.trim(),
+        city: locationForm.city.trim(),
+        district: locationForm.district.trim(),
         address: locationForm.address.trim(),
+        coordinateType: locationForm.coordinateType || 'BD09',
       }])[0];
       setProjects((prev) => prev.map((item) => (item.id === nextProject.id ? nextProject : item)));
       setActiveProjectId(nextProject.id);
@@ -464,7 +509,7 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
         <span style={{ fontSize: 40 }}>!</span>
         <span style={{ fontSize: 15, color: T.danger, fontWeight: 500 }}>{error}</span>
         <button
-          onClick={() => window.location.reload()}
+          onClick={handleRetry}
           style={{
             padding: '8px 20px',
             borderRadius: 6,
@@ -846,6 +891,60 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
             </div>
 
             <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12, color: T.textSecondary }}>
+                  省
+                  <input
+                    value={locationForm.province}
+                    onChange={(event) => setLocationForm((prev) => ({ ...prev, province: event.target.value }))}
+                    placeholder="例如：江苏省"
+                    style={{
+                      background: T.surface2,
+                      border: `1px solid ${T.borderColor}`,
+                      borderRadius: 8,
+                      color: T.textPrimary,
+                      padding: '10px 12px',
+                      outline: 'none',
+                      fontSize: 13,
+                    }}
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12, color: T.textSecondary }}>
+                  市
+                  <input
+                    value={locationForm.city}
+                    onChange={(event) => setLocationForm((prev) => ({ ...prev, city: event.target.value }))}
+                    placeholder="例如：苏州市"
+                    style={{
+                      background: T.surface2,
+                      border: `1px solid ${T.borderColor}`,
+                      borderRadius: 8,
+                      color: T.textPrimary,
+                      padding: '10px 12px',
+                      outline: 'none',
+                      fontSize: 13,
+                    }}
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12, color: T.textSecondary }}>
+                  区县
+                  <input
+                    value={locationForm.district}
+                    onChange={(event) => setLocationForm((prev) => ({ ...prev, district: event.target.value }))}
+                    placeholder="例如：昆山市"
+                    style={{
+                      background: T.surface2,
+                      border: `1px solid ${T.borderColor}`,
+                      borderRadius: 8,
+                      color: T.textPrimary,
+                      padding: '10px 12px',
+                      outline: 'none',
+                      fontSize: 13,
+                    }}
+                  />
+                </label>
+              </div>
+
               <label style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12, color: T.textSecondary }}>
                 真实地址
                 <textarea
@@ -884,7 +983,7 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
                 根据地址解析坐标
               </button>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 150px', gap: 12 }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12, color: T.textSecondary }}>
                   经度 longitude
                   <input
@@ -918,6 +1017,26 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
                       fontSize: 13,
                     }}
                   />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12, color: T.textSecondary }}>
+                  坐标系
+                  <select
+                    value={locationForm.coordinateType}
+                    onChange={(event) => setLocationForm((prev) => ({ ...prev, coordinateType: event.target.value }))}
+                    style={{
+                      background: T.surface2,
+                      border: `1px solid ${T.borderColor}`,
+                      borderRadius: 8,
+                      color: T.textPrimary,
+                      padding: '10px 12px',
+                      outline: 'none',
+                      fontSize: 13,
+                    }}
+                  >
+                    <option value="BD09">BD09</option>
+                    <option value="GCJ02">GCJ02</option>
+                    <option value="WGS84">WGS84</option>
+                  </select>
                 </label>
               </div>
 

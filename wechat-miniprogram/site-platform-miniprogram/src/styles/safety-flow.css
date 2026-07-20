@@ -1,0 +1,73 @@
+.flow-page {
+  height: 100vh;
+  min-height: 100vh;
+  overflow: hidden;
+  background: var(--inspection-page);
+  color: var(--inspection-text);
+}
+
+.flow-scroll { box-sizing: border-box; }
+.flow-content { padding: 20rpx 24rpx 38rpx; }
+
+.flow-card {
+  border: 1rpx solid var(--inspection-divider);
+  border-radius: 22rpx;
+  background: #fff;
+  box-shadow: var(--inspection-shadow);
+  animation: flow-card-in 220ms ease both;
+}
+
+.pressable { transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease; }
+.pressable:active { opacity: .92; transform: scale(.985); }
+
+.stagger-item { animation: flow-list-in 220ms ease both; }
+
+.flow-skeleton {
+  overflow: hidden;
+  border-radius: 14rpx;
+  background: linear-gradient(100deg, #e7edf3 20%, #f7fafc 40%, #e7edf3 60%);
+  background-size: 240% 100%;
+  animation: flow-shimmer 1.2s ease infinite;
+}
+
+.flow-overlay {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(20, 26, 34, .38);
+  animation: flow-fade-in 180ms ease both;
+}
+
+.flow-sheet {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 30rpx 28rpx calc(28rpx + env(safe-area-inset-bottom));
+  border-radius: 30rpx 30rpx 0 0;
+  background: #fff;
+  box-shadow: 0 -18rpx 48rpx rgba(21, 29, 40, .14);
+  animation: flow-sheet-in 220ms ease both;
+}
+
+.flow-sheet-title { display: block; font-size: 30rpx; font-weight: 850; }
+.flow-sheet-desc { display: block; margin-top: 8rpx; color: #7a8492; font-size: 22rpx; line-height: 1.5; }
+.flow-sheet-actions { display: grid; grid-template-columns: 1fr 1.5fr; gap: 16rpx; margin-top: 26rpx; }
+.flow-sheet-actions button { display: flex; height: 82rpx; min-height: 82rpx; align-items: center; justify-content: center; margin: 0; padding: 0 18rpx; border-radius: 16rpx; font-size: 25rpx; font-weight: 750; line-height: 1; text-align: center; }
+.flow-sheet-actions button::after { border: 0; }
+.flow-sheet-cancel { background: #f0f4f7; color: #667181; }
+.flow-sheet-confirm { border: 1rpx solid var(--inspection-border); background: var(--inspection-soft); color: var(--inspection-primary-deep); }
+
+.flow-fade-enter-active, .flow-fade-leave-active { transition: opacity 180ms ease, transform 180ms ease; }
+.flow-fade-enter-from, .flow-fade-leave-to { opacity: 0; transform: translateY(-8rpx); }
+
+@keyframes flow-card-in { from { opacity: 0; transform: translateY(10rpx); } to { opacity: 1; transform: translateY(0); } }
+@keyframes flow-list-in { from { opacity: 0; transform: translateY(12rpx); } to { opacity: 1; transform: translateY(0); } }
+@keyframes flow-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes flow-sheet-in { from { transform: translateY(36rpx); } to { transform: translateY(0); } }
+@keyframes flow-shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .flow-card, .stagger-item, .flow-skeleton, .flow-overlay, .flow-sheet { animation-duration: 1ms !important; animation-iteration-count: 1 !important; }
+  .pressable, .flow-fade-enter-active, .flow-fade-leave-active { transition-duration: 1ms !important; }
+}

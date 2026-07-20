@@ -28,7 +28,11 @@ public class ProjectInfo {
 
     private BigDecimal longitude;
     private BigDecimal latitude;
+    private String province;
+    private String city;
+    private String district;
     private String address;
+    private String coordinateType;
 
     @TableLogic
     private Integer deleted;

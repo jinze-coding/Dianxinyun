@@ -1,0 +1,26 @@
+<svg width="240" height="176" viewBox="0 0 240 176" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="240" y2="176" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d9dde0"/>
+      <stop offset="0.45" stop-color="#f2f4f5"/>
+      <stop offset="1" stop-color="#9ca3a6"/>
+    </linearGradient>
+    <linearGradient id="warm" x1="12" y1="20" x2="222" y2="160" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8a7756"/>
+      <stop offset="1" stop-color="#222a2f"/>
+    </linearGradient>
+  </defs>
+  <rect width="240" height="176" rx="10" fill="url(#bg)"/>
+  <rect x="10" y="18" width="220" height="136" rx="4" fill="#2f373b"/>
+  <rect x="16" y="24" width="208" height="124" fill="url(#warm)" opacity=".85"/>
+  <rect x="24" y="34" width="44" height="94" rx="3" fill="#d9d5c8"/>
+  <rect x="76" y="33" width="40" height="96" rx="3" fill="#edf0eb"/>
+  <rect x="124" y="34" width="42" height="94" rx="3" fill="#c9d0ca"/>
+  <rect x="174" y="35" width="34" height="92" rx="3" fill="#e6e9e4"/>
+  <path d="M30 50h30M30 65h27M30 80h30M82 52h28M82 68h22M130 52h30M130 69h26M179 54h24M179 70h18" stroke="#58636a" stroke-width="4" stroke-linecap="round"/>
+  <path d="M42 37v88M96 36v90M146 36v91M193 37v88" stroke="#3b454b" stroke-width="3"/>
+  <path d="M18 136h205" stroke="#b6aa87" stroke-width="8" stroke-linecap="round"/>
+  <path d="M67 36c10 25 8 56 0 89M117 35c6 24 5 58-1 92M166 36c8 20 6 58 0 90" stroke="#e9b949" stroke-width="3" opacity=".85"/>
+  <path d="M33 129c20-16 50-10 75-14 40-7 67-21 95-12" stroke="#2d3740" stroke-width="9" opacity=".7"/>
+  <rect x="15" y="25" width="210" height="124" fill="#ffffff" opacity=".08"/>
+</svg>

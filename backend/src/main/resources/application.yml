@@ -7,9 +7,9 @@ spring:
 
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/site_platform?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-    username: root
-    password: root123
+    url: jdbc:mysql://localhost:3306/dianxinyun?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
 
   data:
     redis:
@@ -34,7 +34,7 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 jwt:
-  secret: site-platform-jwt-secret-key-2026-telecom-cloud
+  secret: ${JWT_SECRET:site-platform-development-only-change-me}
   expiration: 3153600000000
 
 knife4j:
@@ -46,4 +46,22 @@ file:
   upload:
     path: ./uploads
   storage:
-    type: local
+    type: ${FILE_STORAGE_TYPE:local}
+    minio:
+      endpoint: ${MINIO_ENDPOINT:}
+      bucket: ${MINIO_BUCKET:site-platform}
+      access-key: ${MINIO_ACCESS_KEY:}
+      secret-key: ${MINIO_SECRET_KEY:}
+
+wechat:
+  mini-program:
+    app-id: ${WECHAT_MINI_PROGRAM_APP_ID:touristappid}
+    app-secret: ${WECHAT_MINI_PROGRAM_APP_SECRET:}
+    mock-enabled: ${WECHAT_MINI_PROGRAM_MOCK_ENABLED:true}
+    page: pages/scan-entry/index
+    env-version: ${WECHAT_MINI_PROGRAM_ENV_VERSION:release}
+    public-fallback-url: ${WECHAT_MINI_PROGRAM_PUBLIC_FALLBACK_URL:http://localhost:3003/#/pages/scan-entry/index}
+  message:
+    review-template-id: ${WECHAT_REVIEW_TEMPLATE_ID:}
+    rectification-template-id: ${WECHAT_RECTIFICATION_TEMPLATE_ID:}
+    recheck-template-id: ${WECHAT_RECHECK_TEMPLATE_ID:}

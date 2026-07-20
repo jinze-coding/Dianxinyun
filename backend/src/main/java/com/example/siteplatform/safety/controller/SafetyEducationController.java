@@ -3,11 +3,16 @@ package com.example.siteplatform.safety.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.example.siteplatform.auth.service.AuthService;
+import com.example.siteplatform.auth.entity.SysUser;
+import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.common.Result;
 import com.example.siteplatform.file.entity.FileResource;
 import com.example.siteplatform.file.mapper.FileResourceMapper;
 import com.example.siteplatform.person.entity.TemporaryPerson;
+import com.example.siteplatform.person.constant.PersonnelStatus;
 import com.example.siteplatform.person.mapper.TemporaryPersonMapper;
+import com.example.siteplatform.project.entity.ProjectInfo;
+import com.example.siteplatform.project.service.ProjectPermissionService;
 import com.example.siteplatform.safety.entity.SafetyEducationBatch;
 import com.example.siteplatform.safety.entity.SafetyEducationPerson;
 import com.example.siteplatform.safety.mapper.SafetyEducationBatchMapper;
@@ -45,16 +50,28 @@ public class SafetyEducationController {
     @Autowired
     private FileResourceMapper fileMapper;
 
+    @Autowired
+    private ProjectPermissionService projectPermissionService;
+
     @Operation(summary = "获取培训批次列表")
     @GetMapping
     public Result<List<Map<String, Object>>> getBatchList(
             @Parameter(description = "项目ID") @RequestParam(required = false) Long projectId,
             @RequestHeader(value = "Authorization", required = false) String token) {
-        authService.getCurrentUser(token);
+        SysUser currentUser = authService.getCurrentUser(token);
 
         LambdaQueryWrapper<SafetyEducationBatch> wrapper = new LambdaQueryWrapper<>();
         if (projectId != null) {
+            projectPermissionService.checkProjectPermission(currentUser.getId(), projectId);
             wrapper.eq(SafetyEducationBatch::getProjectId, projectId);
+        } else if (!projectPermissionService.isPlatformAdmin(currentUser.getId())) {
+            List<Long> projectIds = projectPermissionService.getUserProjects(currentUser.getId()).stream()
+                    .map(ProjectInfo::getId)
+                    .toList();
+            if (projectIds.isEmpty()) {
+                return Result.success(List.of());
+            }
+            wrapper.in(SafetyEducationBatch::getProjectId, projectIds);
         }
         wrapper.orderByDesc(SafetyEducationBatch::getCreateTime);
 
@@ -125,12 +142,13 @@ public class SafetyEducationController {
     public Result<Map<String, Object>> getBatchById(
             @PathVariable Long id,
             @RequestHeader(value = "Authorization", required = false) String token) {
-        authService.getCurrentUser(token);
+        SysUser currentUser = authService.getCurrentUser(token);
 
         SafetyEducationBatch batch = batchMapper.selectById(id);
         if (batch == null) {
             return Result.error("培训批次不存在");
         }
+        projectPermissionService.checkProjectPermission(currentUser.getId(), batch.getProjectId());
 
         Map<String, Object> item = new HashMap<>();
         item.put("id", batch.getId());
@@ -192,10 +210,14 @@ public class SafetyEducationController {
     public Result<Map<String, Object>> createBatch(
             @RequestBody Map<String, Object> params,
             @RequestHeader(value = "Authorization", required = false) String token) {
-        authService.getCurrentUser(token);
+        SysUser currentUser = authService.getCurrentUser(token);
 
         SafetyEducationBatch batch = new SafetyEducationBatch();
         batch.setProjectId(params.get("projectId") != null ? Long.valueOf(params.get("projectId").toString()) : null);
+        if (batch.getProjectId() == null) {
+            throw new BusinessException("项目ID不能为空");
+        }
+        requireManagePermission(currentUser, batch.getProjectId());
         batch.setBatchName((String) params.get("batchName"));
         batch.setEduType((String) params.get("eduType"));
         Object timeValue = firstNonNull(params.get("time"), params.get("trainingTime"));
@@ -204,7 +226,7 @@ public class SafetyEducationController {
         }
         batch.setTrainingPlace((String) firstNonNull(params.get("place"), params.get("trainingPlace")));
         batch.setTrainer((String) params.get("trainer"));
-        batch.setStatus("进行中");
+        batch.setStatus("IN_PROGRESS");
         batch.setRemark((String) params.get("remark"));
         if (params.get("courseHours") != null) batch.setCourseHours(Integer.valueOf(params.get("courseHours").toString()));
         if (params.get("examType") != null) batch.setExamType((String) params.get("examType"));
@@ -220,6 +242,9 @@ public class SafetyEducationController {
             for (Integer fileId : fileIds) {
                 FileResource file = fileMapper.selectById(Long.valueOf(fileId));
                 if (file != null) {
+                    if (file.getProjectId() != null && !batch.getProjectId().equals(file.getProjectId())) {
+                        throw new BusinessException("培训资料不属于当前项目");
+                    }
                     file.setBusinessId(batch.getId());
                     fileMapper.updateById(file);
                 }
@@ -228,12 +253,19 @@ public class SafetyEducationController {
 
         // 插入关联人员
         List<Integer> personIds = (List<Integer>) params.get("personIds");
+        if (personIds == null || personIds.isEmpty()) {
+            throw new BusinessException("请至少选择一名培训人员");
+        }
         if (personIds != null) {
             for (Integer personId : personIds) {
+                TemporaryPerson person = personnelMapper.selectById(Long.valueOf(personId));
+                if (person == null || !batch.getProjectId().equals(person.getProjectId())) {
+                    throw new BusinessException("培训人员不属于当前项目");
+                }
                 SafetyEducationPerson relation = new SafetyEducationPerson();
                 relation.setBatchId(batch.getId());
                 relation.setPersonId(Long.valueOf(personId));
-                relation.setStatus("进行中");
+                relation.setStatus("IN_PROGRESS");
                 relation.setCreateTime(LocalDateTime.now());
                 personRelationMapper.insert(relation);
             }
@@ -252,12 +284,13 @@ public class SafetyEducationController {
             @PathVariable Long id,
             @RequestBody Map<String, Object> params,
             @RequestHeader(value = "Authorization", required = false) String token) {
-        authService.getCurrentUser(token);
+        SysUser currentUser = authService.getCurrentUser(token);
 
         SafetyEducationBatch batch = batchMapper.selectById(id);
         if (batch == null) {
             return Result.error("培训批次不存在");
         }
+        requireManagePermission(currentUser, batch.getProjectId());
 
         if (params.get("batchName") != null) batch.setBatchName((String) params.get("batchName"));
         if (params.get("eduType") != null) batch.setEduType((String) params.get("eduType"));
@@ -284,15 +317,20 @@ public class SafetyEducationController {
     public Result<Void> markComplete(
             @PathVariable Long id,
             @RequestHeader(value = "Authorization", required = false) String token) {
-        authService.getCurrentUser(token);
+        SysUser currentUser = authService.getCurrentUser(token);
 
         SafetyEducationBatch batch = batchMapper.selectById(id);
         if (batch == null) {
             return Result.error("培训批次不存在");
         }
+        requireManagePermission(currentUser, batch.getProjectId());
+
+        if ("COMPLETED".equalsIgnoreCase(batch.getStatus()) || "已完成".equals(batch.getStatus())) {
+            return Result.success();
+        }
 
         // 更新批次状态
-        batch.setStatus("已完成");
+        batch.setStatus("COMPLETED");
         batch.setUpdateTime(LocalDateTime.now());
         batchMapper.updateById(batch);
 
@@ -302,14 +340,17 @@ public class SafetyEducationController {
         List<SafetyEducationPerson> relations = personRelationMapper.selectList(relationWrapper);
 
         for (SafetyEducationPerson relation : relations) {
-            LambdaUpdateWrapper<TemporaryPerson> personWrapper = new LambdaUpdateWrapper<>();
-            personWrapper.eq(TemporaryPerson::getId, relation.getPersonId())
-                    .set(TemporaryPerson::getStatus, "已教育")
-                    .set(TemporaryPerson::getUpdateTime, LocalDateTime.now());
-            personnelMapper.update(null, personWrapper);
+            TemporaryPerson person = personnelMapper.selectById(relation.getPersonId());
+            if (person != null && !PersonnelStatus.LEFT.equals(PersonnelStatus.normalize(person.getStatus()))) {
+                LambdaUpdateWrapper<TemporaryPerson> personWrapper = new LambdaUpdateWrapper<>();
+                personWrapper.eq(TemporaryPerson::getId, relation.getPersonId())
+                        .set(TemporaryPerson::getStatus, PersonnelStatus.EDUCATED)
+                        .set(TemporaryPerson::getUpdateTime, LocalDateTime.now());
+                personnelMapper.update(null, personWrapper);
+            }
 
             // 更新关联记录状态
-            relation.setStatus("已完成");
+            relation.setStatus("COMPLETED");
             relation.setFinishTime(LocalDateTime.now());
             personRelationMapper.updateById(relation);
         }
@@ -323,7 +364,13 @@ public class SafetyEducationController {
     public Result<Void> deleteBatch(
             @PathVariable Long id,
             @RequestHeader(value = "Authorization", required = false) String token) {
-        authService.getCurrentUser(token);
+        SysUser currentUser = authService.getCurrentUser(token);
+
+        SafetyEducationBatch batch = batchMapper.selectById(id);
+        if (batch == null) {
+            return Result.error("培训批次不存在");
+        }
+        requireManagePermission(currentUser, batch.getProjectId());
 
         // 删除关联记录
         LambdaQueryWrapper<SafetyEducationPerson> relationWrapper = new LambdaQueryWrapper<>();
@@ -337,6 +384,12 @@ public class SafetyEducationController {
 
     private Object firstNonNull(Object primary, Object fallback) {
         return primary != null ? primary : fallback;
+    }
+
+    private void requireManagePermission(SysUser currentUser, Long projectId) {
+        if (!projectPermissionService.canManagePersonnel(currentUser.getId(), projectId)) {
+            throw BusinessException.forbidden("无安全教育管理权限");
+        }
     }
 
     private LocalDateTime parseTrainingTime(Object value) {

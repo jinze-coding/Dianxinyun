@@ -18,6 +18,17 @@ public class FileResource {
     private String businessType;
     private Long businessId;
     private Long uploaderId;
+
+    private String storageProvider;
+    private String storageKey;
+    private String originalFileName;
+    private String mimeType;
+    private String fileExtension;
+    private String sha256;
+
+    @TableField(exist = false)
+    private String uploaderName;
+
     private String status;
     private String remark;
 

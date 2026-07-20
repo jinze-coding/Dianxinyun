@@ -26,7 +26,7 @@ source src/main/resources/sql/init.sql
 ```yaml
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/site_platform?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false
+    url: jdbc:mysql://localhost:3306/dianxinyun?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false
     username: root
     password: your_password  # 修改为你的密码
 
@@ -35,6 +35,16 @@ spring:
       host: localhost
       port: 6379
       password: your_redis_password  # 如果有密码的话
+```
+
+文件默认保存到本地 `./uploads`。工程资料库也支持 MinIO，通过环境变量切换，不要把密钥写入配置文件：
+
+```bash
+export FILE_STORAGE_TYPE=minio
+export MINIO_ENDPOINT=http://127.0.0.1:9000
+export MINIO_BUCKET=site-platform
+export MINIO_ACCESS_KEY=your_access_key
+export MINIO_SECRET_KEY=your_secret_key
 ```
 
 ### 3. 启动 Redis（如果未运行）
@@ -80,6 +90,10 @@ java -jar target/site-platform-1.0.0.jar
 - GET `/api/v1/projects` - 获取项目列表
 - GET `/api/v1/projects/{projectId}` - 获取项目详情
 
+### 工程资料库接口
+- `/api/v1/document-folders` - 工程资料目录
+- `/api/v1/project-documents` - 分页、上传、版本、归档和回收站
+
 ## 项目结构
 
 ```
@@ -90,6 +104,7 @@ src/main/java/com/example/siteplatform/
 ├── person/         # 临时人员管理
 ├── safety/        # 安全三级教育
 ├── file/          # 文件资料管理
+├── document/      # 工程资料目录、版本和回收站
 ├── camera/        # 摄像头资源与视频播放地址
 ├── videolayout/   # 视频窗口布局
 ├── device/        # 设备与塔吊管理

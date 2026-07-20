@@ -10,6 +10,21 @@ export function getProjectDetail(projectId) {
   return get(`/projects/${projectId}`);
 }
 
+// 获取项目地图点位
+export function getProjectMapPoints() {
+  return get('/projects/map-points');
+}
+
+// 获取项目地图详情
+export function getProjectMapDetail(projectId) {
+  return get(`/projects/${projectId}/map-detail`);
+}
+
+// 更新项目定位信息
+export function updateProjectLocation(projectId, data) {
+  return put(`/projects/${projectId}/location`, data);
+}
+
 // 获取项目统计数据
 export function getProjectStats(projectId) {
   return get(`/projects/${projectId}/stats`);

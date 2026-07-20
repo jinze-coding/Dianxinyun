@@ -9,6 +9,33 @@ const apiClient = axios.create({
   },
 });
 
+function handleUnauthorized() {
+  localStorage.removeItem('site_platform_token');
+  localStorage.removeItem('site_platform_user');
+  window.dispatchEvent(new CustomEvent('site-platform-auth-expired'));
+}
+
+export async function ensureFileBlob(blob, fallbackMessage = '文件请求失败') {
+  if (!(blob instanceof Blob)) {
+    throw new Error(fallbackMessage);
+  }
+  if (!String(blob.type || '').toLowerCase().includes('json')) {
+    return blob;
+  }
+  try {
+    const result = JSON.parse(await blob.text());
+    const isResultPayload = Number.isFinite(Number(result?.code))
+      && typeof result?.message === 'string'
+      && Object.prototype.hasOwnProperty.call(result, 'data');
+    if (!isResultPayload) return blob;
+    if (Number(result.code) === 401) handleUnauthorized();
+    throw new Error(result.message || fallbackMessage);
+  } catch (error) {
+    if (error instanceof SyntaxError) return blob;
+    throw error;
+  }
+}
+
 // 请求拦截器
 apiClient.interceptors.request.use(
   (config) => {
@@ -27,7 +54,12 @@ apiClient.interceptors.request.use(
 // 响应拦截器
 apiClient.interceptors.response.use(
   (response) => {
-    return response.data;
+    const result = response.data;
+    if (result?.code === 401) {
+      handleUnauthorized();
+      return Promise.reject(new Error(result.message || '登录状态已失效，请重新登录'));
+    }
+    return result;
   },
   (error) => {
     const { response } = error;
@@ -35,9 +67,7 @@ apiClient.interceptors.response.use(
       switch (response.status) {
         case 401:
           // token过期，清除token并跳转登录
-          localStorage.removeItem('site_platform_token');
-          localStorage.removeItem('site_platform_user');
-          window.location.href = '/login';
+          handleUnauthorized();
           break;
         case 403:
           console.error('没有权限');

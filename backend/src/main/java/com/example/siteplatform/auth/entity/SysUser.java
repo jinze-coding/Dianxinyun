@@ -12,6 +12,7 @@ public class SysUser {
 
     private String username;
     private String password;
+    private Integer passwordLoginEnabled;
     private String realName;
     private String phone;
     private String email;

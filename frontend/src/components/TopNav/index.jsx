@@ -309,22 +309,21 @@ export function TopNav({
                   letterSpacing: 0.5,
                 }}
               >
-                配色方案 &nbsp;·&nbsp; 深色 → 浅色
+                配色方案 &nbsp;·&nbsp; 白色
               </div>
               <div
                 style={{
                   height: 4,
                   borderRadius: 2,
                   marginBottom: 12,
-                  background:
-                    'linear-gradient(to right, #060f1e, #0c0814, #0e0e0e, #071412, #1a1f2e, #f0f4f9)',
+                  background: '#f0f4f9',
                   border: `1px solid ${T.borderColor}`,
                 }}
               ></div>
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gridTemplateColumns: '1fr',
                   gap: 8,
                   marginBottom: 12,
                 }}

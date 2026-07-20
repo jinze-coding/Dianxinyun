@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="220" viewBox="0 0 300 220" role="img" aria-label="mock inspection photo">
+  <rect width="300" height="220" fill="#e8eef7"/>
+  <rect x="34" y="36" width="232" height="148" rx="12" fill="#f8fbff" stroke="#9ab0ce" stroke-width="4"/>
+  <circle cx="91" cy="88" r="22" fill="#f7b267"/>
+  <path d="M58 164l52-52 38 36 34-30 60 46H58z" fill="#3a7ca5"/>
+  <text x="150" y="202" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#27415f">mock photo</text>
+</svg>

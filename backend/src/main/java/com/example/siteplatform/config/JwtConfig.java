@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 @Component
 public class JwtConfig {
@@ -40,6 +41,7 @@ public class JwtConfig {
 
         return Jwts.builder()
                 .setClaims(claims)
+                .setId(UUID.randomUUID().toString())
                 .setSubject(subject)
                 .setIssuedAt(now)
                 .setExpiration(expirationDate)
