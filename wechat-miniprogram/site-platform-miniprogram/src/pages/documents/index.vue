@@ -9,6 +9,7 @@ import WorkspaceStatusPill from '@/components/workspace/WorkspaceStatusPill.vue'
 import { WORKSPACE_THEME } from '@/constants/workspaceTheme';
 import { getDocumentFolders, getProjectDocuments, getProjectDocumentSummary } from '@/api/document';
 import { useProjectStore } from '@/stores/project';
+import { useAuthStore } from '@/stores/auth';
 import type { DocumentFolder, DocumentStatus, ProjectDocument, ProjectDocumentSummary } from '@/types';
 import { extensionOf, formatFileSize } from '@/utils/documentFile';
 import { usePageScrollHeight } from '@/utils/navLayout';
@@ -20,6 +21,7 @@ const ACCENT = WORKSPACE_THEME.accent;
 const TINT = WORKSPACE_THEME.tint;
 const PAGE_SIZE = 20;
 const projectStore = useProjectStore();
+const authStore = useAuthStore();
 const summary = ref<ProjectDocumentSummary | null>(null);
 const folders = ref<DocumentFolder[]>([]);
 const documents = ref<ProjectDocument[]>([]);
@@ -38,6 +40,11 @@ const { scrollStyle } = usePageScrollHeight({ bottomRpx: 124, minHeight: 320, in
 
 const projects = computed(() => projectStore.state.projects);
 const currentProject = computed(() => projects.value.find((item) => item.id === projectStore.state.currentProjectId));
+const canUpload = computed(() => Boolean(currentProject.value)
+  && authStore.hasProjectPermission(currentProject.value!.id, 'document.upload'));
+const canManage = computed(() => Boolean(currentProject.value)
+  && Boolean(summary.value?.canManage)
+  && authStore.hasProjectPermission(currentProject.value!.id, 'document.manage'));
 const selectedFolder = computed(() => folders.value.find((item) => item.id === selectedFolderId.value));
 const hasMore = computed(() => documents.value.length < total.value);
 const metrics = computed<WorkspaceMetric[]>(() => [
@@ -57,6 +64,7 @@ function hideNativeTabBar() { uni.hideTabBar({ animation: false, fail: () => und
 
 onShow(async () => {
   hideNativeTabBar();
+  if (!await authStore.ensureRootAccess('/pages/documents/index')) return;
   await refreshAll();
 });
 
@@ -67,6 +75,11 @@ async function refreshAll() {
     await projectStore.loadProjects();
     if (!currentProject.value) {
       summary.value = null; folders.value = []; documents.value = []; total.value = 0;
+      return;
+    }
+    if (!authStore.hasProjectPermission(currentProject.value.id, 'document.view')) {
+      summary.value = null; folders.value = []; documents.value = []; total.value = 0;
+      errorMessage.value = '当前项目无资料查看权限，可切换到其他施工区域';
       return;
     }
     pageNo.value = 1;
@@ -156,9 +169,9 @@ function openDetail(document: ProjectDocument) { navigateTo(`/pages/documents/de
           <WorkspaceMetricStrip :metrics="metrics" :accent="ACCENT" :motion-key="`${currentProject.id}-${summary.total}`" />
 
           <view class="document-toolbar">
-            <button class="upload-entry" @tap="openUpload"><text class="upload-plus">＋</text><view><text>上传资料</text><text>微信文件、拍照或相册</text></view></button>
-            <button v-if="summary.canManage" class="tool-entry" @tap="navigateTo(`/pages/documents/folders?projectId=${currentProject.id}`)"><text class="tool-icon folder-icon"></text><text>目录</text></button>
-            <button v-if="summary.canManage" class="tool-entry" @tap="navigateTo(`/pages/documents/recycle?projectId=${currentProject.id}`)"><text class="tool-icon recycle-icon"></text><text>回收站</text></button>
+            <button v-if="canUpload" class="upload-entry" @tap="openUpload"><text class="upload-plus">＋</text><view><text>上传资料</text><text>微信文件、拍照或相册</text></view></button>
+            <button v-if="canManage" class="tool-entry" @tap="navigateTo(`/pages/documents/folders?projectId=${currentProject.id}`)"><text class="tool-icon folder-icon"></text><text>目录</text></button>
+            <button v-if="canManage" class="tool-entry" @tap="navigateTo(`/pages/documents/recycle?projectId=${currentProject.id}`)"><text class="tool-icon recycle-icon"></text><text>回收站</text></button>
           </view>
 
           <view class="section-block document-section">

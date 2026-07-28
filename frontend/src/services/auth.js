@@ -41,6 +41,32 @@ export function login(username, password) {
   });
 }
 
+// 获取 Web 注册验证码
+export function getRegistrationCaptcha() {
+  return get('/auth/captcha');
+}
+
+// 创建 Web 扫码登录挑战
+export function createWebQrChallenge(data = {}) {
+  return post('/auth/web-qr/challenges', data);
+}
+
+// 查询 Web 扫码登录状态
+export function getWebQrChallengeStatus(challengeId, data) {
+  return post(`/auth/web-qr/challenges/${challengeId}/status`, data);
+}
+
+// 使用一次性交换码换取登录 token
+export function exchangeWebQrChallenge(challengeId, data) {
+  return post(`/auth/web-qr/challenges/${challengeId}/exchange`, data).then((res) => {
+    if (res.code === 200 && res.data?.token) {
+      setToken(res.data.token);
+      setUserInfo(res.data);
+    }
+    return res;
+  });
+}
+
 // 获取当前用户信息
 export function getCurrentUser() {
   return get('/auth/user-info');

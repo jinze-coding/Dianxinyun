@@ -741,45 +741,36 @@ CREATE TABLE quality_issue_log (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='质量问题操作留痕';
 
 -- =============================================
--- 初始化拟真基础测试数据
+-- 初始化单项目演示基础数据
 --
--- 这里只写入作业区域、测试账号和基础台账。工程资料、巡检记录、质量问题
+-- 这里只写入唯一演示项目、管理员和基础台账。工程资料、巡检记录、质量问题
 -- 及其真实物理文件请在后端启动后执行 scripts/seed-realistic-business-data.sh。
 -- =============================================
 
--- 作业区域均为同一建设项目下的现场管理范围。
 INSERT INTO project_info (
     id, project_name, short_name, area, period, phase, project_status,
     safety_goal, quality_goal, manager, contractor, description,
     start_date, end_date, longitude, latitude, province, city, district,
     address, coordinate_type, deleted
-) VALUES
-(1, '1号楼主体结构作业区', '1号楼主体', '28600', '2026.03-2027.08', '主体结构施工', 'normal',
- '重大安全事故为零', '主体结构一次验收合格', '陈志远', '华东建设工程有限公司',
- '覆盖1号楼主体结构、钢筋加工、模板安装和塔吊作业面。',
- '2026-03-01', '2027-08-31', 121.507600, 31.233200, '上海市', '上海市', '浦东新区',
- '上海市浦东新区科创大道建设项目施工现场', 'BD09', 0),
-(2, '地下室机电安装作业区', '地下室机电', '15400', '2026.06-2027.03', '机电安装', 'normal',
- '临时用电事故为零', '机电安装一次验收合格', '陈志远', '华东机电安装有限公司',
- '覆盖地下室配电房、设备机房、管线综合和施工电梯作业面。',
- '2026-06-01', '2027-03-31', 121.508100, 31.232700, '上海市', '上海市', '浦东新区',
- '上海市浦东新区科创大道建设项目地下室施工现场', 'BD09', 0),
-(3, '场区临建及材料堆场', '临建堆场', '9200', '2026.02-2027.06', '临建使用', 'warning',
- '消防和临电事故为零', '材料分区堆放达标', '陈志远', '华东建设工程有限公司',
- '覆盖办公生活临建、钢材堆场、周转材料区和场区临时道路。',
- '2026-02-15', '2027-06-30', 121.506800, 31.232100, '上海市', '上海市', '浦东新区',
- '上海市浦东新区科创大道建设项目临建及材料场', 'BD09', 0);
+) VALUES (
+    1, '智慧工地综合演示项目', '综合演示项目', '12000', '2026.07-2027.12',
+    '主体结构施工', 'normal', '重大安全事故为零', '一次验收合格',
+    '系统管理员', '演示施工单位',
+    '用于 Web 与小程序共同联调的唯一演示项目，所有信息均为虚构演示内容。',
+    '2026-07-01', '2027-12-31', 121.507600, 31.233200,
+    '上海市', '上海市', '浦东新区', '上海市浦东新区智慧工地演示现场',
+    'BD09', 0
+);
 
--- 账号密码均为本地开发密码 admin123；手机号和邮箱为合成测试信息。
+-- 仅预留平台管理员主体，不提供可登录的默认密码。
+-- 完成增量迁移后必须通过 ADMIN_RESET_USERNAME / ADMIN_RESET_PASSWORD 显式设置密码。
 INSERT INTO sys_user (
     id, username, password, password_login_enabled, real_name, phone, email,
     status, deleted
-) VALUES
-(1, 'admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iAt6Z5EH', 1, '系统管理员', '19900001000', 'admin@example.test', 1, 0),
-(2, 'project_admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iAt6Z5EH', 1, '陈志远', '19900001001', 'project.admin@example.test', 1, 0),
-(3, 'inspector', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iAt6Z5EH', 1, '周明远', '19900001002', 'inspector@example.test', 1, 0),
-(4, 'quality_manager', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iAt6Z5EH', 1, '李若岚', '19900001003', 'quality@example.test', 1, 0),
-(5, 'document_manager', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iAt6Z5EH', 1, '王静怡', '19900001004', 'document@example.test', 1, 0);
+) VALUES (
+    1, 'admin', '!EXPLICIT_RESET_REQUIRED!',
+    0, '系统管理员', '19900001000', 'admin@example.test', 1, 0
+);
 
 -- 插入角色
 INSERT INTO sys_role (role_name, role_code, description) VALUES
@@ -791,14 +782,6 @@ INSERT INTO sys_role (role_name, role_code, description) VALUES
 -- 关联用户角色
 INSERT INTO sys_user_role (user_id, role_id)
 SELECT 1, id FROM sys_role WHERE role_code = 'PLATFORM_ADMIN';
-INSERT INTO sys_user_role (user_id, role_id)
-SELECT 2, id FROM sys_role WHERE role_code = 'PROJECT_ADMIN';
-INSERT INTO sys_user_role (user_id, role_id)
-SELECT 3, id FROM sys_role WHERE role_code = 'USER';
-INSERT INTO sys_user_role (user_id, role_id)
-SELECT 4, id FROM sys_role WHERE role_code = 'SAFETY_ADMIN';
-INSERT INTO sys_user_role (user_id, role_id)
-SELECT 5, id FROM sys_role WHERE role_code = 'USER';
 
 -- 插入电箱巡检权限模板
 INSERT INTO inspection_permission_template (template_name, template_code, description, permission_codes, enabled, builtin) VALUES
@@ -806,71 +789,72 @@ INSERT INTO inspection_permission_template (template_name, template_code, descri
 ('巡检记录管理员', 'SAFETY_ADMIN', '查看项目电箱、巡检记录和月表导出，不包含用户授权', 'BOX_VIEW,BOX_MANAGE,BOX_QR_MANAGE,BOX_PUBLIC_ACCESS,INSPECTION_RECORD_VIEW,SUMMARY_VIEW,SUMMARY_EXPORT', 1, 1),
 ('巡检员', 'USER', '查看项目电箱并提交日常巡检', 'BOX_VIEW,INSPECTION_DAILY_SUBMIT', 1, 1);
 
--- 关联用户作业区域权限
+-- 关联管理员项目权限
 INSERT INTO sys_user_project (
     user_id, project_id, project_role_code, inspection_permission_template_id, status
-) VALUES
-(1, 1, 'PROJECT_ADMIN', (SELECT id FROM inspection_permission_template WHERE template_code='PROJECT_ADMIN' LIMIT 1), 'ACTIVE'),
-(1, 2, 'PROJECT_ADMIN', (SELECT id FROM inspection_permission_template WHERE template_code='PROJECT_ADMIN' LIMIT 1), 'ACTIVE'),
-(1, 3, 'PROJECT_ADMIN', (SELECT id FROM inspection_permission_template WHERE template_code='PROJECT_ADMIN' LIMIT 1), 'ACTIVE'),
-(2, 1, 'PROJECT_ADMIN', (SELECT id FROM inspection_permission_template WHERE template_code='PROJECT_ADMIN' LIMIT 1), 'ACTIVE'),
-(2, 2, 'PROJECT_ADMIN', (SELECT id FROM inspection_permission_template WHERE template_code='PROJECT_ADMIN' LIMIT 1), 'ACTIVE'),
-(2, 3, 'PROJECT_ADMIN', (SELECT id FROM inspection_permission_template WHERE template_code='PROJECT_ADMIN' LIMIT 1), 'ACTIVE'),
-(3, 1, 'USER', (SELECT id FROM inspection_permission_template WHERE template_code='USER' LIMIT 1), 'ACTIVE'),
-(3, 2, 'USER', (SELECT id FROM inspection_permission_template WHERE template_code='USER' LIMIT 1), 'ACTIVE'),
-(4, 1, 'SAFETY_ADMIN', (SELECT id FROM inspection_permission_template WHERE template_code='SAFETY_ADMIN' LIMIT 1), 'ACTIVE'),
-(4, 2, 'SAFETY_ADMIN', (SELECT id FROM inspection_permission_template WHERE template_code='SAFETY_ADMIN' LIMIT 1), 'ACTIVE'),
-(5, 1, 'USER', (SELECT id FROM inspection_permission_template WHERE template_code='USER' LIMIT 1), 'ACTIVE'),
-(5, 3, 'USER', (SELECT id FROM inspection_permission_template WHERE template_code='USER' LIMIT 1), 'ACTIVE');
+) VALUES (
+    1, 1, 'PROJECT_ADMIN',
+    (SELECT id FROM inspection_permission_template WHERE template_code='PROJECT_ADMIN' LIMIT 1),
+    'ACTIVE'
+);
 
--- 摄像头资源只保存测试台账，不填写可播放的生产 RTSP 地址。
+-- 演示摄像头不填写可播放的生产 RTSP 地址。
 INSERT INTO camera_resource (
     project_id, camera_name, camera_code, area, camera_type, rtsp_url,
     online_status, deleted
-) VALUES
-(1, '1号楼东入口摄像头', 'CAM-1F-EAST-01', '1号楼东入口', '枪机', NULL, 1, 0),
-(1, '1号塔吊全景摄像头', 'CAM-1F-TC-01', '1号塔吊', '球机', NULL, 1, 0),
-(1, '地下室通道摄像头', 'CAM-1F-B1-01', '地下室一层', '枪机', NULL, 0, 0),
-(2, '地下二层机房摄像头', 'CAM-MEP-B2-01', '制冷机房', '半球', NULL, 1, 0),
-(3, '钢材堆场摄像头', 'CAM-YD-01', '钢材堆场', '球机', NULL, 1, 0);
+) VALUES (
+    1, '演示现场摄像头', 'DEMO-CAM-001', '主体楼东入口', '枪机', NULL, 1, 0
+);
 
--- 设备台账
+-- 演示设备台账
 INSERT INTO device_info (
     project_id, device_name, device_code, device_type, status, height,
     max_load, last_report, remark, deleted
-) VALUES
-(1, '1号塔式起重机', 'TC-01', 'tower_crane', 'running', '65m', '8t', NOW(), '已完成月度维保', 0),
-(1, '1号施工电梯', 'EL-01', 'elevator', 'running', '58m', '2t', NOW(), '人货两用施工升降机', 0),
-(1, '扬尘在线监测仪', 'ENV-01', 'monitor', 'running', NULL, NULL, NOW(), '监测PM2.5、PM10和噪声', 0),
-(2, '地下室临时排水泵组', 'PUMP-B2-01', 'other', 'running', NULL, NULL, NOW(), '两用一备', 0),
-(3, '材料堆场喷淋控制器', 'SPRAY-YD-01', 'other', 'abnormal', NULL, NULL, DATE_SUB(NOW(), INTERVAL 2 HOUR), '2号喷头压力偏低，待检修', 0);
+) VALUES (
+    1, '演示塔式起重机', 'DEMO-TC-001', 'tower_crane', 'running',
+    '60m', '8t', NOW(), '演示设备，不对应真实现场设备', 0
+);
 
--- 合成测试人员，不对应真实身份证或手机号。
+-- 虚构演示人员，不对应真实身份证或手机号。
 INSERT INTO temporary_person (
-    project_id, name, gender, idcard, phone, unit, role, entry_time,
+    id, project_id, name, gender, idcard, phone, unit, role, entry_time,
     status, remark, deleted
-) VALUES
-(1, '张建国', '男', '310101199001010011', '19910002001', '华东建设劳务一队', '钢筋工', '2026-07-01 07:30:00', 'EDUCATED', '已完成三级教育', 0),
-(1, '刘海峰', '男', '310101199002020022', '19910002002', '华东建设劳务一队', '木工', '2026-07-02 07:35:00', 'EDUCATED', '已完成三级教育', 0),
-(1, '赵晓梅', '女', '310101199003030033', '19910002003', '华东建设劳务一队', '资料员', '2026-07-03 08:00:00', 'EDUCATED', '已完成三级教育', 0),
-(2, '孙启明', '男', '310101199004040044', '19910002004', '华东机电安装班组', '电工', '2026-07-12 07:40:00', 'EDUCATED', '特种作业证件已核验', 0),
-(2, '郭文杰', '男', '310101199005050055', '19910002005', '华东机电安装班组', '管道工', '2026-07-18 08:10:00', 'WAIT_EDUCATION', '待完成项目级教育', 0),
-(3, '何志鹏', '男', '310101199006060066', '19910002006', '场区综合班组', '材料员', '2026-06-28 08:00:00', 'EDUCATED', '负责材料进出场登记', 0);
+) VALUES (
+    1, 1, '演示人员', '男', '310101199001010011', '19910002001',
+    '演示施工班组', '电工', NOW(), 'EDUCATED', '虚构演示人员', 0
+);
 
--- 初始电箱台账与首个日检模板
+INSERT INTO person_entry_exit_log (
+    project_id, person_id, action_type, occurred_at,
+    operator_id, operator_name, remark
+) VALUES (
+    1, 1, 'ENTRY', NOW(), 1, '系统管理员', '演示人员入场'
+);
+
+INSERT INTO safety_education_batch (
+    id, project_id, batch_name, edu_type, training_time, training_place,
+    trainer, status, remark, course_hours, exam_type, deleted
+) VALUES (
+    1, 1, '演示人员三级安全教育', '三级安全教育', NOW(),
+    '项目会议室', '系统管理员', 'COMPLETED',
+    '单项目演示数据', 2, '现场问答', 0
+);
+
+INSERT INTO safety_education_person (
+    batch_id, person_id, status, finish_time
+) VALUES (1, 1, 'FINISHED', NOW());
+
+-- 唯一演示电箱与首个日检模板
 INSERT INTO electric_box (
     id, project_id, box_code, box_name, install_location,
     responsible_electrician_id, responsible_electrician_name,
     safety_manager_id, safety_manager_name, qr_code, qr_status, status,
     public_code, public_access_enabled, remark, deleted
-) VALUES
-(1, 1, 'EB-1F-AP-01', '1号楼东侧一级配电箱', '1号楼东侧钢筋加工区', 3, '周明远', 4, '李若岚', 'EBQR-1F-AP-01', 'BOUND', 'ACTIVE', 'PUB-1F-AP-01', 1, '负责钢筋加工区动力和照明', 0),
-(2, 1, 'EB-1F-AP-02', '1号楼西侧二级配电箱', '1号楼西侧木工加工区', 3, '周明远', 4, '李若岚', 'EBQR-1F-AP-02', 'BOUND', 'ACTIVE', 'PUB-1F-AP-02', 1, '木工加工设备专用', 0),
-(3, 1, 'EB-1F-B1-01', '地下室一层照明配电箱', '1号楼地下室一层东通道', 3, '周明远', 4, '李若岚', 'EBQR-1F-B1-01', 'BOUND', 'ACTIVE', 'PUB-1F-B1-01', 1, '地下室临时照明', 0),
-(4, 1, 'EB-1F-TC-01', '1号塔吊专用配电箱', '1号楼北侧1号塔吊基础旁', 3, '周明远', 4, '李若岚', 'EBQR-1F-TC-01', 'BOUND', 'ACTIVE', 'PUB-1F-TC-01', 1, '塔吊动力专用配电箱', 0),
-(5, 2, 'EB-MEP-B2-01', '地下二层机房配电箱', '地下二层制冷机房入口', 3, '周明远', 4, '李若岚', 'EBQR-MEP-B2-01', 'BOUND', 'ACTIVE', 'PUB-MEP-B2-01', 1, '机房安装临时用电', 0),
-(6, 2, 'EB-MEP-EL-01', '施工电梯临时配电箱', '2号施工电梯首层入口', 3, '周明远', 4, '李若岚', 'EBQR-MEP-EL-01', 'BOUND', 'ACTIVE', 'PUB-MEP-EL-01', 1, '施工电梯动力专用', 0),
-(7, 3, 'EB-YD-01', '材料堆场总配电箱', '钢材堆场东南角防护棚内', NULL, NULL, 4, '李若岚', 'EBQR-YD-01', 'BOUND', 'ACTIVE', 'PUB-YD-01', 1, '材料加工及夜间照明', 0);
+) VALUES (
+    1, 1, 'DEMO-EB-001', '演示一级配电箱', '主体楼一层东侧演示区',
+    1, '系统管理员', 1, '系统管理员', 'DEMO-EBQR-001', 'BOUND', 'ACTIVE',
+    'DEMO-PUBLIC-001', 1, 'Web 与小程序扫码巡检演示电箱', 0
+);
 
 INSERT INTO inspection_template (template_code, template_name, frequency, status, remark) VALUES
 ('ELECTRIC_BOX_DAILY', '电箱检查记录表', 'DAILY', 'ACTIVE', '小程序首个现场检查模板');

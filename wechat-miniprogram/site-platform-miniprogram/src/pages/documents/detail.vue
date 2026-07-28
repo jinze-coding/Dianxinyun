@@ -7,12 +7,14 @@ import {
   archiveProjectDocument, deleteProjectDocument, getDocumentFolders, getProjectDocumentDetail,
   unarchiveProjectDocument, updateProjectDocument, uploadProjectDocumentVersion
 } from '@/api/document';
+import { useAuthStore } from '@/stores/auth';
 import type { DocumentFolder, ProjectDocumentDetail, ProjectDocumentVersion } from '@/types';
 import { chooseMessageDocument, formatFileSize, openProjectDocument, saveProjectDocument, type LocalDocumentFile } from '@/utils/documentFile';
 import { getQueryNumber, showToast, switchTab } from '@/utils/navigation';
 
 type SheetMode = 'edit' | 'version' | null;
 
+const authStore = useAuthStore();
 const documentId = ref(0);
 const detail = ref<ProjectDocumentDetail | null>(null);
 const folders = ref<DocumentFolder[]>([]);
@@ -26,8 +28,13 @@ const editForm = reactive({ folderId: 0, title: '', documentNo: '', remark: '' }
 const folderOptions = computed(() => [{ id: 0, folderName: '未分类（根目录）' } as DocumentFolder, ...folders.value]);
 const folderIndex = computed(() => Math.max(0, folderOptions.value.findIndex((item) => item.id === editForm.folderId)));
 const document = computed(() => detail.value?.document);
+const canManageDocument = computed(() => Boolean(document.value)
+  && authStore.hasProjectPermission(document.value!.projectId, 'document.manage'));
+const canUploadVersion = computed(() => Boolean(document.value)
+  && authStore.hasProjectPermission(document.value!.projectId, 'document.upload'));
 
 onLoad(async (query) => {
+  if (!await authStore.ensureRootAccess('/pages/documents/index')) return;
   documentId.value = getQueryNumber(query?.id, 0);
   await loadDetail();
 });
@@ -36,7 +43,18 @@ async function loadDetail() {
   if (!documentId.value) { errorMessage.value = '资料参数无效'; loading.value = false; return; }
   loading.value = true;
   errorMessage.value = '';
-  try { detail.value = await getProjectDocumentDetail(documentId.value); }
+  try {
+    const loadedDetail = await getProjectDocumentDetail(documentId.value);
+    if (!await authStore.ensureProjectPermission(
+      '/pages/documents/index',
+      Number(loadedDetail.document.projectId),
+      'document.view'
+    )) {
+      detail.value = null;
+      return;
+    }
+    detail.value = loadedDetail;
+  }
   catch (error) { errorMessage.value = error instanceof Error ? error.message : '资料详情加载失败'; }
   finally { loading.value = false; }
 }
@@ -62,7 +80,7 @@ async function download(version?: ProjectDocumentVersion) {
 }
 
 async function openEdit() {
-  if (!document.value?.canEdit) return;
+  if (!document.value?.canEdit || !canManageDocument.value) return;
   try { folders.value = await getDocumentFolders(document.value.projectId); }
   catch { folders.value = []; }
   Object.assign(editForm, {
@@ -72,7 +90,10 @@ async function openEdit() {
   sheetMode.value = 'edit';
 }
 
-function openVersion() { versionFile.value = null; versionNote.value = ''; sheetMode.value = 'version'; }
+function openVersion() {
+  if (!canUploadVersion.value) return;
+  versionFile.value = null; versionNote.value = ''; sheetMode.value = 'version';
+}
 
 async function chooseVersionFile() {
   try { versionFile.value = await chooseMessageDocument(); }
@@ -158,7 +179,7 @@ function remove() {
             <WorkspaceStatusPill :label="document.status === 'ARCHIVED' ? '已归档' : '使用中'" :tone="document.status === 'ARCHIVED' ? 'gray' : 'green'" />
           </view>
 
-          <view class="primary-actions"><button @tap="preview()"><text class="action-eye"></text><text>预览</text></button><button @tap="download()"><text class="action-download"></text><text>下载</text></button><button v-if="document.canEdit" @tap="openVersion"><text class="action-version">V+</text><text>新版本</text></button><button v-if="document.canEdit" @tap="openEdit"><text class="action-edit"></text><text>编辑</text></button></view>
+          <view class="primary-actions"><button @tap="preview()"><text class="action-eye"></text><text>预览</text></button><button @tap="download()"><text class="action-download"></text><text>下载</text></button><button v-if="document.canEdit && canUploadVersion" @tap="openVersion"><text class="action-version">V+</text><text>新版本</text></button><button v-if="document.canEdit && canManageDocument" @tap="openEdit"><text class="action-edit"></text><text>编辑</text></button></view>
 
           <view class="detail-section">
             <view class="detail-head"><text>资料属性</text><text>基础信息</text></view>
@@ -175,7 +196,7 @@ function remove() {
             <view class="activity-list"><view v-for="activity in detail.activities" :key="activity.id" class="activity-row"><text class="activity-dot"></text><view><text>{{ activity.operationLabel }}</text><text>{{ activity.description || '无补充说明' }}</text><text>{{ activity.operatorName || '-' }} · {{ formatTime(activity.createTime) }}</text></view></view><view v-if="!detail.activities.length" class="empty-line">暂无操作记录</view></view>
           </view>
 
-          <view v-if="document.canEdit || (document.canManage && document.status === 'ARCHIVED')" class="manage-section">
+          <view v-if="canManageDocument && (document.canEdit || (document.canManage && document.status === 'ARCHIVED'))" class="manage-section">
             <button v-if="document.canEdit && document.status === 'ACTIVE'" @tap="archive">归档资料</button>
             <button v-if="document.canManage && document.status === 'ARCHIVED'" @tap="unarchive">恢复归档</button>
             <button v-if="document.canEdit" class="danger" @tap="remove">移入回收站</button>

@@ -3,11 +3,13 @@ import { computed, reactive, ref } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
 import { createProjectDocument, getDocumentFolders } from '@/api/document';
+import { useAuthStore } from '@/stores/auth';
 import { useProjectStore } from '@/stores/project';
 import type { DocumentFolder } from '@/types';
 import { chooseDocumentImage, chooseMessageDocument, formatFileSize, type LocalDocumentFile } from '@/utils/documentFile';
 import { getQueryNumber, showToast } from '@/utils/navigation';
 
+const authStore = useAuthStore();
 const projectStore = useProjectStore();
 const projectId = ref(0);
 const folders = ref<DocumentFolder[]>([]);
@@ -20,11 +22,13 @@ const folderIndex = computed(() => Math.max(0, folderOptions.value.findIndex((it
 const currentProject = computed(() => projectStore.state.projects.find((item) => item.id === projectId.value));
 
 onLoad(async (query) => {
-  projectId.value = getQueryNumber(query?.projectId, projectStore.state.currentProjectId || 0);
   form.folderId = getQueryNumber(query?.folderId, 0);
   try {
     await projectStore.loadProjects();
+    projectId.value = getQueryNumber(query?.projectId, projectStore.state.currentProjectId || 0);
     if (!projectId.value) projectId.value = projectStore.state.currentProjectId;
+    if (!await authStore.ensureProjectPermission(
+      '/pages/documents/index', projectId.value, 'document.upload')) return;
     folders.value = projectId.value ? await getDocumentFolders(projectId.value) : [];
   } catch (error) { showToast(error instanceof Error ? error.message : '目录加载失败'); }
   finally { loading.value = false; }

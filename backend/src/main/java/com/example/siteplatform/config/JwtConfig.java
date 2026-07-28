@@ -29,9 +29,14 @@ public class JwtConfig {
     }
 
     public String generateToken(Long userId, String username) {
+        return generateToken(userId, username, 1);
+    }
+
+    public String generateToken(Long userId, String username, Integer credentialVersion) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", userId);
         claims.put("username", username);
+        claims.put("credentialVersion", credentialVersion == null ? 1 : credentialVersion);
         return createToken(claims, username);
     }
 
@@ -64,6 +69,15 @@ public class JwtConfig {
     public String getUsernameFromToken(String token) {
         Claims claims = parseToken(token);
         return claims.getSubject();
+    }
+
+    public Integer getCredentialVersionFromToken(String token) {
+        Claims claims = parseToken(token);
+        return claims.get("credentialVersion", Integer.class);
+    }
+
+    public long getExpirationMillis() {
+        return expiration;
     }
 
     public boolean isTokenExpired(String token) {

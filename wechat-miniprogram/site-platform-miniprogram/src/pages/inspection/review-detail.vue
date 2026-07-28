@@ -5,10 +5,12 @@ import AppNavBar from '@/components/AppNavBar.vue';
 import { getInspectionRecordDetail, reviewInspectionRecord } from '@/api/inspection';
 import { getProjectMembers } from '@/api/projectMember';
 import { spotCheckCategories } from '@/constants/spotCheck';
+import { useAuthStore } from '@/stores/auth';
 import type { CheckResult, InspectionRecord, InspectionReviewLog, ProjectMember } from '@/types';
 import { usePageScrollHeight } from '@/utils/navLayout';
 import { getQueryNumber, navigateTo, showToast, switchTab } from '@/utils/navigation';
 
+const authStore = useAuthStore();
 const record = ref<InspectionRecord>();
 const comment = ref('');
 const requirement = ref(spotCheckCategories[0].template);
@@ -25,6 +27,7 @@ const selectedAssigneeName = ref('');
 const { scrollStyle } = usePageScrollHeight({ bottomRpx: 150, minHeight: 240 });
 
 onShow(async () => {
+  if (!await authStore.ensureRootAccess('/pages/inspection/index')) return;
   const pages = getCurrentPages();
   const current = pages[pages.length - 1] as unknown as { options?: Record<string, string> };
   const id = getQueryNumber(current.options?.id || current.options?.recordId, 5001);
@@ -39,6 +42,11 @@ onShow(async () => {
   }
   if (!projectId.value && record.value?.projectId) {
     projectId.value = Number(record.value.projectId);
+  }
+  if (!projectId.value || !await authStore.ensureProjectPermission(
+    '/pages/inspection/index', projectId.value, 'inspection.manage', 'INSPECTION_REVIEW')) {
+    record.value = undefined;
+    return;
   }
   comment.value = record.value?.reviewComment || '';
   await loadProjectMembers();

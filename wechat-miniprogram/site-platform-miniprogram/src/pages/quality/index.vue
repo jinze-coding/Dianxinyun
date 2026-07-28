@@ -12,6 +12,7 @@ import { createQualityIssue, getQualityIssue, getQualityIssues, getQualitySummar
 import { deleteFileResources, downloadFilePaths, downloadFileToTempPath, getFileResources, uploadPhotoIds, type FileResourceItem } from '@/api/file';
 import { getProjectMembers } from '@/api/projectMember';
 import { useProjectStore } from '@/stores/project';
+import { useAuthStore } from '@/stores/auth';
 import type { ProjectMember, QualityIssue, QualityIssueStatus, QualitySummary } from '@/types';
 import { usePageScrollHeight } from '@/utils/navLayout';
 import { showToast } from '@/utils/navigation';
@@ -22,6 +23,7 @@ type SheetMode = 'create' | 'detail' | 'documents' | null;
 const ACCENT = WORKSPACE_THEME.accent;
 const TINT = WORKSPACE_THEME.tint;
 const projectStore = useProjectStore();
+const authStore = useAuthStore();
 const summary = ref<QualitySummary | null>(null);
 const issues = ref<QualityIssue[]>([]);
 const members = ref<ProjectMember[]>([]);
@@ -44,7 +46,12 @@ const { scrollStyle } = usePageScrollHeight({ bottomRpx: 124, minHeight: 320 });
 const createForm = reactive({ title: '', location: '', description: '', severity: 'NORMAL' as 'NORMAL' | 'WARNING' | 'DANGER', assigneeIndex: 0, deadline: '' });
 const projects = computed(() => projectStore.state.projects);
 const currentProject = computed(() => projects.value.find((item) => item.id === projectStore.state.currentProjectId));
-const canManage = computed(() => Boolean(summary.value?.canManage));
+const canManage = computed(() => Boolean(summary.value?.canManage) && Boolean(currentProject.value)
+  && authStore.hasProjectPermission(currentProject.value!.id, 'quality.manage'));
+const canRectify = computed(() => Boolean(selectedIssue.value)
+  && authStore.hasProjectPermission(selectedIssue.value!.projectId, 'quality.rectify'));
+const canReview = computed(() => Boolean(selectedIssue.value)
+  && authStore.hasProjectPermission(selectedIssue.value!.projectId, 'quality.review'));
 const filteredIssues = computed(() => {
   const text = keyword.value.trim().toLowerCase();
   if (!text) return issues.value;
@@ -64,7 +71,11 @@ const filters = computed(() => [
 ]);
 
 function hideNativeTabBar() { uni.hideTabBar({ animation: false, fail: () => undefined }); }
-onShow(async () => { hideNativeTabBar(); await refresh(); });
+onShow(async () => {
+  hideNativeTabBar();
+  if (!await authStore.ensureRootAccess('/pages/quality/index')) return;
+  await refresh();
+});
 
 async function refresh() {
   loading.value = true;
@@ -73,6 +84,11 @@ async function refresh() {
     await projectStore.loadProjects();
     if (!projectStore.state.currentProjectId) { summary.value = null; issues.value = []; return; }
     const projectId = projectStore.state.currentProjectId;
+    if (!authStore.hasProjectPermission(projectId, 'quality.view')) {
+      summary.value = null; issues.value = []; qualityDocuments.value = [];
+      errorMessage.value = '当前项目无质量管理查看权限，可切换到其他施工区域';
+      return;
+    }
     const [summaryResult, issueResult, documentResult] = await Promise.all([getQualitySummary(projectId), getQualityIssues(projectId, activeFilter.value), getFileResources(projectId, 'QUALITY_DOCUMENT')]);
     summary.value = summaryResult;
     issues.value = issueResult;
@@ -230,8 +246,8 @@ async function openDocument(file: FileResourceItem) {
           <text class="issue-detail-title">{{ selectedIssue.title }}</text>
           <view class="detail-lines"><view><text>问题位置</text><text>{{ selectedIssue.location || '未设置' }}</text></view><view><text>整改负责人</text><text>{{ selectedIssue.assigneeName || '未指定' }}</text></view><view><text>整改期限</text><text>{{ selectedIssue.deadline || '未设置' }}</text></view><view><text>问题描述</text><text>{{ selectedIssue.description || '无' }}</text></view></view>
           <view v-if="detailPhotoPaths.length" class="quality-photo-grid detail-photos"><image v-for="path in detailPhotoPaths" :key="path" :src="path" mode="aspectFill" @tap="previewDetailPhoto(path)" /></view>
-          <view v-if="selectedIssue.canRectify" class="form-field action-field"><text class="form-label">整改说明 *</text><textarea v-model="rectificationText" class="form-textarea" placeholder="填写整改措施和结果" /><button class="photo-picker" @tap="choosePhotos('rectification')">+ 整改照片 *</button><view class="quality-photo-grid"><image v-for="path in rectificationPhotoPaths" :key="path" :src="path" mode="aspectFill" /></view><button class="primary-action single-action" :disabled="submitting" @tap="submitRectification">提交复查</button></view>
-          <view v-if="selectedIssue.canReview" class="form-field action-field"><text class="form-label">复查意见</text><textarea v-model="reviewComment" class="form-textarea" placeholder="退回时必须填写意见" /><button class="photo-picker" @tap="choosePhotos('review')">+ 复查照片（可选）</button><view class="quality-photo-grid"><image v-for="path in reviewPhotoPaths" :key="path" :src="path" mode="aspectFill" /></view><view class="form-actions"><button class="secondary-action reject" :disabled="submitting" @tap="submitReview(false)">退回整改</button><button class="primary-action" :disabled="submitting" @tap="submitReview(true)">复查通过</button></view></view>
+          <view v-if="selectedIssue.canRectify && canRectify" class="form-field action-field"><text class="form-label">整改说明 *</text><textarea v-model="rectificationText" class="form-textarea" placeholder="填写整改措施和结果" /><button class="photo-picker" @tap="choosePhotos('rectification')">+ 整改照片 *</button><view class="quality-photo-grid"><image v-for="path in rectificationPhotoPaths" :key="path" :src="path" mode="aspectFill" /></view><button class="primary-action single-action" :disabled="submitting" @tap="submitRectification">提交复查</button></view>
+          <view v-if="selectedIssue.canReview && canReview" class="form-field action-field"><text class="form-label">复查意见</text><textarea v-model="reviewComment" class="form-textarea" placeholder="退回时必须填写意见" /><button class="photo-picker" @tap="choosePhotos('review')">+ 复查照片（可选）</button><view class="quality-photo-grid"><image v-for="path in reviewPhotoPaths" :key="path" :src="path" mode="aspectFill" /></view><view class="form-actions"><button class="secondary-action reject" :disabled="submitting" @tap="submitReview(false)">退回整改</button><button class="primary-action" :disabled="submitting" @tap="submitReview(true)">复查通过</button></view></view>
           <view v-if="selectedIssue.rectificationDescription" class="rectification-result"><text>最近整改说明</text><text>{{ selectedIssue.rectificationDescription }}</text></view>
           <view class="quality-timeline"><text class="timeline-title">操作留痕</text><view v-for="log in selectedIssue.logs || []" :key="log.id"><text>{{ actionLabel(log.actionType) }}</text><text>{{ log.operatorName || '-' }} · {{ formatTime(log.createTime) }}</text><text>{{ log.comment || '无补充说明' }}</text></view><text v-if="!(selectedIssue.logs || []).length" class="empty-line">暂无留痕</text></view>
         </template>

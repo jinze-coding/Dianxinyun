@@ -20,6 +20,7 @@ import {
   updateProjectDocument,
   uploadProjectDocumentVersion,
 } from '../../services/document';
+import { hasProjectPermission, isPlatformAdmin } from '../../utils/permissions';
 import './index.css';
 
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
@@ -97,7 +98,7 @@ function FolderTree({ folders, selectedId, onSelect, onCreate, onRename, onDelet
   );
 }
 
-export default function DocumentManagementPage({ projectId, projectList, theme: T }) {
+export default function DocumentManagementPage({ projectId, projectList, theme: T, currentUser }) {
   const [folders, setFolders] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [summary, setSummary] = useState({ total: 0, active: 0, archived: 0, recentUpdates: 0 });
@@ -124,7 +125,10 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
   const projectName = projectList?.find((item) => item.id === projectId)?.projectName || '当前作业区域';
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const allSelected = documents.length > 0 && documents.every((item) => selectedIds.includes(item.id));
-  const canManage = summary.canManage === true;
+  const canManage = summary.canManage === true
+    && (isPlatformAdmin(currentUser) || hasProjectPermission(currentUser, projectId, 'document.manage'));
+  const canUpload = isPlatformAdmin(currentUser)
+    || hasProjectPermission(currentUser, projectId, 'document.upload');
   const themeVars = {
     '--dm-page-bg': T.pageBg,
     '--dm-card-bg': T.cardBg,
@@ -354,7 +358,7 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
         <div><span>{projectName}</span><h1>资料管理</h1><p>工程资料库</p></div>
         <div className="dm-header-actions">
           {canManage && <button className="dm-button dm-button-secondary" onClick={() => { setRecycle(!recycle); setPageNo(1); }}>{recycle ? '返回资料库' : '回收站'}</button>}
-          <button className="dm-button dm-button-primary" onClick={startUpload}>上传资料</button>
+          {canUpload && <button className="dm-button dm-button-primary" onClick={startUpload}>上传资料</button>}
         </div>
       </header>
 
@@ -465,7 +469,7 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
               <div className="dm-drawer-actions">
                 <button onClick={() => openPreview(detail.document)}>预览</button>
                 <button onClick={() => download(detail.document)}>下载</button>
-                {detail.document.canEdit && detail.document.status === 'ACTIVE' && <button onClick={() => setVersionState({ document: detail.document, file: null, changeNote: '' })}>上传新版本</button>}
+                {detail.document.canEdit && canUpload && detail.document.status === 'ACTIVE' && <button onClick={() => setVersionState({ document: detail.document, file: null, changeNote: '' })}>上传新版本</button>}
                 {detail.document.canEdit && <button onClick={() => setEditState({ document: detail.document, form: { folderId: detail.document.folderId, documentNo: detail.document.documentNo || '', title: detail.document.title, remark: detail.document.remark || '' } })}>编辑属性</button>}
                 {detail.document.canEdit && <button onClick={() => handleArchive(detail.document)}>{detail.document.status === 'ARCHIVED' ? '恢复归档' : '归档'}</button>}
                 {detail.document.canEdit && <button className="is-danger" onClick={() => handleDelete(detail.document)}>删除</button>}

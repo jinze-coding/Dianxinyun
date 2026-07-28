@@ -6,7 +6,19 @@
     },
     {
       "path": "pages/wechat-bind/index",
-      "style": { "navigationStyle": "custom", "navigationBarTitleText": "内部人员绑定" }
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "绑定系统账号" }
+    },
+    {
+      "path": "pages/register/index",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "申请注册账号" }
+    },
+    {
+      "path": "pages/registration-status/index",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "注册申请进度" }
+    },
+    {
+      "path": "pages/web-login-confirm/index",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "确认网页登录" }
     },
     {
       "path": "pages/inspection/index",
@@ -67,6 +79,7 @@
   ],
   "subPackages": [],
   "tabBar": {
+    "custom": true,
     "color": "#7A8491",
     "selectedColor": "#315F86",
     "backgroundColor": "#FFFFFF",

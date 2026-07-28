@@ -11,9 +11,7 @@ import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.common.PageResult;
 import com.example.siteplatform.electricbox.entity.ElectricBox;
 import com.example.siteplatform.electricbox.mapper.ElectricBoxMapper;
-import com.example.siteplatform.project.dto.CreateProjectUserRequest;
 import com.example.siteplatform.project.dto.ProjectMemberRequest;
-import com.example.siteplatform.project.dto.ProjectMemberVO;
 import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.project.service.ProjectMemberService;
@@ -28,7 +26,6 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
-import java.util.UUID;
 
 @Service
 public class WechatAccessApplicationService {
@@ -90,42 +87,29 @@ public class WechatAccessApplicationService {
         if (request.getPermissionTemplateId() == null) throw new BusinessException("巡检权限模板不能为空");
         if (!StringUtils.hasText(request.getComment())) throw new BusinessException("审批意见不能为空");
         String accountMode = StringUtils.hasText(request.getAccountMode())
-                ? request.getAccountMode().trim().toUpperCase() : (request.getUserId() != null || application.getMatchedUserId() != null ? "EXISTING" : "CREATE");
-        if (!"EXISTING".equals(accountMode) && !"CREATE".equals(accountMode)) throw new BusinessException("账号处理方式只支持 EXISTING 或 CREATE");
-        Long userId = "EXISTING".equals(accountMode)
-                ? (request.getUserId() != null ? request.getUserId() : application.getMatchedUserId()) : null;
-        if ("EXISTING".equals(accountMode) && userId == null) throw new BusinessException("请选择要绑定的已有账号");
+                ? request.getAccountMode().trim().toUpperCase() : "EXISTING";
+        if (!"EXISTING".equals(accountMode)) {
+            throw new BusinessException("账号注册请使用统一注册申请，不再支持微信权限申请自动创建账号");
+        }
+        Long userId = request.getUserId() != null ? request.getUserId() : application.getMatchedUserId();
+        if (userId == null) throw new BusinessException("请选择要绑定的已有账号");
         String projectRole = StringUtils.hasText(request.getProjectRoleCode())
                 ? request.getProjectRoleCode().trim().toUpperCase() : ProjectPermissionService.ROLE_USER;
-        if (userId == null) {
-            CreateProjectUserRequest create = new CreateProjectUserRequest();
-            create.setProjectId(application.getProjectId());
-            create.setUsername(generateWechatUsername(application));
-            create.setRealName(StringUtils.hasText(request.getRealName()) ? request.getRealName() : application.getRealName());
-            create.setPhone(application.getPhone());
-            create.setPassword(UUID.randomUUID().toString() + UUID.randomUUID());
-            create.setPasswordLoginEnabled(0);
-            create.setGlobalRoleCode(ProjectPermissionService.ROLE_SAFETY_ADMIN.equals(projectRole)
-                    ? ProjectPermissionService.ROLE_SAFETY_ADMIN : ProjectPermissionService.ROLE_USER);
-            create.setProjectRoleCode(projectRole);
-            create.setPermissionTemplateId(request.getPermissionTemplateId());
-            ProjectMemberVO member = projectMemberService.createUserAndJoinProject(create, currentUser);
-            userId = member.getUserId();
-        } else {
-            SysUser user = userMapper.selectById(userId);
-            if (user == null) throw BusinessException.notFound("待绑定账号不存在");
-            ProjectMemberRequest member = new ProjectMemberRequest();
-            member.setProjectId(application.getProjectId());
-            member.setUserId(userId);
-            member.setProjectRoleCode(projectRole);
-            member.setPermissionTemplateId(request.getPermissionTemplateId());
-            projectMemberService.saveMember(member, currentUser);
-        }
+        SysUser selectedUser = userMapper.selectById(userId);
+        if (selectedUser == null) throw BusinessException.notFound("待绑定账号不存在");
+        ProjectMemberRequest member = new ProjectMemberRequest();
+        member.setProjectId(application.getProjectId());
+        member.setUserId(userId);
+        member.setProjectRoleCode(projectRole);
+        member.setPermissionTemplateId(request.getPermissionTemplateId());
+        projectMemberService.saveMember(member, currentUser);
         SysUser user = userMapper.selectById(userId);
         wechatAuthService.bind(user, application.getAppId(), application.getOpenid(), null, application.getPhone());
         finish(application, "APPROVED", request.getComment(), currentUser);
         application.setMatchedUserId(userId);
-        applicationMapper.updateById(application);
+        if (applicationMapper.updateById(application) != 1) {
+            throw BusinessException.of(409, "微信权限申请状态已变化，请刷新后重试");
+        }
         recordApplicationOperation(application, currentUser, "APPROVE_WECHAT_APPLICATION");
         return toVO(application);
     }
@@ -137,7 +121,9 @@ public class WechatAccessApplicationService {
         String comment = request == null ? null : request.getComment();
         if (!StringUtils.hasText(comment)) throw new BusinessException("拒绝原因不能为空");
         finish(application, "REJECTED", comment, currentUser);
-        applicationMapper.updateById(application);
+        if (applicationMapper.updateById(application) != 1) {
+            throw BusinessException.of(409, "微信权限申请状态已变化，请刷新后重试");
+        }
         recordApplicationOperation(application, currentUser, "REJECT_WECHAT_APPLICATION");
         return toVO(application);
     }
@@ -152,9 +138,14 @@ public class WechatAccessApplicationService {
     }
 
     private WechatAccessApplication requirePending(Long id) {
-        WechatAccessApplication application = applicationMapper.selectById(id);
+        WechatAccessApplication application = applicationMapper.selectOne(
+                new LambdaQueryWrapper<WechatAccessApplication>()
+                        .eq(WechatAccessApplication::getId, id)
+                        .last("LIMIT 1 FOR UPDATE"));
         if (application == null) throw BusinessException.notFound("微信权限申请不存在");
-        if (!"PENDING".equals(application.getStatus())) throw new BusinessException("该申请已处理");
+        if (!"PENDING".equals(application.getStatus())) {
+            throw BusinessException.of(409, "该申请已处理");
+        }
         return application;
     }
 
@@ -178,18 +169,6 @@ public class WechatAccessApplicationService {
         vo.setApplicationType(matchedCount != null && matchedCount > 1 ? "MULTIPLE_MATCH"
                 : application.getMatchedUserId() == null ? "NEW_REGISTRATION" : "PROJECT_ACCESS");
         return vo;
-    }
-
-    private String generateWechatUsername(WechatAccessApplication application) {
-        String digits = StringUtils.hasText(application.getPhone()) ? application.getPhone().replaceAll("\\D", "") : "";
-        String suffix = digits.length() > 4 ? digits.substring(digits.length() - 4) : digits;
-        String base = "wx_" + (StringUtils.hasText(suffix) ? suffix : "user") + "_" + application.getId();
-        String candidate = base;
-        int index = 1;
-        while (userMapper.selectCount(new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, candidate)) > 0) {
-            candidate = base + "_" + index++;
-        }
-        return candidate;
     }
 
     private void recordApplicationOperation(WechatAccessApplication application, SysUser operator, String type) {

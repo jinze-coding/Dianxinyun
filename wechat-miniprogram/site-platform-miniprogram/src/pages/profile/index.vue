@@ -8,6 +8,8 @@ import { useAuthStore } from '@/stores/auth';
 import { useProjectStore } from '@/stores/project';
 import { usePageScrollHeight } from '@/utils/navLayout';
 import { navigateTo } from '@/utils/navigation';
+import { bindCurrentUserWechat, unbindCurrentUserWechat } from '@/api/auth';
+import { getFreshWechatCode } from '@/utils/wechat';
 
 const ACCENT = WORKSPACE_THEME.accent;
 const TINT = WORKSPACE_THEME.tint;
@@ -15,6 +17,9 @@ const authStore = useAuthStore();
 const projectStore = useProjectStore();
 const loading = ref(false);
 const errorMessage = ref('');
+const bindingBusy = ref(false);
+const showUnbindForm = ref(false);
+const unbindPassword = ref('');
 const { scrollStyle } = usePageScrollHeight({ bottomRpx: 124, minHeight: 320 });
 
 const user = computed(() => authStore.state.user);
@@ -31,9 +36,18 @@ const roleLabel = computed(() => {
   if (user.value?.roles?.includes('PLATFORM_ADMIN')) return '平台管理员';
   if (currentRole.value?.projectRoleCode === 'PROJECT_ADMIN') return '项目领导';
   if (currentRole.value?.projectRoleCode === 'SAFETY_ADMIN') return '项目领导';
-  return '巡检人员';
+  return '普通用户';
 });
 const authorizedProjectCount = computed(() => projectStore.state.projects.length);
+const wechatBound = computed(() => user.value?.wechatBound === true
+  || user.value?.wechatBindingStatus === 'BOUND'
+  || user.value?.wechatBindingStatus === 'ACTIVE');
+const requiresPasswordForUnbind = computed(() => {
+  const value = user.value?.passwordLoginEnabled;
+  return value === true || value === 1 || value === '1'
+    || String(value || '').toUpperCase() === 'TRUE'
+    || String(value || '').toUpperCase() === 'ENABLED';
+});
 
 function hideNativeTabBar() {
   uni.hideTabBar({ animation: false, fail: () => undefined });
@@ -57,6 +71,38 @@ async function logout() {
     await authStore.logout();
   } finally {
     uni.reLaunch({ url: '/pages/login/index' });
+  }
+}
+
+async function bindWechat() {
+  if (bindingBusy.value) return;
+  bindingBusy.value = true;
+  try {
+    await bindCurrentUserWechat(await getFreshWechatCode());
+    await authStore.loadUser();
+    uni.showToast({ title: '微信绑定成功', icon: 'none' });
+  } catch (error) {
+    uni.showToast({ title: error instanceof Error ? error.message : '绑定失败', icon: 'none' });
+  } finally {
+    bindingBusy.value = false;
+  }
+}
+
+async function unbindWechat() {
+  if (requiresPasswordForUnbind.value && !unbindPassword.value) {
+    uni.showToast({ title: '请输入当前账号密码', icon: 'none' });
+    return;
+  }
+  bindingBusy.value = true;
+  try {
+    await unbindCurrentUserWechat(unbindPassword.value || undefined);
+    authStore.clearLocalSession();
+    uni.showToast({ title: '微信已解绑，请重新登录', icon: 'none' });
+    setTimeout(() => uni.reLaunch({ url: '/pages/login/index' }), 500);
+  } catch (error) {
+    uni.showToast({ title: error instanceof Error ? error.message : '解绑失败', icon: 'none' });
+  } finally {
+    bindingBusy.value = false;
   }
 }
 </script>
@@ -93,6 +139,30 @@ async function logout() {
           <view class="info-row"><text>授权项目</text><text>{{ authorizedProjectCount }} 个</text></view>
         </view>
 
+        <view class="account-card">
+          <view class="card-title"><text>微信快捷登录</text><text>{{ wechatBound ? '已绑定' : '未绑定' }}</text></view>
+          <view class="binding-body">
+            <view class="binding-copy">
+              <text>{{ wechatBound ? '当前微信可直接登录小程序和确认 Web 扫码登录。' : '绑定当前微信后，可使用微信快捷登录。' }}</text>
+              <text v-if="wechatBound">解绑会立即注销当前账号的全部登录会话。</text>
+            </view>
+            <button v-if="!wechatBound" class="bind-button" :disabled="bindingBusy" @tap="bindWechat">
+              {{ bindingBusy ? '绑定中…' : '绑定当前微信' }}
+            </button>
+            <template v-else>
+              <button class="unbind-entry" @tap="showUnbindForm = !showUnbindForm">{{ showUnbindForm ? '取消解绑' : '解除绑定' }}</button>
+              <view v-if="showUnbindForm" class="unbind-form">
+                <template v-if="requiresPasswordForUnbind">
+                  <text>请输入当前账号密码完成身份复核</text>
+                  <input v-model="unbindPassword" password placeholder="当前账号密码" />
+                </template>
+                <text v-else class="blocked-tip">当前账号未启用密码登录，请联系平台管理员处理微信解绑。</text>
+                <button v-if="requiresPasswordForUnbind" :disabled="bindingBusy" @tap="unbindWechat">确认解绑并退出</button>
+              </view>
+            </template>
+          </view>
+        </view>
+
         <button class="logout-button" :disabled="loading" @tap="logout">退出登录</button>
       </view>
     </scroll-view>
@@ -126,4 +196,15 @@ async function logout() {
 .info-row text:first-child { color: #7A8798; font-size: 22rpx; }
 .info-row text:last-child { color: #344054; font-size: 23rpx; font-weight: 650; }
 .logout-button { min-height: 78rpx; border-radius: 15rpx; background: #fff; box-shadow: 0 7rpx 22rpx rgba(43,56,72,.04); color: #BE5555; font-size: 23rpx; font-weight: 750; }
+.binding-body { padding: 22rpx; }
+.binding-copy text { display: block; color: #6F7D8D; font-size: 21rpx; line-height: 1.55; }
+.binding-copy text + text { margin-top: 4rpx; color: #B06A50; }
+.bind-button,.unbind-entry { width: 100%; min-height: 68rpx; margin-top: 18rpx; border-radius: 13rpx; font-size: 22rpx; font-weight: 750; }
+.bind-button { background: #EAF6F1; color: #2F8065; }
+.unbind-entry { border: 1rpx solid #E9CFCF; background: #FFF8F8; color: #B75353; }
+.unbind-form { margin-top: 14rpx; padding: 18rpx; border-radius: 13rpx; background: #FAF6F6; }
+.unbind-form > text { display: block; color: #7A6464; font-size: 20rpx; }
+.unbind-form input { height: 70rpx; margin-top: 12rpx; padding: 0 16rpx; border: 1rpx solid #E2CCCC; border-radius: 11rpx; background: #fff; font-size: 21rpx; }
+.unbind-form button { width: 100%; min-height: 64rpx; margin-top: 12rpx; border-radius: 11rpx; background: #B75353; color: #fff; font-size: 21rpx; font-weight: 750; }
+.blocked-tip { color: #B75353 !important; }
 </style>

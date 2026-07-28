@@ -1,196 +1,178 @@
 # AGENTS.md
 
-本文件给 Codex / AI 编程助手使用。进入本仓库后，先阅读本文件，再阅读 `docs/新对话交接文档.md` 和相关专题文档。
+本文件供 Codex / AI 编程助手使用。进入本仓库后，必须先阅读本文件，再阅读 `docs/新对话交接文档.md`、`docs/开发状态.md` 和任务相关专题文档。所有判断以当前代码和当前项目文档为准，不依赖旧聊天记录。
 
-## 项目简介
+## 项目与正式范围
 
 项目名称：电信云平台项目现场综合管理系统。
 
-系统定位：面向多个建设项目现场的综合管理平台，承载地图总览、项目概况、临时人员与安全教育、资料管理、摄像头与设备监控等能力。
+当前正式产品是 Web 与微信小程序共用后端、数据库和文件存储的多项目现场管理平台。正式权限目录只包括：
 
-当前阶段：前后端主体已搭建，部分业务接口已接入真实后端，部分页面仍保留 mock 数据或前端内存状态。权限和项目隔离尚未全部完成。
+- 资料管理：目录、资料、版本、预览下载、归档和回收站。
+- 巡检管理：电箱台账、每日巡检、记录查询、月表和统一二维码。
+- 质量管理：问题发起、整改、复查和操作留痕。
+- 系统管理：注册审核、用户、角色权限、菜单功能、项目授权、微信绑定和操作日志。
 
-## 技术栈
+地图、项目概况、人员、安全总览、摄像头、设备和视频等历史代码可能仍在仓库中，但当前入口已隐藏，不属于本期菜单和权限目录。除非任务明确要求，不得恢复这些入口，也不得把历史文档中的旧页面当成当前产品。
+
+## 技术栈与目录
 
 后端：
 
-- Java 17
-- Spring Boot 3.2.5
-- MyBatis-Plus 3.5.6
-- MySQL 8.x
-- Redis
-- JWT：`io.jsonwebtoken`
-- Knife4j / OpenAPI
-- Lombok
+- Java 17、Spring Boot 3.2.5
+- MyBatis-Plus 3.5.6、MySQL 8.x
+- Redis、JWT、BCrypt
+- Knife4j / OpenAPI、Lombok
 
-前端：
+客户端：
 
-- React 18
-- Vite 5
-- axios
-- zustand 当前存在但主入口未大量使用
-- 百度地图 JavaScript API GL，通过 `VITE_BAIDU_MAP_AK` 配置
+- Web：React 18、Vite 5、axios
+- 小程序：uni-app、Vue 3、TypeScript
 
-本地默认端口：
-
-- 前端：`http://localhost:3002`
-- 后端：`http://localhost:8080`
-- 后端接口文档：`http://localhost:8080/doc.html`
-
-## 目录结构说明
+主要目录：
 
 ```text
 backend/
-  pom.xml
-  src/main/resources/application.yml
-  src/main/resources/sql/init.sql
   src/main/java/com/example/siteplatform/
-    auth/       登录、JWT、用户实体、角色查询
-    project/    项目管理、地图点位、项目权限服务
-    person/     临时人员管理
-    safety/     安全三级教育
-    file/       文件上传、下载、归档、删除
-    camera/     摄像头资源管理
-    device/     设备与塔吊基础信息
-    external/   外部系统配置实体和 mapper
-    log/        操作日志实体和 mapper
-    common/     Result、BusinessException、全局异常处理
-    config/     JWT、Redis、MyBatis-Plus、Swagger 配置
+    auth/          账号登录、微信绑定、会话、Web 扫码登录
+    registration/  Web/小程序统一注册申请与审批
+    system/        菜单、操作权限、角色和系统管理
+    project/       项目、项目成员、项目范围和兼容巡检权限
+    document/      工程资料目录、资料版本和回收站
+    electricbox/   电箱台账和二维码
+    inspection/    电箱巡检记录与月表
+    quality/       质量问题、整改和复查
+    file/          通用文件与存储
+    common/        统一响应、异常和限流
+    config/        JWT、Redis、跨域、拦截器和接口文档
+  src/main/resources/sql/
+    init.sql
+    migrations/
 
 frontend/
-  package.json
-  vite.config.js
-  .env.example
-  src/
-    main.jsx
-    App.jsx
-    services/       API 封装
-    components/     地图、通用组件、表单组件
-    pages/Login     登录页，当前被 App 使用
-    pages/Camera    镜头管理页，当前被 App 使用
-    pages/Overview  旧拆分页，当前 App 未使用
-    pages/Personnel 旧拆分页，当前 App 未使用
-    pages/Monitor   旧拆分页，当前 App 未使用
-    constants/      字典、主题、mock 数据
-    hooks/          部分旧 hook，当前主流程使用有限
+  src/App.jsx
+  src/pages/Login/
+  src/pages/DocumentManagement/
+  src/pages/QualityManagement/
+  src/pages/SystemManagement/
+  src/services/
+  src/utils/permissions.js
+
+wechat-miniprogram/site-platform-miniprogram/
+  src/pages/
+  src/api/
+  src/stores/auth.ts
+  src/utils/navigation.ts
 
 docs/
-  项目开发文档和新对话交接文档
+  当前项目文档和历史兼容说明
 ```
+
+本地默认地址：
+
+- Web：`http://localhost:3002`
+- 后端：`http://localhost:8080`
+- Knife4j：`http://localhost:8080/doc.html`
+
+## 认证、注册与微信登录
+
+- 密码必须使用 BCrypt 校验和保存。非 BCrypt 历史密码禁止登录，并标记为待管理员重置。
+- 系统不提供默认测试账号或明文密码。平台管理员密码只能通过系统管理，或一次性环境变量 `ADMIN_RESET_USERNAME`、`ADMIN_RESET_PASSWORD` 显式重置。
+- JWT 与 Redis 会话有效期统一读取 `JWT_EXPIRATION_MILLIS`，默认 7 天。
+- JWT 带凭证版本和独立会话标识。同一账号可保留多个会话；普通退出只注销当前会话，改密、停用、微信解绑和关键授权变化必须注销该用户全部会话。
+- Web 与小程序新用户统一写入 `registration_application`。提交申请时不得创建 `sys_user`；只有审批通过后才能在事务内创建账号、分配角色和项目范围、建立申请中的微信绑定并写审计日志。
+- `wechat_access_application` 只用于已存在系统账号申请项目访问，不得创建微信专用随机账号。
+- 微信绑定在同一 AppID 下严格保持有效用户、OpenID、UnionID 一对一。手机号相同只能用于提示下一步，绝不能自动绑定账号。
+- 小程序绑定已有账号必须同时验证账号密码和新的 `uni.login` code。
+- Web 扫码登录使用 Redis challenge、浏览器私有校验密钥和一次性交换码；二维码中不得携带 JWT 或浏览器密钥。
+- 微信 mock 默认关闭，只允许在显式 `dev`、`local` 或 `test` Profile 下启用。非开发环境缺少正式 AppID、AppSecret、合法 HTTPS 域名或回跳地址时必须拒绝启动微信能力。
+
+## RBAC 与项目隔离
+
+当前权限由以下部分共同决定：
+
+- 平台角色：`sys_role.scope_type=PLATFORM`。
+- 当前项目的项目角色：`sys_role.scope_type=PROJECT` 与 `sys_user_project.project_role_code`。
+- 角色菜单：`sys_menu`、`sys_role_menu`。
+- 操作权限：`sys_permission`、`sys_role_permission`。
+- 项目数据范围：`sys_user_project.status=ACTIVE`。
+
+必须遵守：
+
+- `PLATFORM_ADMIN` 只通过角色判断，不允许使用固定用户 ID 兜底。
+- 平台级系统管理接口只认可平台角色提供的平台权限；项目角色不能借聚合权限调用注册、全量用户、角色、菜单、微信全局管理或审计接口。
+- 项目角色权限只在目标 `projectId` 的有效成员关系内生效。用户在 A 项目有写权限，不代表能写 B 项目。
+- `/api/v1/auth/user-info` 是 Web 和小程序菜单、平台权限码、项目角色及项目权限的统一来源。
+- 菜单决定入口可见性，操作权限决定页面内动作；前端显隐只用于体验，不能替代后端鉴权。
+- 所有业务接口必须以后端 JWT 用户为准，不得信任前端传入的 `userId`、`username`、角色、上传人或操作人。
+- 列表接口必须按有权项目过滤；详情、更新和删除接口必须先查业务记录，再按记录真实 `projectId` 校验。
+- 无权限访问必须返回真实 HTTP `403`。
+
+## 接口与错误处理
+
+- 后端接口统一放在 `/api/v1/**`，Web 通过 Vite `/api` 代理调用。
+- 普通 JSON 接口返回 `Result<T>`；文件流接口可返回 `ResponseEntity<Resource>`。
+- `BusinessException` 由 `GlobalExceptionHandler` 映射为真实 HTTP `400 / 401 / 403 / 404 / 409` 等状态，同时保留响应体业务 `code`。
+- 客户端必须同时处理 HTTP 状态和响应体业务消息。
+- 新增公共登录、注册、扫码或状态查询接口时，必须补字段校验、Redis 限流和统一错误提示。
+- 重要写操作必须记录审计日志，并在授权或凭证变化后清理权限缓存和相应会话。
+
+## 数据库与迁移
+
+- 当前有数据的本地库以 39 表基线为准；统一注册、RBAC 和微信快捷登录使用增量迁移：
+
+```text
+backend/src/main/resources/sql/migrations/20260728_unified_registration_rbac_wechat_login.sql
+```
+
+- `backend/src/main/resources/sql/init.sql` 包含 `DROP TABLE`，只允许用于明确确认的全新空库初始化。严禁在当前有数据环境、生产环境或长期开发库执行。
+- 不得用 `init.sql` 代替增量迁移，也不得为了方便测试重建用户现有数据库。
+- 执行迁移前必须备份数据库和相关文件，检查重复手机号、旧角色、微信绑定、项目授权和至少一个可恢复的平台管理员。
+- 迁移必须可重复检查；重复执行不得恢复管理员已经停用的菜单或撤销的角色授权。
+- 数据库字段变更必须同步 SQL、Entity、DTO/VO、Service/Controller、前端表单与展示、`docs/数据库结构.md` 和 `docs/接口规则.md`。
 
 ## 开发规范
 
-- 开发前先读 `AGENTS.md`、`docs/新对话交接文档.md`、`docs/开发状态.md`。
-- 涉及模块开发时，再读 `docs/模块清单.md`、`docs/接口规则.md`、`docs/数据库结构.md`、`docs/权限规则.md`。
-- 以当前代码为准，PRD 文档仅作为业务背景，不能把 PRD 中规划能力当成已实现能力。
-- 修改应小步、聚焦，不做无关重构。
-- 不要改动用户或其他工具已有的未提交变更，除非任务明确要求。
-- 后端保持当前模块化单体结构，优先使用 MyBatis-Plus 既有写法。
-- 前端当前真实入口主要在 `frontend/src/App.jsx`，不要误改未被使用的旧拆分页面后以为功能已生效。
-- 新增接口应保持 `/api/v1/**` 后端路径，前端通过 Vite `/api` 代理访问。
-- 新增前端 API 方法放在 `frontend/src/services/*.js`。
-- 百度地图 AK 只能放在 `frontend/.env`，不能写死进源码或文档。
+- 修改前先用 `rg`、`rg --files` 和 `sed` 确认真实入口与调用链。
+- 当前 Web 根流程仍主要由 `frontend/src/App.jsx` 组织；独立业务页在 `frontend/src/pages/`。不要误改未挂载的旧拆分页。
+- 小程序导航和页面守卫必须继续由 `/auth/user-info` 返回的菜单与项目权限驱动，不得恢复固定原生权限入口。
+- 新增前端 API 方法放在相应 `services` / `api` 文件，不在页面中重复拼请求。
+- 保持现有模块化单体结构和 MyBatis-Plus 写法，修改应小步、聚焦。
+- 工作区可能已有用户或其他工具的未提交变更；不得回退、覆盖或清理无关修改。
+- 不要读取或修改 `node_modules/`、`dist/`、`backend/target/`、日志、构建产物和无关大文件。
+- 不要把真实 AppSecret、数据库密码、JWT、百度地图 AK、生产 token 或用户业务数据写入源码和文档。
+- 不做只有前端显隐、没有后端权限校验的功能。
+- 不恢复已隐藏旧模块，不恢复巡检管理中的“用户与权限”双入口。
 
-## 命名规范
-
-后端：
-
-- 包名使用小写模块名，例如 `project`、`camera`、`device`。
-- Entity 对应数据库表，使用 PascalCase 类名和 camelCase 字段名。
-- 表字段使用 snake_case，MyBatis-Plus 开启 `map-underscore-to-camel-case`。
-- Controller 方法命名体现业务动作，例如 `getProjectMapPoints`、`updateProjectLocation`。
-- DTO / VO 放在对应模块 `dto/` 目录。
-
-前端：
-
-- 页面组件使用 PascalCase。
-- API 方法使用动词开头，例如 `getProjectList`、`updateProjectLocation`。
-- 常量放在 `frontend/src/constants/`。
-- 本地存储 token key 当前为 `site_platform_token`，用户信息 key 为 `site_platform_user`。
-
-## 接口规范
-
-- 后端统一返回 `Result<T>`：
-  - `code`: 业务状态码，成功为 `200`
-  - `message`: 消息
-  - `data`: 业务数据
-- 注意：当前 `GlobalExceptionHandler` 对 `BusinessException` 返回 `Result.error(code, message)`，HTTP 状态通常仍为 200。前端应检查业务 `code`，不能只看 HTTP 状态。
-- 文件下载接口 `GET /api/v1/files/{id}/download` 返回 `ResponseEntity<Resource>`，不是 `Result<T>`。
-- 需要登录的接口从 `Authorization: Bearer <token>` 取当前用户。
-- 后端不能信任前端传入的 `userId`、`username`、`role` 等身份字段；涉及当前登录用户的数据必须以后端 token 解析出的用户为准。
-- 涉及 `projectId` 的接口必须校验当前用户是否有该项目权限。当前代码中只有项目模块做得较多，其他模块仍待完善。
-
-## 权限规则
-
-当前角色表规划：
-
-- `PLATFORM_ADMIN`：平台管理员
-- `PROJECT_ADMIN`：项目管理员
-- `SAFETY_ADMIN`：安全管理员
-- `USER`：普通用户
-
-当前已实现：
-
-- `ProjectPermissionService.isPlatformAdmin(userId)`：`userId == 1` 兜底，或拥有 `PLATFORM_ADMIN` 角色。
-- `ProjectPermissionService.isProjectAdmin(userId)`：拥有 `PROJECT_ADMIN` 角色。
-- 项目列表、详情、地图点位、地图详情和定位更新会走当前用户逻辑。
-- 项目新增、更新、删除只允许平台管理员。
-- 项目定位更新允许平台管理员或对该项目有权限的项目管理员。
-
-当前待完善：
-
-- `ProjectPermissionService.getUserProjects` 注释说明应查询 `sys_user_project`，但实际仍是简化逻辑：非 `userId=1` 用户只看项目 1。
-- 人员、安全、文件、摄像头、设备接口当前大多只校验登录态，未严格校验 `projectId` 权限。
-- 前端当前没有基于角色隐藏菜单或禁用按钮。
-
-## 数据库操作注意事项
-
-- 当前初始化脚本：`backend/src/main/resources/sql/init.sql`。
-- 该脚本包含大量 `DROP TABLE IF EXISTS`，执行会重建表并清空已有数据。不要在已有数据环境直接运行。
-- 当前没有 Flyway / Liquibase 迁移体系。新增字段应优先写增量 SQL 文档或迁移脚本，不要只改 `init.sql`。
-- 逻辑删除字段为 `deleted`，多个实体使用 `@TableLogic`。
-- 新增字段时必须同步：
-  - SQL
-  - Entity
-  - DTO / VO
-  - Controller / Service 入参出参
-  - 前端表单和展示
-  - `docs/数据库结构.md`
-  - `docs/接口规则.md`
-
-## 禁止事项
-
-- 不要读取或修改 `frontend/node_modules/`、`frontend/dist/`、`backend/target/`、构建产物、日志和无关大文件。
-- 不要把真实百度地图 AK、数据库密码、生产 token 写进源码或文档。
-- 不要随意改数据库结构，尤其不要在有数据环境执行带 `DROP TABLE` 的初始化脚本。
-- 不要绕过后端权限校验，只在前端做权限判断。
-- 不要相信前端传入的用户身份字段。
-- 不要大范围重构 `frontend/src/App.jsx`，除非任务明确要求拆分页面。
-- 不要把 `frontend/src/pages/Overview|Personnel|Monitor` 的旧拆分页当作当前真实页面入口。
-- 不要删除现有功能或 mock 兜底，除非任务明确要求。
-
-## 每次开发前必须阅读
+## 开发前必须阅读
 
 最少阅读：
 
 1. `AGENTS.md`
-2. `docs/新对话交接文档.md`
-3. `docs/开发状态.md`
+2. `docs/项目总览.md`
+3. `docs/新对话交接文档.md`
+4. `docs/开发状态.md`
 
 按任务补充阅读：
 
-- 模块开发：`docs/模块清单.md`
-- 接口开发：`docs/接口规则.md`
-- 数据库修改：`docs/数据库结构.md`
-- 权限相关：`docs/权限规则.md`
-- 地图相关：`百度地图接入说明.md`
-- 摄像头字段增强：`摄像头资源管理字段增强.md`
+- 模块：`docs/模块清单.md`
+- 接口：`docs/接口规则.md`
+- 数据库：`docs/数据库结构.md`
+- 权限：`docs/权限规则.md`
+- 小程序与巡检：`docs/小程序需求说明书.md`、`docs/小程序现场检查与电箱检查规格.md`
 
-## 每次修改后必须更新
+## 修改后验证与文档同步
 
-- 新增或改模块：更新 `docs/模块清单.md`
-- 新增或改接口：更新 `docs/接口规则.md`
-- 新增或改表字段：更新 `docs/数据库结构.md`
-- 改权限逻辑：更新 `docs/权限规则.md`
-- 修复重要问题或推进功能：更新 `docs/开发状态.md`
-- 改变项目交接方式或启动步骤：更新 `docs/新对话交接文档.md`
+- 后端：`cd backend && mvn test`
+- Web：`cd frontend && npm run build`
+- 小程序：在 `wechat-miniprogram/site-platform-miniprogram` 执行 `npm run type-check`、`npm run build:h5`、`npm run build:mp-weixin`
+- 提交前执行 `git diff --check`。
+
+同步规则：
+
+- 新增或修改模块：更新 `docs/模块清单.md`
+- 新增或修改接口：更新 `docs/接口规则.md`
+- 新增或修改表字段：更新 `docs/数据库结构.md`
+- 修改权限：更新 `docs/权限规则.md`
+- 推进重要功能或完成验收：更新 `docs/开发状态.md`
+- 改变交接、启动或部署方式：更新 `docs/新对话交接文档.md` 和相关 README

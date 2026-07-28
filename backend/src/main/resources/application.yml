@@ -26,7 +26,8 @@ spring:
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # 默认禁止输出 SQL 参数，避免密码摘要、手机号等敏感字段进入启动日志。
+    log-impl: ${MYBATIS_LOG_IMPL:org.apache.ibatis.logging.nologging.NoLoggingImpl}
   global-config:
     db-config:
       logic-delete-field: deleted
@@ -35,7 +36,7 @@ mybatis-plus:
 
 jwt:
   secret: ${JWT_SECRET:site-platform-development-only-change-me}
-  expiration: 3153600000000
+  expiration: ${JWT_EXPIRATION_MILLIS:604800000}
 
 knife4j:
   enable: true
@@ -57,8 +58,13 @@ wechat:
   mini-program:
     app-id: ${WECHAT_MINI_PROGRAM_APP_ID:touristappid}
     app-secret: ${WECHAT_MINI_PROGRAM_APP_SECRET:}
-    mock-enabled: ${WECHAT_MINI_PROGRAM_MOCK_ENABLED:true}
+    mock-enabled: ${WECHAT_MINI_PROGRAM_MOCK_ENABLED:false}
+    production: ${WECHAT_MINI_PROGRAM_PRODUCTION:false}
+    legal-domain: ${WECHAT_MINI_PROGRAM_LEGAL_DOMAIN:}
+    connect-timeout-millis: ${WECHAT_CONNECT_TIMEOUT_MILLIS:5000}
+    read-timeout-millis: ${WECHAT_READ_TIMEOUT_MILLIS:8000}
     page: pages/scan-entry/index
+    web-login-page: pages/web-login-confirm/index
     env-version: ${WECHAT_MINI_PROGRAM_ENV_VERSION:release}
     public-fallback-url: ${WECHAT_MINI_PROGRAM_PUBLIC_FALLBACK_URL:http://localhost:3003/#/pages/scan-entry/index}
   message:

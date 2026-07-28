@@ -26,6 +26,7 @@ import com.example.siteplatform.project.constant.InspectionPermissionCodes;
 import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.service.ProjectMemberService;
 import com.example.siteplatform.project.service.ProjectPermissionService;
+import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import com.google.zxing.BarcodeFormat;
 import com.google.zxing.EncodeHintType;
 import com.google.zxing.WriterException;
@@ -124,6 +125,8 @@ public class ElectricBoxService {
     public List<ElectricBoxVO> list(Long projectId, String status, SysUser currentUser) {
         if (projectId != null) {
             projectPermissionService.checkProjectPermission(currentUser.getId(), projectId);
+            projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
+                    SystemPermissionCodes.INSPECTION_VIEW);
         }
         LambdaQueryWrapper<ElectricBox> wrapper = new LambdaQueryWrapper<>();
         if (projectId != null) {
@@ -614,18 +617,24 @@ public class ElectricBoxService {
     }
 
     private void requireManagePermission(SysUser currentUser, Long projectId) {
+        projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
+                SystemPermissionCodes.INSPECTION_MANAGE);
         if (!projectPermissionService.hasInspectionPermission(currentUser.getId(), projectId, InspectionPermissionCodes.BOX_MANAGE)) {
             throw BusinessException.forbidden("无电箱管理权限");
         }
     }
 
     private void requireQrManagePermission(SysUser currentUser, Long projectId) {
+        projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
+                SystemPermissionCodes.INSPECTION_MANAGE);
         if (!projectPermissionService.hasInspectionPermission(currentUser.getId(), projectId, InspectionPermissionCodes.BOX_QR_MANAGE)) {
             throw BusinessException.forbidden("无电箱二维码管理权限");
         }
     }
 
     private void requirePublicAccessPermission(SysUser currentUser, Long projectId) {
+        projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
+                SystemPermissionCodes.INSPECTION_MANAGE);
         if (!projectPermissionService.hasInspectionPermission(currentUser.getId(), projectId, InspectionPermissionCodes.BOX_PUBLIC_ACCESS)) {
             throw BusinessException.forbidden("无外部公开扫码管理权限");
         }
@@ -639,6 +648,10 @@ public class ElectricBoxService {
     }
 
     private boolean canViewBox(ElectricBox box, SysUser currentUser) {
+        if (!projectPermissionService.hasSystemPermission(currentUser.getId(), box.getProjectId(),
+                SystemPermissionCodes.INSPECTION_VIEW)) {
+            return false;
+        }
         if (projectPermissionService.hasInspectionPermission(currentUser.getId(), box.getProjectId(), InspectionPermissionCodes.BOX_VIEW)) {
             return true;
         }

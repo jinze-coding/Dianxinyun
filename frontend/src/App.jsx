@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { ALL_THEMES, DEFAULT_THEME_ID, getThemeById } from './constants/themes';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { DEFAULT_THEME_ID, getThemeById } from './constants/themes';
 import { PROJECTS, PROJECT_INFO, DATA_BY_PROJECT } from './constants/mockData';
 import { NAV_ITEMS, PAGE_IDS } from './constants/dicts';
-import { isLoggedIn, getCurrentUser } from './services/auth';
+import { isLoggedIn, getCurrentUser, logout } from './services/auth';
 import { getProjectList, addProject, updateProject, deleteProject } from './services/project';
 import { getPersonnelList, addPersonnel, updatePersonnel, deletePersonnel } from './services/personnel';
 import { getTrainingList, createTraining, updateTraining, markTrainingComplete, deleteTraining } from './services/safety';
@@ -35,6 +35,8 @@ import LoginPage from './pages/Login';
 import PersonnelManagementPage from './pages/PersonnelManagement';
 import QualityManagementPage from './pages/QualityManagement';
 import DocumentManagementPage from './pages/DocumentManagement';
+import SystemManagementPage from './pages/SystemManagement';
+import { canAccessPage, hasProjectPermission, isPlatformAdmin } from './utils/permissions';
 import StatusBadge from './components/StatusBadge';
 import SectionCard from './components/SectionCard';
 import PersonFormModal from './components/PersonFormModal';
@@ -165,9 +167,8 @@ function VideoCell({ cam, theme: T, onFullscreen, fullscreen }) {
 // ============================================
 // 顶部导航
 // ============================================
-function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, projectList, onRefreshProjects, theme, themeId, onThemeChange, compactMode, onCompactChange, onLogout, currentUser }) {
+function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, projectList, onRefreshProjects, theme, onLogout, currentUser, visibleNavItems, canAccessSystem }) {
   const [showProjects, setShowProjects] = useState(false);
-  const [showThemePicker, setShowThemePicker] = useState(false);
   const [showProjectMgmt, setShowProjectMgmt] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [addForm, setAddForm] = useState({ projectName: '', shortName: '', projectStatus: 'normal', startDate: '', endDate: '' });
@@ -189,12 +190,12 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
   }, []);
 
   useEffect(() => {
-    const close = () => { setShowProjects(false); setShowThemePicker(false); setShowProjectMgmt(false); setProjectSearch(''); setProjectMgmtSearch(''); };
-    if (showProjects || showThemePicker || showProjectMgmt) {
+    const close = () => { setShowProjects(false); setShowProjectMgmt(false); setProjectSearch(''); setProjectMgmtSearch(''); };
+    if (showProjects || showProjectMgmt) {
       document.addEventListener('click', close);
       return () => document.removeEventListener('click', close);
     }
-  }, [showProjects, showThemePicker, showProjectMgmt]);
+  }, [showProjects, showProjectMgmt]);
 
   const handleAddProject = async () => {
     if (!addForm.projectName.trim()) { alert('请填写作业区域名称'); return; }
@@ -227,8 +228,8 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
   const proj = projectList.find(p => p.id === currentProject) || projectList[0] || {};
   const userName = currentUser?.realName || currentUser?.username || '平台管理员';
   const userRoles = currentUser?.roles || [];
-  const userRoleName = Number(currentUser?.id || currentUser?.userId) === 1 ? '平台管理员'
-    : userRoles.includes('PLATFORM_ADMIN') ? '平台管理员'
+  const canManageProjects = isPlatformAdmin(currentUser);
+  const userRoleName = userRoles.includes('PLATFORM_ADMIN') ? '平台管理员'
     : userRoles.includes('PROJECT_ADMIN') ? '项目管理员'
       : userRoles.includes('SAFETY_ADMIN') ? '安全管理员'
         : '项目成员';
@@ -247,20 +248,18 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
     }}>
       {/* Logo */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 200 }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: 6,
-          background: `linear-gradient(135deg, ${T.accent}, ${T.accent2})`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 16, fontWeight: 700, color: '#fff', flexShrink: 0,
-        }}>云</div>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: T.textPrimary, letterSpacing: 1, lineHeight: 1.2 }}>电信云平台</div>
+          <img
+            src="/brand/zhihui-yingzao-horizontal.png"
+            alt="智慧营造"
+            style={{ display: 'block', width: 116, height: 34, objectFit: 'contain' }}
+          />
           <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: 0.5 }}>项目现场综合管理系统</div>
         </div>
       </div>
 
       {/* 作业区域管理 */}
-      <div style={{ position: 'relative', marginLeft: 12 }}>
+      {canManageProjects && <div style={{ position: 'relative', marginLeft: 12 }}>
         <button
           onClick={e => { e.stopPropagation(); setShowProjectMgmt(!showProjectMgmt); setShowProjects(false); }}
           style={{
@@ -321,12 +320,12 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
             </div>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* 项目切换 */}
       <div style={{ position: 'relative', marginLeft: 16 }}>
         <button
-          onClick={e => { e.stopPropagation(); setShowProjects(!showProjects); setShowThemePicker(false); }}
+          onClick={e => { e.stopPropagation(); setShowProjects(!showProjects); }}
           style={{
             display: 'flex', alignItems: 'center', gap: 8,
             background: T.cardBg, border: `1px solid ${T.borderColor}`,
@@ -397,7 +396,7 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
         overflowY: 'hidden',
         whiteSpace: 'nowrap',
       }}>
-        {NAV_ITEMS.map(item => {
+        {visibleNavItems.map(item => {
           const active = currentPage === item.id;
           return (
             <button
@@ -438,86 +437,23 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
           {formatTime(time)}
         </div>
 
-        {/* 主题切换 */}
-        <div style={{ position: 'relative' }}>
+        {canAccessSystem && (
           <button
-            onClick={e => { e.stopPropagation(); setShowThemePicker(!showThemePicker); setShowProjects(false); }}
+            onClick={() => onPageChange(PAGE_IDS.SYSTEM_MANAGEMENT)}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
-              background: T.cardBg, border: `1px solid ${T.borderColor}`,
+              background: currentPage === PAGE_IDS.SYSTEM_MANAGEMENT ? T.accent : T.cardBg,
+              border: `1px solid ${currentPage === PAGE_IDS.SYSTEM_MANAGEMENT ? T.accent : T.borderColor}`,
               borderRadius: 6, padding: '5px 10px', cursor: 'pointer',
-              color: T.textSecondary, fontSize: 12,
+              color: currentPage === PAGE_IDS.SYSTEM_MANAGEMENT ? '#fff' : T.textSecondary,
+              fontSize: 12, fontWeight: currentPage === PAGE_IDS.SYSTEM_MANAGEMENT ? 700 : 500,
             }}
-            title="主题配色"
+            title="进入系统管理"
           >
-            <span style={{
-              width: 12, height: 12, borderRadius: '50%',
-              background: `linear-gradient(135deg, ${T.accent}, ${T.accent2})`,
-              border: `1px solid ${T.borderColor}`, flexShrink: 0,
-            }}></span>
-            <span>主题</span>
-            <span style={{ color: T.textMuted, fontSize: 10 }}>▼</span>
+            <span>⚙</span>
+            <span>系统管理</span>
           </button>
-          {showThemePicker && (
-            <div style={{
-              position: 'absolute', top: '100%', right: 0, marginTop: 6,
-              background: T.dropdownBg, border: `1px solid ${T.borderColor}`,
-              borderRadius: 10, width: 320, zIndex: 200, padding: 14,
-              boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
-            }} onClick={e => e.stopPropagation()}>
-              <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 10, letterSpacing: 0.5 }}>
-                配色方案 &nbsp;·&nbsp; 白色
-              </div>
-              <div style={{
-                height: 4, borderRadius: 2, marginBottom: 12,
-                background: '#f0f4f9',
-                border: `1px solid ${T.borderColor}`,
-              }}></div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8, marginBottom: 12 }}>
-                {ALL_THEMES.map(th => {
-                  const active = themeId === th.id;
-                  return (
-                    <button key={th.id} onClick={() => onThemeChange(th.id)} style={{
-                      padding: '10px 6px 8px', borderRadius: 8, cursor: 'pointer',
-                      border: `2px solid ${active ? th.accent : 'transparent'}`,
-                      background: th.pageBg, outline: active ? `1px solid ${th.accent}` : 'none',
-                      outlineOffset: 1, transition: 'all 0.15s', position: 'relative',
-                    }}>
-                      <div style={{ marginBottom: 6 }}>
-                        <div style={{ height: 4, borderRadius: 1, background: th.navBg, border: `1px solid ${th.borderColor}`, marginBottom: 3 }}></div>
-                        <div style={{ display: 'flex', gap: 2 }}>
-                          <div style={{ width: '35%', height: 22, background: th.cardBg, borderRadius: 2, border: `1px solid ${th.borderColor}` }}></div>
-                          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                            <div style={{ height: 10, background: th.cardBg, borderRadius: 2, border: `1px solid ${th.borderColor}` }}></div>
-                            <div style={{ height: 10, background: th.cardBg, borderRadius: 2, border: `1px solid ${th.borderColor}` }}></div>
-                          </div>
-                        </div>
-                        <div style={{ width: 10, height: 3, background: th.accent, borderRadius: 1, margin: '3px auto 0' }}></div>
-                      </div>
-                      <div style={{ fontSize: 10, color: th.textPrimary, fontWeight: active ? 700 : 400, lineHeight: 1.3 }}>{th.name}</div>
-                      <div style={{ fontSize: 8, color: th.textMuted, marginTop: 1 }}>{th.brightness}</div>
-                      {active && (
-                        <div style={{ position: 'absolute', top: 4, right: 4, width: 6, height: 6, borderRadius: '50%', background: th.accent }}></div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-              <div style={{ height: 1, background: T.borderColor, marginBottom: 10 }}></div>
-              <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 6, letterSpacing: 0.5 }}>信息密度</div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {[{ label: '舒适型', v: false }, { label: '紧凑型', v: true }].map(opt => (
-                  <button key={opt.label} onClick={() => onCompactChange(opt.v)} style={{
-                    flex: 1, padding: '6px', borderRadius: 5, cursor: 'pointer', fontSize: 11,
-                    border: `1px solid ${compactMode === opt.v ? T.accent : T.borderColor}`,
-                    background: compactMode === opt.v ? T.activeItemBg : 'transparent',
-                    color: compactMode === opt.v ? T.accent : T.textMuted,
-                  }}>{opt.label}</button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+        )}
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: T.textSecondary }}>
           <div style={{
@@ -712,6 +648,18 @@ function ProjectPlaceholderPage({ projectId, projectList, theme: T, title, descr
         }}>
           {description}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function NoAuthorizedPage({ theme: T }) {
+  return (
+    <div style={{ height: '100%', display: 'grid', placeItems: 'center', padding: 24, background: T.pageBg }}>
+      <div style={{ width: 'min(520px, 100%)', padding: 28, textAlign: 'center', borderRadius: 10, border: `1px solid ${T.borderColor}`, background: T.cardBg }}>
+        <div style={{ width: 46, height: 46, margin: '0 auto 14px', display: 'grid', placeItems: 'center', borderRadius: '50%', color: T.warning, background: 'rgba(217, 119, 6, 0.1)', fontSize: 22 }}>!</div>
+        <div style={{ color: T.textPrimary, fontSize: 17, fontWeight: 800 }}>暂未分配可访问功能</div>
+        <div style={{ marginTop: 8, color: T.textMuted, fontSize: 12, lineHeight: 1.8 }}>账号已登录，但管理员尚未分配业务菜单或项目权限。请联系系统管理员完成授权后重新登录。</div>
       </div>
     </div>
   );
@@ -3187,7 +3135,6 @@ function PersonnelPage({ projectId, theme: T, compactMode }) {
 const ELECTRIC_INSPECTION_TABS = [
   { id: 'ledger', label: '巡检台账' },
   { id: 'records', label: '巡检记录' },
-  { id: 'permission', label: '用户与权限', permissionOnly: true },
 ];
 
 const BOX_STATUS_TEXT = { ACTIVE: '启用', INACTIVE: '停用', REMOVED: '已拆除' };
@@ -3299,13 +3246,12 @@ const formatDateTime = (value) => {
 
 const getProjectRoleCode = (user, projectId) => {
   if (!user) return '';
-  if (Number(user.id || user.userId) === 1) return 'PLATFORM_ADMIN';
   if ((user.roles || []).includes('PLATFORM_ADMIN')) return 'PLATFORM_ADMIN';
   const item = (user.projectRoles || []).find(role => Number(role.projectId) === Number(projectId));
   return item?.projectRoleCode || '';
 };
 
-const isPlatformUser = (user) => Number(user?.id || user?.userId) === 1 || (user?.roles || []).includes('PLATFORM_ADMIN');
+const isPlatformUser = (user) => (user?.roles || []).includes('PLATFORM_ADMIN');
 
 const getInspectionPermissionCodes = (user, projectId) => {
   if (isPlatformUser(user)) {
@@ -3525,7 +3471,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     realName: '',
     phone: '',
     email: '',
-    password: 'admin123',
+    password: '',
     globalRoleCode: 'USER',
     projectRoleCode: 'USER',
     permissionTemplateId: '',
@@ -3675,13 +3621,21 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   const activePermissionTemplates = permissionTemplates.filter(template => Number(template.enabled ?? 1) === 1);
   const templateByCode = (code) => permissionTemplates.find(template => template.templateCode === code);
   const defaultTemplateIdForRole = (roleCode) => templateByCode(roleCode)?.id || templateByCode('USER')?.id || '';
-  const boxManageAllowed = hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.BOX_MANAGE);
-  const qrManageAllowed = hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.BOX_QR_MANAGE);
-  const publicAccessAllowed = hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.BOX_PUBLIC_ACCESS);
-  const inspectionReviewAllowed = hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.INSPECTION_REVIEW);
-  const rectificationReviewAllowed = hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.RECTIFICATION_REVIEW);
-  const summaryExportAllowed = hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.SUMMARY_EXPORT);
-  const dailySubmitAllowed = hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.INSPECTION_DAILY_SUBMIT);
+  const generalInspectionManageAllowed = isPlatformUser(currentUser)
+    || hasProjectPermission(currentUser, projectId, 'inspection.manage');
+  const generalInspectionExportAllowed = isPlatformUser(currentUser)
+    || hasProjectPermission(currentUser, projectId, 'inspection.export');
+  const generalInspectionSubmitAllowed = isPlatformUser(currentUser)
+    || hasProjectPermission(currentUser, projectId, 'inspection.submit');
+  const boxManageAllowed = generalInspectionManageAllowed && hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.BOX_MANAGE);
+  const qrManageAllowed = generalInspectionManageAllowed && hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.BOX_QR_MANAGE);
+  const publicAccessAllowed = generalInspectionManageAllowed && hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.BOX_PUBLIC_ACCESS);
+  const inspectionReviewAllowed = generalInspectionManageAllowed
+    && hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.INSPECTION_REVIEW);
+  const rectificationReviewAllowed = generalInspectionManageAllowed
+    && hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.RECTIFICATION_REVIEW);
+  const summaryExportAllowed = generalInspectionExportAllowed && hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.SUMMARY_EXPORT);
+  const dailySubmitAllowed = generalInspectionSubmitAllowed && hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.INSPECTION_DAILY_SUBMIT);
   const singleBoxExportAllowed = Boolean(summaryBoxId) && (summaryExportAllowed || dailySubmitAllowed);
   const recordInspectors = Array.from(new Map((summary?.records || [])
     .filter(record => record.inspectorId)
@@ -4025,10 +3979,9 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
 
   const reviewWechatApplication = async (application, approved) => {
     if (approved) {
-      const accountMode = application.matchedUserId ? 'EXISTING' : 'CREATE';
       setSelectedWechatApplication(application);
       setWechatApprovalForm({
-        accountMode,
+        accountMode: 'EXISTING',
         userId: application.matchedUserId ? String(application.matchedUserId) : '',
         projectRoleCode: 'USER',
         permissionTemplateId: String(defaultTemplateIdForRole('USER') || ''),
@@ -4055,11 +4008,11 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     if (!selectedWechatApplication) return;
     if (!wechatApprovalForm.permissionTemplateId) { alert('请选择权限角色'); return; }
     if (!wechatApprovalForm.comment.trim()) { alert('请填写审批意见'); return; }
-    if (wechatApprovalForm.accountMode === 'EXISTING' && !wechatApprovalForm.userId) { alert('请选择要绑定的已有账号'); return; }
+    if (!wechatApprovalForm.userId) { alert('请选择要绑定的已有账号；新账号请先通过统一注册审核创建'); return; }
     try {
       const res = await approveWechatAccessApplication(selectedWechatApplication.id, {
-        accountMode: wechatApprovalForm.accountMode,
-        userId: wechatApprovalForm.accountMode === 'EXISTING' ? Number(wechatApprovalForm.userId) : null,
+        accountMode: 'EXISTING',
+        userId: Number(wechatApprovalForm.userId),
         realName: selectedWechatApplication.realName,
         projectRoleCode: wechatApprovalForm.projectRoleCode,
         permissionTemplateId: Number(wechatApprovalForm.permissionTemplateId),
@@ -4073,7 +4026,10 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
 
   const openWechatUserDetail = async (user) => {
     try {
-      const res = await getWechatUserDetail(user.userId);
+      const detailProjectId = isPlatformAdmin
+        ? (permissionFilters.projectId ? Number(permissionFilters.projectId) : undefined)
+        : projectId;
+      const res = await getWechatUserDetail(user.userId, detailProjectId);
       if (res.code !== 200) { alert(res.message || '用户详情加载失败'); return; }
       setSelectedWechatUser(res.data);
     } catch (err) { alert(err.message || '用户详情加载失败'); }
@@ -4300,6 +4256,10 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
       alert('请填写姓名');
       return;
     }
+    if (userForm.password.length < 8) {
+      alert('初始密码至少 8 位');
+      return;
+    }
     const userTemplateId = userForm.permissionTemplateId || defaultTemplateIdForRole(userForm.projectRoleCode);
     try {
       const res = await createProjectUser({
@@ -4308,7 +4268,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
         realName: userForm.realName.trim(),
         phone: userForm.phone.trim(),
         email: userForm.email.trim(),
-        password: userForm.password.trim() || 'admin123',
+        password: userForm.password,
         globalRoleCode: userForm.globalRoleCode,
         projectRoleCode: userForm.projectRoleCode,
         permissionTemplateId: userTemplateId ? Number(userTemplateId) : null,
@@ -4323,7 +4283,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
         realName: '',
         phone: '',
         email: '',
-        password: 'admin123',
+        password: '',
         globalRoleCode: 'USER',
         projectRoleCode: 'USER',
         permissionTemplateId: '',
@@ -5162,7 +5122,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
             <div style={{ overflowX: 'auto' }}>
               <div style={{ ...tableHeaderStyle, minWidth: 980, gridTemplateColumns: '1fr .9fr 1fr .85fr 1fr .9fr 120px' }}><span>申请人</span><span>申请类型</span><span>来源项目/电箱</span><span>匹配账号</span><span>申请时间</span><span>状态</span><span>操作</span></div>
               <div style={{ minWidth: 980 }}>
-                {wechatApplications.map(item => <div key={item.id} style={{ ...rowBaseStyle, gridTemplateColumns: '1fr .9fr 1fr .85fr 1fr .9fr 120px' }}><div><div style={{ fontWeight: 800 }}>{item.realName || '未填姓名'}</div><div style={{ color: T.textMuted, fontSize: 10 }}>{item.phone || '-'}</div></div><span>{item.applicationType === 'MULTIPLE_MATCH' ? '多账号待确认' : item.applicationType === 'PROJECT_ACCESS' ? '项目权限申请' : '新用户注册'}</span><span>{item.projectName || '-'} · {item.boxCode || '-'}</span><span>{item.matchedUsername || '未匹配'}</span><span>{formatDateTime(item.createTime)}</span><InspectionPill status={item.status === 'PENDING' ? 'REVIEW_PENDING' : item.status === 'APPROVED' ? 'ACTIVE' : 'INACTIVE'} theme={T}>{item.status === 'PENDING' ? '待审批' : item.status === 'APPROVED' ? '已通过' : '已拒绝'}</InspectionPill><div style={{ display: 'flex', gap: 5 }}>{item.status === 'PENDING' ? <>{actionButton('审批', () => reviewWechatApplication(item, true))}{actionButton('拒绝', () => reviewWechatApplication(item, false), 'danger')}</> : <span style={{ color: T.textMuted }}>—</span>}</div></div>)}
+                {wechatApplications.map(item => <div key={item.id} style={{ ...rowBaseStyle, gridTemplateColumns: '1fr .9fr 1fr .85fr 1fr .9fr 120px' }}><div><div style={{ fontWeight: 800 }}>{item.realName || '未填姓名'}</div><div style={{ color: T.textMuted, fontSize: 10 }}>{item.phone || '-'}</div></div><span>{item.applicationType === 'MULTIPLE_MATCH' ? '多账号待确认' : '项目访问申请'}</span><span>{item.projectName || '-'} · {item.boxCode || '-'}</span><span>{item.matchedUsername || '未匹配'}</span><span>{formatDateTime(item.createTime)}</span><InspectionPill status={item.status === 'PENDING' ? 'REVIEW_PENDING' : item.status === 'APPROVED' ? 'ACTIVE' : 'INACTIVE'} theme={T}>{item.status === 'PENDING' ? '待审批' : item.status === 'APPROVED' ? '已通过' : '已拒绝'}</InspectionPill><div style={{ display: 'flex', gap: 5 }}>{item.status === 'PENDING' ? <>{actionButton('审批', () => reviewWechatApplication(item, true))}{actionButton('拒绝', () => reviewWechatApplication(item, false), 'danger')}</> : <span style={{ color: T.textMuted }}>—</span>}</div></div>)}
                 {!wechatApplications.length && <InspectionEmpty text={permissionUserTab === 'pending' ? '暂无待审批申请' : '暂无历史申请记录'} theme={T} />}
               </div>
             </div>
@@ -5634,7 +5594,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
           </label>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 5, color: T.textSecondary, fontSize: 11 }}>
             初始密码
-            <input value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} placeholder="默认 admin123" style={fieldStyle} />
+            <input type="password" autoComplete="new-password" value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} placeholder="至少 8 位" style={fieldStyle} />
           </label>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 5, color: T.textSecondary, fontSize: 11 }}>
             全局角色
@@ -5674,10 +5634,10 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     <div style={{ position: 'fixed', inset: 0, zIndex: 1010, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(15,23,42,.58)' }} onClick={() => setSelectedWechatApplication(null)}>
       <div style={{ width: 620, maxHeight: '86vh', overflow: 'auto', padding: 18, borderRadius: 10, border: `1px solid ${T.borderColor}`, background: T.modalBg }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><div style={{ color: T.textPrimary, fontSize: 16, fontWeight: 900 }}>审批小程序用户申请</div><div style={{ color: T.textMuted, fontSize: 11, marginTop: 4 }}>{selectedWechatApplication.realName || '未填姓名'} · {selectedWechatApplication.phone || '-'} · {selectedWechatApplication.projectName || '-'}</div></div><button onClick={() => setSelectedWechatApplication(null)} style={{ border: 0, background: 'transparent', color: T.textMuted, fontSize: 20, cursor: 'pointer' }}>×</button></div>
-        <div style={{ marginTop: 14, padding: 12, borderRadius: 7, background: T.surface2, border: `1px solid ${T.borderColor}`, color: T.textSecondary, fontSize: 12, lineHeight: 1.8 }}>来源电箱：{selectedWechatApplication.boxCode || '-'}<br />匹配账号：{selectedWechatApplication.matchedUsername || '未匹配'}<br />申请类型：{selectedWechatApplication.applicationType === 'MULTIPLE_MATCH' ? '手机号匹配多个账号，必须人工确认' : selectedWechatApplication.applicationType === 'PROJECT_ACCESS' ? '已有账号申请项目权限' : '新用户注册'}</div>
+        <div style={{ marginTop: 14, padding: 12, borderRadius: 7, background: T.surface2, border: `1px solid ${T.borderColor}`, color: T.textSecondary, fontSize: 12, lineHeight: 1.8 }}>来源电箱：{selectedWechatApplication.boxCode || '-'}<br />匹配账号：{selectedWechatApplication.matchedUsername || '未匹配'}<br />申请类型：{selectedWechatApplication.applicationType === 'MULTIPLE_MATCH' ? '多个已有账号待人工确认' : '已有账号申请项目访问'}<br />新账号必须先通过“系统管理 → 注册审核”创建，本入口不创建微信专用账号。</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14 }}>
-          <label style={{ color: T.textSecondary, fontSize: 11 }}>账号处理方式<select value={wechatApprovalForm.accountMode} onChange={e => setWechatApprovalForm({ ...wechatApprovalForm, accountMode: e.target.value, userId: e.target.value === 'CREATE' ? '' : wechatApprovalForm.userId })} style={{ ...fieldStyle, width: '100%', marginTop: 5 }}><option value="EXISTING">绑定已有账号</option><option value="CREATE">创建微信专用账号</option></select></label>
-          {wechatApprovalForm.accountMode === 'EXISTING' ? <label style={{ color: T.textSecondary, fontSize: 11 }}>选择系统账号<select value={wechatApprovalForm.userId} onChange={e => setWechatApprovalForm({ ...wechatApprovalForm, userId: e.target.value })} style={{ ...fieldStyle, width: '100%', marginTop: 5 }}><option value="">请选择账号</option>{userOptions.map(user => <option key={user.id} value={user.id}>{user.realName || user.username} · {user.phone || user.username}</option>)}</select></label> : <div style={{ padding: 10, borderRadius: 6, background: T.surface2, color: T.textMuted, fontSize: 11 }}>将自动生成微信专用用户名和不可登录随机密码，只允许微信登录。</div>}
+          <div style={{ padding: 10, borderRadius: 6, background: T.surface2, color: T.textMuted, fontSize: 11 }}>账号处理方式：绑定已有系统账号</div>
+          <label style={{ color: T.textSecondary, fontSize: 11 }}>选择系统账号<select value={wechatApprovalForm.userId} onChange={e => setWechatApprovalForm({ ...wechatApprovalForm, userId: e.target.value })} style={{ ...fieldStyle, width: '100%', marginTop: 5 }}><option value="">请选择账号</option>{userOptions.map(user => <option key={user.id} value={user.id}>{user.realName || user.username} · {user.phone || user.username}</option>)}</select></label>
           <label style={{ color: T.textSecondary, fontSize: 11 }}>项目职责<select value={wechatApprovalForm.projectRoleCode} onChange={e => setWechatApprovalForm({ ...wechatApprovalForm, projectRoleCode: e.target.value, permissionTemplateId: String(defaultTemplateIdForRole(e.target.value) || '') })} style={{ ...fieldStyle, width: '100%', marginTop: 5 }}>{PROJECT_ROLE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
           <label style={{ color: T.textSecondary, fontSize: 11 }}>权限角色 *<select value={wechatApprovalForm.permissionTemplateId} onChange={e => setWechatApprovalForm({ ...wechatApprovalForm, permissionTemplateId: e.target.value })} style={{ ...fieldStyle, width: '100%', marginTop: 5 }}><option value="">必须选择</option>{activePermissionTemplates.map(template => <option key={template.id} value={template.id}>{template.templateName}</option>)}</select></label>
           <label style={{ gridColumn: '1 / -1', color: T.textSecondary, fontSize: 11 }}>审批意见 *<textarea value={wechatApprovalForm.comment} onChange={e => setWechatApprovalForm({ ...wechatApprovalForm, comment: e.target.value })} style={{ ...fieldStyle, width: '100%', minHeight: 76, marginTop: 5, resize: 'vertical' }} /></label>
@@ -5745,12 +5705,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
 
 function ElectricInspectionPage({ projectId, theme: T, currentUser }) {
   const [activeTab, setActiveTab] = useState('ledger');
-  const canManagePermissions = canManageProjectMembersByUser(currentUser, projectId);
-  const visibleTabs = ELECTRIC_INSPECTION_TABS.filter(tab => !tab.permissionOnly || canManagePermissions);
-
-  useEffect(() => {
-    if (activeTab === 'permission' && !canManagePermissions) setActiveTab('ledger');
-  }, [activeTab, canManagePermissions]);
+  const visibleTabs = ELECTRIC_INSPECTION_TABS;
 
   return (
     <div style={{
@@ -5774,7 +5729,7 @@ function ElectricInspectionPage({ projectId, theme: T, currentUser }) {
       }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 800, color: T.textPrimary }}>巡检管理</div>
-          <div style={{ fontSize: 11, color: T.textMuted, marginTop: 3 }}>维护巡检台账、月度记录和小程序用户权限</div>
+          <div style={{ fontSize: 11, color: T.textMuted, marginTop: 3 }}>维护巡检台账和月度检查记录；用户权限已统一迁移至系统管理</div>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {visibleTabs.map(tab => (
@@ -5803,19 +5758,24 @@ function ElectricInspectionPage({ projectId, theme: T, currentUser }) {
 // ============================================
 export default function App() {
   const [isAuth, setIsAuth] = useState(isLoggedIn());
-  const [themeId, setThemeId] = useState(DEFAULT_THEME_ID);
   const [currentPage, setCurrentPage] = useState(PAGE_IDS.ELECTRIC_INSPECTION);
   const [currentProject, setCurrentProject] = useState(1);
-  const [compactMode, setCompactMode] = useState(false);
   const [projectList, setProjectList] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
+  const [currentUserError, setCurrentUserError] = useState('');
   const [showCameraPage, setShowCameraPage] = useState(false);
   const [cameraConfig, setCameraConfig] = useState({
     videoLayout: 4,
     cameraAssignments: [],
   });
 
-  const theme = getThemeById(themeId);
+  const theme = getThemeById(DEFAULT_THEME_ID);
+  const compactMode = false;
+  const visibleNavItems = useMemo(
+    () => currentUser ? NAV_ITEMS.filter((item) => canAccessPage(currentUser, item.id)) : [],
+    [currentUser],
+  );
+  const canAccessSystem = currentUser ? canAccessPage(currentUser, PAGE_IDS.SYSTEM_MANAGEMENT) : false;
 
   // 获取项目列表
   const fetchProjectList = useCallback(async () => {
@@ -5835,13 +5795,17 @@ export default function App() {
   }, []);
 
   const fetchCurrentUser = useCallback(async () => {
+    setCurrentUserError('');
     try {
       const res = await getCurrentUser();
       if (res.code === 200 && res.data) {
         setCurrentUser(res.data);
+      } else {
+        setCurrentUserError(res.message || '账号权限加载失败');
       }
     } catch (e) {
       console.error('获取当前用户信息失败', e);
+      setCurrentUserError(e.message || '账号权限加载失败');
     }
   }, []);
 
@@ -5853,8 +5817,16 @@ export default function App() {
   }, [isAuth, fetchProjectList, fetchCurrentUser]);
 
   useEffect(() => {
+    if (!currentUser) return;
+    if (currentPage === PAGE_IDS.SYSTEM_MANAGEMENT && canAccessSystem) return;
+    if (visibleNavItems.some((item) => item.id === currentPage)) return;
+    setCurrentPage(visibleNavItems[0]?.id || (canAccessSystem ? PAGE_IDS.SYSTEM_MANAGEMENT : PAGE_IDS.ELECTRIC_INSPECTION));
+  }, [canAccessSystem, currentPage, currentUser, visibleNavItems]);
+
+  useEffect(() => {
     const handleAuthExpired = () => {
       setCurrentUser(null);
+      setCurrentUserError('');
       setIsAuth(false);
     };
     window.addEventListener('site-platform-auth-expired', handleAuthExpired);
@@ -5866,10 +5838,15 @@ export default function App() {
     setCurrentPage(PAGE_IDS.ELECTRIC_INSPECTION);
   }, []);
 
-  const handleLogout = useCallback(() => {
-    localStorage.removeItem('site_platform_token');
-    localStorage.removeItem('site_platform_user');
+  const handleLogout = useCallback(async () => {
+    try {
+      await logout();
+    } catch (error) {
+      localStorage.removeItem('site_platform_token');
+      localStorage.removeItem('site_platform_user');
+    }
     setCurrentUser(null);
+    setCurrentUserError('');
     setIsAuth(false);
   }, []);
 
@@ -5884,6 +5861,19 @@ export default function App() {
       onEnterCameraPage: () => setShowCameraPage(true),
       onRefreshProjects: fetchProjectList,
     };
+    if (currentPage === PAGE_IDS.SYSTEM_MANAGEMENT) {
+      return canAccessSystem ? (
+        <SystemManagementPage
+          currentUser={currentUser}
+          currentProject={currentProject}
+          projectList={projectList}
+          onBack={() => setCurrentPage(visibleNavItems[0]?.id || PAGE_IDS.ELECTRIC_INSPECTION)}
+        />
+      ) : <NoAuthorizedPage theme={theme} />;
+    }
+    if (!visibleNavItems.some((item) => item.id === currentPage)) {
+      return <NoAuthorizedPage theme={theme} />;
+    }
     switch (currentPage) {
       case PAGE_IDS.PERSON_MANAGEMENT:
         return <PersonnelManagementPage {...pageProps} />;
@@ -5896,7 +5886,7 @@ export default function App() {
       case PAGE_IDS.ELECTRIC_INSPECTION:
         return <ElectricInspectionPage {...pageProps} />;
       default:
-        return <ElectricInspectionPage {...pageProps} />;
+        return <NoAuthorizedPage theme={theme} />;
     }
   };
 
@@ -5904,10 +5894,26 @@ export default function App() {
     return <LoginPage onLogin={handleLogin} theme={theme} />;
   }
 
+  if (!currentUser) {
+    return (
+      <div data-theme={DEFAULT_THEME_ID} style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', background: theme.pageBg, color: theme.textMuted }}>
+        {currentUserError ? (
+          <div style={{ padding: 24, textAlign: 'center', border: `1px solid ${theme.borderColor}`, borderRadius: 8, background: theme.cardBg }}>
+            <div style={{ color: theme.danger, marginBottom: 14 }}>{currentUserError}</div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+              <button onClick={fetchCurrentUser} style={{ padding: '7px 14px', borderRadius: 5, color: '#fff', background: theme.accent }}>重新加载</button>
+              <button onClick={handleLogout} style={{ padding: '7px 14px', borderRadius: 5, color: theme.textSecondary, border: `1px solid ${theme.borderColor}`, background: theme.cardBg }}>退出登录</button>
+            </div>
+          </div>
+        ) : '正在加载账号权限…'}
+      </div>
+    );
+  }
+
   // 如果进入了镜头管理页面，单独渲染
   if (showCameraPage) {
     return (
-      <div data-theme={themeId} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: theme.pageBg }}>
+      <div data-theme={DEFAULT_THEME_ID} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: theme.pageBg }}>
         <CameraPage
           projectId={currentProject}
           theme={theme}
@@ -5922,7 +5928,7 @@ export default function App() {
   }
 
   return (
-    <div data-theme={themeId} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: theme.pageBg }}>
+    <div data-theme={DEFAULT_THEME_ID} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: theme.pageBg }}>
       <TopNav
         currentPage={currentPage}
         onPageChange={setCurrentPage}
@@ -5931,12 +5937,10 @@ export default function App() {
         projectList={projectList}
         onRefreshProjects={fetchProjectList}
         theme={theme}
-        themeId={themeId}
-        onThemeChange={setThemeId}
-        compactMode={compactMode}
-        onCompactChange={setCompactMode}
         onLogout={handleLogout}
         currentUser={currentUser}
+        visibleNavItems={visibleNavItems}
+        canAccessSystem={canAccessSystem}
       />
       <main style={{ flex: 1, overflow: 'hidden' }}>
         {renderPage()}

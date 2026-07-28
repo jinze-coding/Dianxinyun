@@ -18,4 +18,8 @@ public class PageResult<T> {
         result.setRecords(records);
         return result;
     }
+
+    public List<T> getItems() {
+        return records;
+    }
 }

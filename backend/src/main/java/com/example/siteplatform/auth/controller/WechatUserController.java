@@ -35,8 +35,9 @@ public class WechatUserController {
     @Operation(summary = "查询小程序用户详情")
     @GetMapping("/{userId}")
     public Result<WechatUserDetailVO> detail(@PathVariable Long userId,
+                                             @RequestParam(required = false) Long projectId,
                                              @RequestHeader(value = "Authorization", required = false) String token) {
-        return Result.success(service.detail(userId, authService.getCurrentUser(token)));
+        return Result.success(service.detail(userId, projectId, authService.getCurrentUser(token)));
     }
 
     @Operation(summary = "启用或停用微信登录")

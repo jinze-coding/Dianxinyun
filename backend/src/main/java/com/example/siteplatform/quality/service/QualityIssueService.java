@@ -18,6 +18,7 @@ import com.example.siteplatform.quality.mapper.QualityIssueMapper;
 import com.example.siteplatform.quality.vo.QualityIssueSummaryVO;
 import com.example.siteplatform.quality.vo.QualityIssueVO;
 import com.example.siteplatform.project.service.ProjectPermissionService;
+import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -156,6 +157,8 @@ public class QualityIssueService {
     public QualityIssueVO submitRectification(Long id, QualityRectificationRequest request, SysUser currentUser) {
         QualityIssue issue = requireIssue(id);
         requireProject(issue.getProjectId(), currentUser);
+        projectPermissionService.requireSystemPermission(currentUser.getId(), issue.getProjectId(),
+                SystemPermissionCodes.QUALITY_RECTIFY);
         if (!STATUS_PENDING.equals(issue.getStatus())) {
             throw new BusinessException("只有待整改问题可以提交整改");
         }
@@ -186,7 +189,12 @@ public class QualityIssueService {
     @Transactional
     public QualityIssueVO reviewIssue(Long id, QualityReviewRequest request, SysUser currentUser) {
         QualityIssue issue = requireIssue(id);
-        requireManage(currentUser, issue.getProjectId());
+        requireProject(issue.getProjectId(), currentUser);
+        projectPermissionService.requireSystemPermission(currentUser.getId(), issue.getProjectId(),
+                SystemPermissionCodes.QUALITY_REVIEW);
+        if (!projectPermissionService.canManageQuality(currentUser.getId(), issue.getProjectId())) {
+            throw BusinessException.forbidden("无质量复查权限");
+        }
         if (!STATUS_RECHECK.equals(issue.getStatus())) {
             throw new BusinessException("只有待复查问题可以复查");
         }
@@ -285,10 +293,14 @@ public class QualityIssueService {
             throw new BusinessException("项目ID不能为空");
         }
         projectPermissionService.checkProjectPermission(currentUser.getId(), projectId);
+        projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
+                SystemPermissionCodes.QUALITY_VIEW);
     }
 
     private void requireManage(SysUser currentUser, Long projectId) {
         requireProject(projectId, currentUser);
+        projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
+                SystemPermissionCodes.QUALITY_MANAGE);
         if (!projectPermissionService.canManageQuality(currentUser.getId(), projectId)) {
             throw BusinessException.forbidden("无质量管理权限");
         }

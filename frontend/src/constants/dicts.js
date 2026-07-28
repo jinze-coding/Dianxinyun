@@ -80,6 +80,7 @@ export const PAGE_IDS = {
   QUALITY_MANAGEMENT: 'quality_management',
   DOCUMENT_MANAGEMENT: 'document_management',
   ELECTRIC_INSPECTION: 'electric_inspection',
+  SYSTEM_MANAGEMENT: 'system_management',
 };
 
 // 导航菜单

@@ -55,13 +55,13 @@ public class ProjectMemberController {
         return Result.success(projectMemberService.listUserOptions(projectId, keyword, currentUser));
     }
 
-    @Operation(summary = "新增用户并加入项目")
+    @Operation(summary = "已停用：新账号必须通过统一注册审批")
     @PostMapping("/users")
     public Result<ProjectMemberVO> createUser(
             @RequestBody CreateProjectUserRequest request,
             @RequestHeader(value = "Authorization", required = false) String token) {
-        SysUser currentUser = authService.getCurrentUser(token);
-        return Result.success(projectMemberService.createUserAndJoinProject(request, currentUser));
+        return Result.success(projectMemberService.createUserAndJoinProject(
+                request, authService.getCurrentUser(token)));
     }
 
     @Operation(summary = "添加项目成员")

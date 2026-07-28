@@ -7,9 +7,14 @@ import com.example.siteplatform.auth.dto.WechatPhoneRequest;
 import com.example.siteplatform.auth.dto.WechatSessionRequest;
 import com.example.siteplatform.auth.dto.WechatSessionResponse;
 import com.example.siteplatform.auth.dto.WechatProjectAccessRequest;
+import com.example.siteplatform.auth.dto.WechatBindLoginRequest;
+import com.example.siteplatform.auth.dto.WechatCurrentBindRequest;
+import com.example.siteplatform.auth.dto.WechatSelfUnbindRequest;
 import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.auth.service.AuthService;
+import com.example.siteplatform.auth.service.CaptchaService;
 import com.example.siteplatform.auth.service.WechatAuthService;
+import com.example.siteplatform.common.RedisRateLimitService;
 import com.example.siteplatform.common.Result;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -17,6 +22,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
+
+import java.time.Duration;
+import java.util.Map;
 
 @Tag(name = "认证管理", description = "用户登录、登出、用户信息接口")
 @RestController
@@ -29,28 +37,84 @@ public class AuthController {
     @Autowired
     private WechatAuthService wechatAuthService;
 
+    @Autowired
+    private CaptchaService captchaService;
+
+    @Autowired
+    private RedisRateLimitService rateLimitService;
+
+    @Operation(summary = "获取注册图形验证码")
+    @GetMapping("/captcha")
+    public Result<Map<String, Object>> captcha(HttpServletRequest request) {
+        rateLimitService.check("captcha", request.getRemoteAddr(), 30, Duration.ofMinutes(10));
+        return Result.success(captchaService.create());
+    }
+
     @Operation(summary = "用户登录")
     @PostMapping("/login")
-    public Result<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
+    public Result<LoginResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
+        String remoteAddress = httpRequest.getRemoteAddr();
+        rateLimitService.check("password-login-ip", remoteAddress, 30, Duration.ofMinutes(10));
+        rateLimitService.check("password-login-account", remoteAddress + ":" + request.getUsername().trim(),
+                10, Duration.ofMinutes(10));
         LoginResponse response = authService.login(request);
         return Result.success(response);
     }
 
     @Operation(summary = "微信小程序登录并查询绑定状态")
     @PostMapping("/wechat/session")
-    public Result<WechatSessionResponse> wechatSession(@RequestBody WechatSessionRequest request) {
+    public Result<WechatSessionResponse> wechatSession(@Valid @RequestBody WechatSessionRequest request,
+                                                        HttpServletRequest httpRequest) {
+        rateLimitService.check("wechat-session", httpRequest.getRemoteAddr(), 20, Duration.ofMinutes(10));
         return Result.success(wechatAuthService.session(request));
+    }
+
+    @Operation(summary = "微信小程序快捷登录")
+    @PostMapping("/wechat/mini/login")
+    public Result<WechatSessionResponse> wechatMiniLogin(@Valid @RequestBody WechatSessionRequest request,
+                                                         HttpServletRequest httpRequest) {
+        rateLimitService.check("wechat-mini-login", httpRequest.getRemoteAddr(), 20, Duration.ofMinutes(10));
+        return Result.success(wechatAuthService.miniLogin(request));
+    }
+
+    @Operation(summary = "账号密码验证后绑定微信并登录")
+    @PostMapping("/wechat/mini/bind-login")
+    public Result<WechatSessionResponse> wechatBindLogin(@Valid @RequestBody WechatBindLoginRequest request,
+                                                         HttpServletRequest httpRequest) {
+        String remoteAddress = httpRequest.getRemoteAddr();
+        rateLimitService.check("wechat-bind-login-ip", remoteAddress, 30, Duration.ofMinutes(10));
+        rateLimitService.check("wechat-bind-login-account", remoteAddress + ":" + request.getUsername().trim(),
+                10, Duration.ofMinutes(10));
+        return Result.success(wechatAuthService.bindLogin(request));
+    }
+
+    @Operation(summary = "当前账号绑定微信")
+    @PostMapping("/wechat/bind")
+    public Result<WechatSessionResponse> bindCurrentWechat(@Valid @RequestBody WechatCurrentBindRequest request,
+                                                            HttpServletRequest httpRequest) {
+        return Result.success(wechatAuthService.bindCurrent(request.getCode(),
+                authService.getCurrentUser(extractToken(httpRequest))));
+    }
+
+    @Operation(summary = "当前账号解绑微信")
+    @PostMapping("/wechat/unbind")
+    public Result<Void> unbindCurrentWechat(@Valid @RequestBody WechatSelfUnbindRequest request,
+                                             HttpServletRequest httpRequest) {
+        wechatAuthService.unbindCurrent(authService.getCurrentUser(extractToken(httpRequest)), request.getPassword());
+        return Result.success();
     }
 
     @Operation(summary = "微信手机号匹配账号或提交权限申请")
     @PostMapping("/wechat/phone")
-    public Result<WechatSessionResponse> wechatPhone(@RequestBody WechatPhoneRequest request) {
+    public Result<WechatSessionResponse> wechatPhone(@Valid @RequestBody WechatPhoneRequest request,
+                                                      HttpServletRequest httpRequest) {
+        rateLimitService.check("wechat-phone", httpRequest.getRemoteAddr(), 10, Duration.ofMinutes(10));
         return Result.success(wechatAuthService.bindPhone(request));
     }
 
     @Operation(summary = "已绑定微信用户申请当前项目权限")
     @PostMapping("/wechat/project-access")
-    public Result<WechatSessionResponse> wechatProjectAccess(@RequestBody WechatProjectAccessRequest request,
+    public Result<WechatSessionResponse> wechatProjectAccess(@Valid @RequestBody WechatProjectAccessRequest request,
                                                              HttpServletRequest httpRequest) {
         return Result.success(wechatAuthService.requestProjectAccess(request,
                 authService.getCurrentUser(extractToken(httpRequest))));

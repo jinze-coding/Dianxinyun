@@ -16,6 +16,7 @@ import {
   uploadFile,
 } from "../../services/file";
 import { getProjectMembers } from "../../services/projectMembers";
+import { hasProjectPermission, isPlatformAdmin } from "../../utils/permissions";
 
 const EMPTY_CREATE = {
   title: "",
@@ -45,7 +46,7 @@ const actionLabel = (value) =>
     ASSIGN: "改派/调整期限",
   })[value] || value;
 
-export default function QualityManagementPage({ projectId, theme: T }) {
+export default function QualityManagementPage({ projectId, theme: T, currentUser }) {
   const [summary, setSummary] = useState(null);
   const [issues, setIssues] = useState([]);
   const [documents, setDocuments] = useState([]);
@@ -135,7 +136,13 @@ export default function QualityManagementPage({ projectId, theme: T }) {
     load();
   }, [projectId, status]);
 
-  const canManage = Boolean(summary?.canManage);
+  const canManage = Boolean(summary?.canManage)
+    && (isPlatformAdmin(currentUser)
+      || hasProjectPermission(currentUser, projectId, "quality.manage"));
+  const canRectify = isPlatformAdmin(currentUser)
+    || hasProjectPermission(currentUser, projectId, "quality.rectify");
+  const canReview = isPlatformAdmin(currentUser)
+    || hasProjectPermission(currentUser, projectId, "quality.review");
   const filteredIssues = useMemo(
     () =>
       !keyword.trim()
@@ -758,6 +765,8 @@ export default function QualityManagementPage({ projectId, theme: T }) {
                 actionForm={actionForm}
                 setActionForm={setActionForm}
                 canManage={canManage}
+                canRectify={canRectify}
+                canReview={canReview}
                 submitting={submitting}
                 buttonStyle={buttonStyle}
                 fieldStyle={fieldStyle}
@@ -835,6 +844,8 @@ function IssueDetail({
   actionForm,
   setActionForm,
   canManage,
+  canRectify,
+  canReview,
   submitting,
   buttonStyle,
   fieldStyle,
@@ -940,7 +951,7 @@ function IssueDetail({
           ))}
         </div>
       )}
-      {issue.canRectify && (
+      {issue.canRectify && canRectify && (
         <div
           style={{
             padding: 12,
@@ -981,7 +992,7 @@ function IssueDetail({
           </button>
         </div>
       )}
-      {issue.canReview && (
+      {issue.canReview && canReview && (
         <div
           style={{
             padding: 12,

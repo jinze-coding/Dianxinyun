@@ -21,4 +21,14 @@ public class OperationLog {
     private Long businessId;
     private String ipAddress;
     private LocalDateTime createTime;
+
+    public LocalDateTime getCreatedAt() { return createTime; }
+    public String getOperatorName() { return username; }
+    public String getModule() { return businessType; }
+    public String getAction() { return operationType; }
+    public String getTargetName() {
+        return businessType + (businessId == null ? "" : "#" + businessId);
+    }
+    public String getResult() { return "SUCCESS"; }
+    public String getDescription() { return operationDesc; }
 }

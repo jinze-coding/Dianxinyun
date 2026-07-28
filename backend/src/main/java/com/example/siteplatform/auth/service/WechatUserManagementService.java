@@ -19,6 +19,7 @@ import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
 import com.example.siteplatform.project.service.ProjectPermissionService;
 import org.springframework.beans.BeanUtils;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -66,6 +67,7 @@ public class WechatUserManagementService {
                                                  Long permissionTemplateId, Integer pageNo, Integer pageSize,
                                                  SysUser currentUser) {
         requireListPermission(projectId, currentUser);
+        boolean platformAdmin = permissionService.isPlatformAdmin(currentUser.getId());
         int currentPage = pageNo == null || pageNo < 1 ? 1 : pageNo;
         int size = pageSize == null ? 20 : Math.max(1, Math.min(pageSize, 100));
         List<SysUserWechatBinding> bindings = bindingMapper.selectList(new LambdaQueryWrapper<SysUserWechatBinding>()
@@ -103,7 +105,9 @@ public class WechatUserManagementService {
                     && (selected == null || !projectRoleCode.trim().equalsIgnoreCase(selected.getProjectRoleCode()))) continue;
             if (permissionTemplateId != null
                     && (selected == null || !permissionTemplateId.equals(selected.getInspectionPermissionTemplateId()))) continue;
-            items.add(toListItem(binding, user, projects, selected));
+            List<SysUserProject> visibleProjects = platformAdmin ? projects
+                    : projects.stream().filter(item -> Objects.equals(item.getProjectId(), projectId)).toList();
+            items.add(toListItem(binding, user, visibleProjects, selected));
         }
         int from = Math.min((currentPage - 1) * size, items.size());
         int to = Math.min(from + size, items.size());
@@ -136,33 +140,47 @@ public class WechatUserManagementService {
 
     private long value(Long value) { return value == null ? 0L : value; }
 
-    public WechatUserDetailVO detail(Long userId, SysUser currentUser) {
+    public WechatUserDetailVO detail(Long userId, Long projectId, SysUser currentUser) {
         SysUser user = userMapper.selectById(userId);
         if (user == null) throw BusinessException.notFound("小程序用户不存在");
+        boolean platformAdmin = permissionService.isPlatformAdmin(currentUser.getId());
+        if (!platformAdmin) {
+            if (projectId == null) throw new BusinessException("项目ID不能为空");
+            if (!permissionService.canManageProjectMembers(currentUser.getId(), projectId)) {
+                throw BusinessException.forbidden("无该项目小程序用户查看权限");
+            }
+        }
         List<SysUserProject> projects = userProjectMapper.selectList(new LambdaQueryWrapper<SysUserProject>()
                 .eq(SysUserProject::getUserId, userId).orderByAsc(SysUserProject::getProjectId));
-        if (!permissionService.isPlatformAdmin(currentUser.getId())
-                && projects.stream().noneMatch(item -> permissionService.canManageProjectMembers(currentUser.getId(), item.getProjectId()))) {
+        if (!platformAdmin && projects.stream().noneMatch(item -> Objects.equals(item.getProjectId(), projectId))) {
             throw BusinessException.forbidden("无该小程序用户查看权限");
         }
+        List<SysUserProject> visibleProjects = projectId == null ? projects
+                : projects.stream().filter(item -> Objects.equals(item.getProjectId(), projectId)).toList();
         WechatUserDetailVO result = new WechatUserDetailVO();
         result.setUserId(user.getId()); result.setUsername(user.getUsername()); result.setRealName(user.getRealName());
         result.setPhone(user.getPhone()); result.setStatus(user.getStatus());
-        result.setBindings(bindingMapper.selectList(new LambdaQueryWrapper<SysUserWechatBinding>()
-                .eq(SysUserWechatBinding::getUserId, userId).eq(SysUserWechatBinding::getDeleted, 0)
-                .orderByDesc(SysUserWechatBinding::getId)).stream().map(this::toBindingVO).toList());
-        result.setProjects(projects.stream()
-                .filter(item -> permissionService.isPlatformAdmin(currentUser.getId())
-                        || permissionService.canManageProjectMembers(currentUser.getId(), item.getProjectId()))
-                .map(this::toProjectVO).toList());
-        result.setApplications(applicationMapper.selectList(new LambdaQueryWrapper<WechatAccessApplication>()
-                .eq(WechatAccessApplication::getMatchedUserId, userId).orderByDesc(WechatAccessApplication::getCreateTime))
-                .stream().map(this::toApplicationVO).toList());
-        result.setOperationLogs(operationLogMapper.selectList(new LambdaQueryWrapper<OperationLog>()
-                .eq(OperationLog::getBusinessId, userId)
-                .in(OperationLog::getBusinessType, "WECHAT_USER", "WECHAT_PROJECT_ACCESS")
-                .orderByDesc(OperationLog::getCreateTime).last("LIMIT 100"))
-                .stream().map(this::toLogVO).toList());
+        result.setBindings(platformAdmin
+                ? bindingMapper.selectList(new LambdaQueryWrapper<SysUserWechatBinding>()
+                        .eq(SysUserWechatBinding::getUserId, userId).eq(SysUserWechatBinding::getDeleted, 0)
+                        .orderByDesc(SysUserWechatBinding::getId)).stream().map(this::toBindingVO).toList()
+                : List.of());
+        result.setProjects(visibleProjects.stream().map(this::toProjectVO).toList());
+        LambdaQueryWrapper<WechatAccessApplication> applicationQuery =
+                new LambdaQueryWrapper<WechatAccessApplication>()
+                        .eq(WechatAccessApplication::getMatchedUserId, userId)
+                        .eq(projectId != null, WechatAccessApplication::getProjectId, projectId)
+                        .orderByDesc(WechatAccessApplication::getCreateTime);
+        result.setApplications(applicationMapper.selectList(applicationQuery).stream()
+                .filter(item -> projectId == null || Objects.equals(item.getProjectId(), projectId))
+                .map(this::toApplicationVO).toList());
+        result.setOperationLogs(platformAdmin
+                ? operationLogMapper.selectList(new LambdaQueryWrapper<OperationLog>()
+                        .eq(OperationLog::getBusinessId, userId)
+                        .in(OperationLog::getBusinessType, "WECHAT_USER", "WECHAT_PROJECT_ACCESS")
+                        .orderByDesc(OperationLog::getCreateTime).last("LIMIT 100"))
+                        .stream().map(this::toLogVO).toList()
+                : List.of());
         return result;
     }
 
@@ -177,7 +195,11 @@ public class WechatUserManagementService {
         if ("UNBOUND".equals(binding.getStatus())) throw new BusinessException("已解绑微信需重新申请绑定，不能直接恢复");
         if ("ACTIVE".equals(status)) ensureNoOtherActiveBinding(binding);
         binding.setStatus(status); binding.setUpdateTime(LocalDateTime.now());
-        bindingMapper.updateById(binding);
+        try {
+            bindingMapper.updateById(binding);
+        } catch (DuplicateKeyException exception) {
+            throw BusinessException.of(409, "微信或系统账号已有其他有效绑定，请刷新后重试");
+        }
         authService.logout(userId);
         record(userId, operator, "ACTIVE".equals(status) ? "RESTORE_WECHAT_BINDING" : "DISABLE_WECHAT_BINDING",
                 "微信绑定" + bindingId + "状态变更为" + status, request.getReason());
@@ -219,7 +241,20 @@ public class WechatUserManagementService {
                 .eq(SysUserWechatBinding::getUserId, binding.getUserId()).eq(SysUserWechatBinding::getAppId, binding.getAppId())
                 .eq(SysUserWechatBinding::getStatus, "ACTIVE").eq(SysUserWechatBinding::getDeleted, 0)
                 .ne(SysUserWechatBinding::getId, binding.getId()));
-        if (count != null && count > 0) throw new BusinessException("同一小程序账号已绑定其他微信，请先解绑原微信");
+        if (count != null && count > 0) {
+            throw BusinessException.of(409, "同一小程序账号已绑定其他微信，请先解绑原微信");
+        }
+        if (StringUtils.hasText(binding.getUnionid())) {
+            Long unionidCount = bindingMapper.selectCount(new LambdaQueryWrapper<SysUserWechatBinding>()
+                    .eq(SysUserWechatBinding::getAppId, binding.getAppId())
+                    .eq(SysUserWechatBinding::getUnionid, binding.getUnionid())
+                    .eq(SysUserWechatBinding::getStatus, "ACTIVE")
+                    .eq(SysUserWechatBinding::getDeleted, 0)
+                    .ne(SysUserWechatBinding::getId, binding.getId()));
+            if (unionidCount != null && unionidCount > 0) {
+                throw BusinessException.of(409, "该微信 UnionID 已绑定其他系统账号");
+            }
+        }
     }
 
     private WechatUserListItemVO toListItem(SysUserWechatBinding binding, SysUser user, List<SysUserProject> projects, SysUserProject selected) {
@@ -227,7 +262,7 @@ public class WechatUserManagementService {
         vo.setBindingId(binding.getId()); vo.setUserId(user.getId()); vo.setUsername(user.getUsername());
         vo.setRealName(user.getRealName()); vo.setPhone(StringUtils.hasText(binding.getPhone()) ? binding.getPhone() : user.getPhone());
         vo.setBindingStatus(binding.getStatus()); vo.setBindTime(binding.getBindTime()); vo.setLastLoginTime(binding.getLastLoginTime());
-        vo.setProjectCount(projects.size()); vo.setRegistrationSource(hasApprovedApplication(user.getId()) ? "小程序审批" : "手机号自动绑定");
+        vo.setProjectCount(projects.size()); vo.setRegistrationSource(hasApprovedApplication(user.getId()) ? "小程序审批" : "账号验证绑定");
         if (selected != null) {
             vo.setProjectId(selected.getProjectId()); vo.setProjectRoleCode(selected.getProjectRoleCode());
             vo.setPermissionTemplateId(selected.getInspectionPermissionTemplateId()); vo.setProjectAccessStatus(selected.getStatus());

@@ -6,7 +6,9 @@ import { getPublicElectricBoxMonthly } from '@/api/electricBox';
 import type { PublicElectricBoxMonthly } from '@/types';
 import { showToast } from '@/utils/navigation';
 import { getToken } from '@/api/request';
-import { requestWechatProjectAccess, wechatSession } from '@/api/auth';
+import { requestWechatProjectAccess, miniWechatLogin } from '@/api/auth';
+import { useAuthStore } from '@/stores/auth';
+import { getFreshWechatCode } from '@/utils/wechat';
 
 const publicCode = ref('');
 const month = ref('');
@@ -15,6 +17,7 @@ const loading = ref(true);
 const errorMessage = ref('');
 const wechatBusy = ref(false);
 const accessMessage = ref('');
+const authStore = useAuthStore();
 const monthStart = computed(() => {
   const now = new Date(); now.setMonth(now.getMonth() - 11);
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -43,15 +46,25 @@ async function internalAccess() {
     if (getToken()) {
       const response = await requestWechatProjectAccess(scene);
       accessMessage.value = response.message;
-      showToast(response.message);
+      if (response.bindingStatus === 'BOUND') {
+        uni.redirectTo({ url: `/pages/scan-entry/index?scene=${encodeURIComponent(scene)}` });
+      } else {
+        showToast(response.message);
+      }
       return;
     }
     // #ifdef MP-WEIXIN
-    const loginResult = await new Promise<UniApp.LoginRes>((resolve, reject) => uni.login({ provider: 'weixin', success: resolve, fail: reject }));
-    const response = await wechatSession(loginResult.code, scene);
+    const response = await miniWechatLogin(await getFreshWechatCode(), scene);
     accessMessage.value = response.message;
-    if (response.bindingStatus === 'BOUND') {
-      uni.redirectTo({ url: `/pages/scan-entry/index?scene=${encodeURIComponent(scene)}` });
+    if (response.token) {
+      await authStore.completeLogin(response.token);
+      const application = await requestWechatProjectAccess(scene);
+      accessMessage.value = application.message;
+      if (application.bindingStatus === 'BOUND') {
+        uni.redirectTo({ url: `/pages/scan-entry/index?scene=${encodeURIComponent(scene)}` });
+      } else {
+        showToast(application.message);
+      }
     } else if (response.bindingStatus === 'UNBOUND' || response.bindingStatus === 'APPLICATION_REJECTED') {
       uni.navigateTo({ url: `/pages/wechat-bind/index?session=${encodeURIComponent(response.wechatSessionToken || '')}&scene=${encodeURIComponent(scene)}` });
     } else if (response.bindingStatus === 'BOUND_NO_PROJECT_ACCESS') {

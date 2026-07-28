@@ -6,38 +6,73 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 
 import java.nio.charset.StandardCharsets;
+import java.net.URI;
 import java.security.MessageDigest;
 import java.util.Map;
 import java.util.Base64;
 import java.util.concurrent.TimeUnit;
+import java.util.Arrays;
 
 @Component
 public class WechatPlatformClient {
 
-    private final RestClient restClient = RestClient.create();
+    private final RestClient restClient;
     private final ObjectMapper objectMapper;
     private final RedisTemplate<String, Object> redisTemplate;
 
-    @Value("${wechat.mini-program.app-id:touristappid}")
-    private String appId;
-    @Value("${wechat.mini-program.app-secret:}")
-    private String appSecret;
-    @Value("${wechat.mini-program.mock-enabled:true}")
-    private boolean mockEnabled;
+    private final String appId;
+    private final String appSecret;
+    private final boolean mockEnabled;
+    private final boolean production;
 
-    public WechatPlatformClient(ObjectMapper objectMapper, RedisTemplate<String, Object> redisTemplate) {
+    public WechatPlatformClient(ObjectMapper objectMapper, RedisTemplate<String, Object> redisTemplate,
+                                @Value("${wechat.mini-program.app-id:touristappid}") String appId,
+                                @Value("${wechat.mini-program.app-secret:}") String appSecret,
+                                @Value("${wechat.mini-program.mock-enabled:false}") boolean mockEnabled,
+                                @Value("${wechat.mini-program.production:false}") boolean production,
+                                @Value("${wechat.mini-program.legal-domain:}") String legalDomain,
+                                @Value("${wechat.mini-program.public-fallback-url:http://localhost:3003}") String publicFallbackUrl,
+                                @Value("${wechat.mini-program.connect-timeout-millis:5000}") int connectTimeout,
+                                @Value("${wechat.mini-program.read-timeout-millis:8000}") int readTimeout,
+                                Environment environment) {
         this.objectMapper = objectMapper;
         this.redisTemplate = redisTemplate;
+        this.appId = appId;
+        this.appSecret = appSecret;
+        boolean developmentProfile = Arrays.stream(environment.getActiveProfiles())
+                .anyMatch(profile -> "dev".equalsIgnoreCase(profile)
+                        || "local".equalsIgnoreCase(profile)
+                        || "test".equalsIgnoreCase(profile));
+        boolean productionProfile = Arrays.stream(environment.getActiveProfiles())
+                .anyMatch(profile -> "prod".equalsIgnoreCase(profile)
+                        || "production".equalsIgnoreCase(profile));
+        if (mockEnabled && !developmentProfile) {
+            throw new IllegalStateException("微信 mock 仅允许在 dev、local 或 test 环境启用");
+        }
+        this.mockEnabled = mockEnabled && developmentProfile;
+        this.production = production || productionProfile || !developmentProfile;
+        if (this.production && (this.mockEnabled || !StringUtils.hasText(appId)
+                || !StringUtils.hasText(appSecret) || "touristappid".equals(appId)
+                || !legalHttpsUrl(legalDomain) || !legalHttpsUrl(publicFallbackUrl))) {
+            throw new IllegalStateException(
+                    "生产环境必须配置正式微信 AppID/AppSecret、合法 HTTPS 域名和 HTTPS 扫码回跳地址，并关闭 mock");
+        }
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(connectTimeout);
+        requestFactory.setReadTimeout(readTimeout);
+        this.restClient = RestClient.builder().requestFactory(requestFactory).build();
     }
 
     public WechatIdentity login(String code) {
         if (!StringUtils.hasText(code)) throw new BusinessException("微信登录 code 不能为空");
-        if (mockEnabled || !StringUtils.hasText(appSecret) || "touristappid".equals(appId)) {
+        if (developmentMock()) {
             return new WechatIdentity(appId, "mock_" + digest(code).substring(0, 24), null);
         }
         String body = restClient.get()
@@ -51,7 +86,7 @@ public class WechatPlatformClient {
     }
 
     public String getPhoneNumber(String phoneCode, String mockPhone) {
-        if (mockEnabled || !StringUtils.hasText(appSecret) || "touristappid".equals(appId)) {
+        if (developmentMock()) {
             if (!StringUtils.hasText(mockPhone)) throw new BusinessException("开发模式请填写手机号");
             return mockPhone.trim();
         }
@@ -74,6 +109,11 @@ public class WechatPlatformClient {
 
     public boolean officialCodeEnabled() {
         return !mockEnabled && StringUtils.hasText(appSecret) && !"touristappid".equals(appId);
+    }
+
+    private boolean developmentMock() {
+        if (production) return false;
+        return mockEnabled;
     }
 
     public String generateUnlimitedCode(String scene, String page, String envVersion) {
@@ -129,6 +169,21 @@ public class WechatPlatformClient {
             return result.toString();
         } catch (Exception e) {
             throw new IllegalStateException(e);
+        }
+    }
+
+    private boolean legalHttpsUrl(String value) {
+        if (!StringUtils.hasText(value)) return false;
+        try {
+            URI uri = URI.create(value.trim());
+            String host = uri.getHost();
+            return "https".equalsIgnoreCase(uri.getScheme())
+                    && StringUtils.hasText(host)
+                    && !"localhost".equalsIgnoreCase(host)
+                    && !"127.0.0.1".equals(host)
+                    && !"::1".equals(host);
+        } catch (IllegalArgumentException exception) {
+            return false;
         }
     }
 

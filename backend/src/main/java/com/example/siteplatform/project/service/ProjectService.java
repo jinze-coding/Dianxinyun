@@ -25,6 +25,8 @@ import com.example.siteplatform.project.dto.ProjectLocationUpdateRequest;
 import com.example.siteplatform.project.dto.ProjectMapPointVO;
 import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.mapper.ProjectInfoMapper;
+import com.example.siteplatform.system.constant.SystemPermissionCodes;
+import com.example.siteplatform.system.service.SystemPermissionService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -71,9 +73,14 @@ public class ProjectService {
     @Autowired
     private OperationLogMapper operationLogMapper;
 
+    @Autowired
+    private SystemPermissionService systemPermissionService;
+
     public List<ProjectInfo> getProjectList(SysUser currentUser) {
-        // 平台管理员可以看到所有项目
-        if (projectPermissionService.isPlatformAdmin(currentUser.getId())) {
+        // 平台管理员与注册审核员需要在账号审批时查看完整项目目录。
+        if (projectPermissionService.isPlatformAdmin(currentUser.getId())
+                || systemPermissionService.permissionCodes(currentUser.getId())
+                .contains(SystemPermissionCodes.REGISTRATION_REVIEW)) {
             return projectMapper.selectList(null);
         }
         // 其他用户只能看到有权限的项目

@@ -8,11 +8,13 @@ import { submitSafetySpotCheck } from '@/api/inspection';
 import { uploadPhotoIds } from '@/api/file';
 import { getProjectMembers } from '@/api/projectMember';
 import { spotCheckCategories } from '@/constants/spotCheck';
+import { useAuthStore } from '@/stores/auth';
 import type { ElectricBox, ProjectMember } from '@/types';
 import { usePageScrollHeight } from '@/utils/navLayout';
 import { getQueryNumber, navigateTo, showToast, switchTab } from '@/utils/navigation';
 
 const PHOTO_MAX = 4;
+const authStore = useAuthStore();
 const firstCategory = spotCheckCategories[0];
 const box = ref<ElectricBox>();
 const members = ref<ProjectMember[]>([]);
@@ -29,9 +31,21 @@ const showConfirm = ref(false);
 const { scrollStyle } = usePageScrollHeight({ bottomRpx: 132, minHeight: 240 });
 
 onShow(async () => {
+  if (!await authStore.ensureRootAccess('/pages/inspection/index')) return;
   const pages = getCurrentPages();
   const current = pages[pages.length - 1] as unknown as { options?: Record<string, string> };
-  box.value = await getElectricBoxDetail(getQueryNumber(current.options?.boxId, 102));
+  const loadedBox = await getElectricBoxDetail(getQueryNumber(current.options?.boxId, 102));
+  if (!loadedBox) { showToast('未找到电箱信息'); return; }
+  box.value = loadedBox;
+  if (!await authStore.ensureProjectPermission(
+    '/pages/inspection/index',
+    Number(loadedBox.projectId),
+    'inspection.submit',
+    'INSPECTION_REVIEW'
+  )) {
+    box.value = undefined;
+    return;
+  }
   await loadProjectMembers();
 });
 

@@ -40,20 +40,11 @@ export interface DocumentUpdateInput {
   remark?: string;
 }
 
-const MOCK_NOW = '2026-07-17T23:20:00';
 let mockDocumentId = 100;
 let mockFolderId = 20;
 let mockVersionId = 200;
-const mockFolders: DocumentFolder[] = [
-  { id: 11, projectId: 1, parentId: 0, folderName: '施工图纸', documentCount: 1, updateTime: MOCK_NOW },
-  { id: 12, projectId: 1, parentId: 0, folderName: '检查表格', documentCount: 1, updateTime: MOCK_NOW },
-  { id: 13, projectId: 1, parentId: 0, folderName: '会议纪要', documentCount: 1, updateTime: MOCK_NOW }
-];
-const mockDocuments: ProjectDocument[] = [
-  mockDocument(91, 1, 11, '施工图纸', 'A1区域施工总平面图', 'TZ-A1-001', 'DRAWING', 'A1-施工总平面图.pdf', 'pdf', 2480000, 'ACTIVE'),
-  mockDocument(92, 1, 12, '检查表格', '主体结构检查记录', 'JC-A1-014', 'FORM', '主体结构检查记录.xlsx', 'xlsx', 386000, 'ACTIVE'),
-  mockDocument(93, 1, 13, '会议纪要', '七月施工协调会纪要', 'HY-2026-07', 'MEETING', '七月施工协调会纪要.docx', 'docx', 728000, 'ARCHIVED')
-];
+const mockFolders: DocumentFolder[] = [];
+const mockDocuments: ProjectDocument[] = [];
 const mockRecycleDocuments: ProjectDocument[] = [];
 
 function mockDocument(id: number, projectId: number, folderId: number, folderName: string, title: string,
@@ -61,9 +52,9 @@ function mockDocument(id: number, projectId: number, folderId: number, folderNam
   fileSize: number, status: DocumentStatus): ProjectDocument {
   return {
     id, projectId, folderId, folderName, title, documentNo, category, status,
-    remark: status === 'ARCHIVED' ? '已归档会议资料' : '现场资料同步示例',
-    createdBy: 1, createdByName: '系统管理员', createTime: MOCK_NOW, updateTime: MOCK_NOW,
-    currentVersion: { id: id + 100, versionNo: 1, versionLabel: 'V1', fileName, fileExtension: extension, fileSize, createdByName: '系统管理员', createTime: MOCK_NOW },
+    remark: '',
+    createdBy: 0, createdByName: '', createTime: '', updateTime: '',
+    currentVersion: { id: id + 100, versionNo: 1, versionLabel: 'V1', fileName, fileExtension: extension, fileSize, createdByName: '', createTime: '' },
     canEdit: status === 'ACTIVE', canManage: true
   };
 }

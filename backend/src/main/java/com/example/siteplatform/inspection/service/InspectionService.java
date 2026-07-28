@@ -46,6 +46,7 @@ import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
 import com.example.siteplatform.project.service.ProjectMemberService;
 import com.example.siteplatform.project.service.ProjectPermissionService;
+import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import com.example.siteplatform.notification.service.WechatNotificationService;
 import org.apache.poi.ss.usermodel.CellStyle;
 import org.apache.poi.ss.usermodel.BorderStyle;
@@ -279,6 +280,7 @@ public class InspectionService {
     public InspectionRecordVO submitRecord(Long id, SysUser currentUser) {
         InspectionRecord record = requireRecord(id);
         projectPermissionService.checkProjectPermission(currentUser.getId(), record.getProjectId());
+        requireDailySubmitPermission(currentUser, record.getProjectId());
         if (!Objects.equals(record.getInspectorId(), currentUser.getId())
                 && !projectPermissionService.hasInspectionPermission(currentUser.getId(), record.getProjectId(), InspectionPermissionCodes.INSPECTION_RECORD_VIEW)) {
             throw BusinessException.forbidden("只能提交自己的检查记录");
@@ -395,7 +397,9 @@ public class InspectionService {
             Long projectId = project.getId();
             String projectName = StringUtils.hasText(project.getShortName()) ? project.getShortName() : project.getProjectName();
             boolean canSubmitDaily = projectPermissionService.hasInspectionPermission(currentUser.getId(), projectId,
-                    InspectionPermissionCodes.INSPECTION_DAILY_SUBMIT);
+                    InspectionPermissionCodes.INSPECTION_DAILY_SUBMIT)
+                    && projectPermissionService.hasSystemPermission(currentUser.getId(), projectId,
+                    SystemPermissionCodes.INSPECTION_SUBMIT);
             if (canSubmitDaily) {
                 appendInspectionTodos(todos, idGenerator, projectId, projectName);
             }
@@ -535,6 +539,8 @@ public class InspectionService {
     public InspectionRectificationVO getRectification(Long id, SysUser currentUser) {
         InspectionRectification rectification = requireRectification(id);
         projectPermissionService.checkProjectPermission(currentUser.getId(), rectification.getProjectId());
+        projectPermissionService.requireSystemPermission(currentUser.getId(), rectification.getProjectId(),
+                SystemPermissionCodes.INSPECTION_VIEW);
         if (!projectPermissionService.hasInspectionPermission(currentUser.getId(), rectification.getProjectId(), InspectionPermissionCodes.RECTIFICATION_VIEW)
                 && !Objects.equals(rectification.getAssigneeId(), currentUser.getId())) {
             throw BusinessException.forbidden("无整改任务访问权限");
@@ -545,6 +551,8 @@ public class InspectionService {
     public InspectionRectificationVO completeRectification(Long id, RectificationCompleteRequest request,
                                                            SysUser currentUser) {
         InspectionRectification rectification = requireRectification(id);
+        projectPermissionService.requireSystemPermission(currentUser.getId(), rectification.getProjectId(),
+                SystemPermissionCodes.INSPECTION_MANAGE);
         boolean manager = projectPermissionService.hasInspectionPermission(currentUser.getId(), rectification.getProjectId(), InspectionPermissionCodes.RECTIFICATION_REVIEW);
         if (!manager && !Objects.equals(rectification.getAssigneeId(), currentUser.getId())) {
             throw BusinessException.forbidden("只能处理分配给自己的整改任务");
@@ -1797,24 +1805,32 @@ public class InspectionService {
     }
 
     private void requireInspectionManager(SysUser currentUser, Long projectId) {
+        projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
+                SystemPermissionCodes.INSPECTION_MANAGE);
         if (!projectPermissionService.hasInspectionPermission(currentUser.getId(), projectId, InspectionPermissionCodes.INSPECTION_REVIEW)) {
             throw BusinessException.forbidden("无检查复核权限");
         }
     }
 
     private void requireDailySubmitPermission(SysUser currentUser, Long projectId) {
+        projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
+                SystemPermissionCodes.INSPECTION_SUBMIT);
         if (!projectPermissionService.hasInspectionPermission(currentUser.getId(), projectId, InspectionPermissionCodes.INSPECTION_DAILY_SUBMIT)) {
             throw BusinessException.forbidden("无日检提交权限");
         }
     }
 
     private void requireRectificationReviewPermission(SysUser currentUser, Long projectId) {
+        projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
+                SystemPermissionCodes.INSPECTION_MANAGE);
         if (!projectPermissionService.hasInspectionPermission(currentUser.getId(), projectId, InspectionPermissionCodes.RECTIFICATION_REVIEW)) {
             throw BusinessException.forbidden("无整改复查权限");
         }
     }
 
     private void requireSummaryPermission(SysUser currentUser, Long projectId) {
+        projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
+                SystemPermissionCodes.INSPECTION_VIEW);
         if (!projectPermissionService.hasAnyInspectionPermission(currentUser.getId(), projectId,
                 InspectionPermissionCodes.SUMMARY_VIEW,
                 InspectionPermissionCodes.INSPECTION_DAILY_SUBMIT)) {
@@ -1823,12 +1839,16 @@ public class InspectionService {
     }
 
     private void requireSummaryExportPermission(SysUser currentUser, Long projectId) {
+        projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
+                SystemPermissionCodes.INSPECTION_EXPORT);
         if (!projectPermissionService.hasInspectionPermission(currentUser.getId(), projectId, InspectionPermissionCodes.SUMMARY_EXPORT)) {
             throw BusinessException.forbidden("无巡检汇总导出权限");
         }
     }
 
     private void requireSingleBoxExportPermission(SysUser currentUser, Long projectId) {
+        projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
+                SystemPermissionCodes.INSPECTION_EXPORT);
         if (!projectPermissionService.hasAnyInspectionPermission(currentUser.getId(), projectId,
                 InspectionPermissionCodes.INSPECTION_DAILY_SUBMIT,
                 InspectionPermissionCodes.SUMMARY_EXPORT)) {
@@ -1837,6 +1857,10 @@ public class InspectionService {
     }
 
     private boolean canViewRecord(InspectionRecord record, SysUser currentUser) {
+        if (!projectPermissionService.hasSystemPermission(currentUser.getId(), record.getProjectId(),
+                SystemPermissionCodes.INSPECTION_VIEW)) {
+            return false;
+        }
         if (projectPermissionService.hasAnyInspectionPermission(currentUser.getId(), record.getProjectId(),
                 InspectionPermissionCodes.INSPECTION_RECORD_VIEW,
                 InspectionPermissionCodes.INSPECTION_DAILY_SUBMIT)) {
@@ -1846,6 +1870,10 @@ public class InspectionService {
     }
 
     private boolean canViewRectification(InspectionRectification rectification, SysUser currentUser) {
+        if (!projectPermissionService.hasSystemPermission(currentUser.getId(), rectification.getProjectId(),
+                SystemPermissionCodes.INSPECTION_VIEW)) {
+            return false;
+        }
         if (projectPermissionService.hasInspectionPermission(currentUser.getId(), rectification.getProjectId(), InspectionPermissionCodes.RECTIFICATION_VIEW)) {
             return true;
         }
@@ -1855,6 +1883,8 @@ public class InspectionService {
     private void applyProjectScope(LambdaQueryWrapper<InspectionRecord> wrapper, Long projectId, SysUser currentUser) {
         if (projectId != null) {
             projectPermissionService.checkProjectPermission(currentUser.getId(), projectId);
+            projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
+                    SystemPermissionCodes.INSPECTION_VIEW);
             wrapper.eq(InspectionRecord::getProjectId, projectId);
             return;
         }
@@ -1873,6 +1903,8 @@ public class InspectionService {
                                                 SysUser currentUser) {
         if (projectId != null) {
             projectPermissionService.checkProjectPermission(currentUser.getId(), projectId);
+            projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
+                    SystemPermissionCodes.INSPECTION_VIEW);
             wrapper.eq(InspectionRectification::getProjectId, projectId);
             return;
         }

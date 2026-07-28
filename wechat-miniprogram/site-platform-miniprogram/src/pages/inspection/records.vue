@@ -5,13 +5,17 @@ import AppNavBar from '@/components/AppNavBar.vue';
 import EmptyState from '@/components/EmptyState.vue';
 import { getElectricBoxes } from '@/api/electricBox';
 import { exportInspectionRecords, getInspectionRecords } from '@/api/inspection';
+import { useAuthStore } from '@/stores/auth';
+import { useProjectStore } from '@/stores/project';
 import type { ElectricBox, InspectionRecord } from '@/types';
 import { usePageScrollHeight } from '@/utils/navLayout';
 import { getQueryNumber, navigateTo, showToast } from '@/utils/navigation';
 
 type ResultFilter = 'ALL' | 'NORMAL' | 'ABNORMAL';
 
-const projectId = ref(1);
+const authStore = useAuthStore();
+const projectStore = useProjectStore();
+const projectId = ref(0);
 const queryBoxId = ref<number>();
 const selectedBoxId = ref<number>();
 const selectedMonth = ref(currentMonth());
@@ -29,6 +33,8 @@ const boxOptions = computed(() => [
 ]);
 const selectedBoxIndex = computed(() => Math.max(0, boxOptions.value.findIndex((item) => item.id === selectedBoxId.value)));
 const selectedBox = computed(() => boxes.value.find((box) => box.id === selectedBoxId.value));
+const canExport = computed(() => authStore.hasProjectPermission(
+  projectId.value, 'inspection.export', 'SUMMARY_EXPORT'));
 const visibleRecords = computed(() => records.value
   .filter((record) => !selectedBoxId.value || record.electricBoxId === selectedBoxId.value)
   .filter((record) => resultFilter.value === 'ALL'
@@ -43,9 +49,22 @@ function currentMonth() {
 }
 
 onShow(async () => {
+  if (!await authStore.ensureRootAccess('/pages/inspection/index')) return;
+  await projectStore.loadProjects();
   const pages = getCurrentPages();
   const current = pages[pages.length - 1] as unknown as { options?: Record<string, string> };
-  projectId.value = getQueryNumber(current.options?.projectId, projectId.value || 1);
+  projectId.value = getQueryNumber(
+    current.options?.projectId,
+    projectStore.state.currentProjectId || projectId.value
+  );
+  if (!await authStore.ensureProjectPermission(
+    '/pages/inspection/index',
+    projectId.value,
+    'inspection.view',
+    'BOX_VIEW',
+    'INSPECTION_RECORD_VIEW',
+    'SUMMARY_VIEW'
+  )) return;
   const parsedBoxId = Number(current.options?.boxId || '');
   queryBoxId.value = Number.isFinite(parsedBoxId) && parsedBoxId > 0 ? parsedBoxId : undefined;
   selectedBoxId.value = queryBoxId.value;
@@ -90,6 +109,7 @@ function openRecord(record: InspectionRecord) {
 }
 
 async function exportMonthlyTable() {
+  if (!canExport.value) { showToast('当前项目无导出权限'); return; }
   if (!selectedBox.value || exporting.value) {
     if (!selectedBox.value) showToast('请先选择需要导出的电箱');
     return;
@@ -135,7 +155,7 @@ function goBack() {
             <button :class="{ active: resultFilter === 'NORMAL' }" @tap="resultFilter = 'NORMAL'">正常</button>
             <button :class="{ active: resultFilter === 'ABNORMAL', danger: resultFilter === 'ABNORMAL' }" @tap="resultFilter = 'ABNORMAL'">有异常</button>
           </view>
-          <button class="export-button" :disabled="!selectedBoxId || exporting" @tap="exportMonthlyTable">
+          <button v-if="canExport" class="export-button" :disabled="!selectedBoxId || exporting" @tap="exportMonthlyTable">
             {{ exporting ? '正在导出...' : selectedBoxId ? '导出本箱月度检查表' : '请先选择电箱后导出' }}
           </button>
         </view>

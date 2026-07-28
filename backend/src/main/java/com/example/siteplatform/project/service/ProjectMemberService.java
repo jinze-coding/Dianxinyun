@@ -3,6 +3,7 @@ package com.example.siteplatform.project.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.auth.mapper.SysUserMapper;
+import com.example.siteplatform.auth.service.AuthService;
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.project.dto.CreateProjectUserRequest;
 import com.example.siteplatform.project.dto.ProjectMemberRequest;
@@ -14,6 +15,8 @@ import com.example.siteplatform.project.entity.SysUserProject;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
 import com.example.siteplatform.log.entity.OperationLog;
 import com.example.siteplatform.log.mapper.OperationLogMapper;
+import com.example.siteplatform.system.entity.SystemRole;
+import com.example.siteplatform.system.mapper.SystemRoleMapper;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -42,10 +45,16 @@ public class ProjectMemberService {
     @Autowired
     private OperationLogMapper operationLogMapper;
 
+    @Autowired
+    private AuthService authService;
+
+    @Autowired
+    private SystemRoleMapper systemRoleMapper;
+
     public List<ProjectMemberVO> listMembers(Long projectId, SysUser currentUser) {
         requireProjectId(projectId);
-        if (!projectPermissionService.canManageInspection(currentUser.getId(), projectId)) {
-            throw BusinessException.forbidden("无项目巡检权限查看权限");
+        if (!projectPermissionService.canManageProjectMembers(currentUser.getId(), projectId)) {
+            throw BusinessException.forbidden("无项目成员查看权限");
         }
         List<ProjectMemberVO> members = userProjectMapper.selectMembersByProjectId(projectId);
         members.forEach(this::fillGlobalRoles);
@@ -57,10 +66,19 @@ public class ProjectMemberService {
         if (!projectPermissionService.canManageProjectMembers(currentUser.getId(), projectId)) {
             throw BusinessException.forbidden("无项目成员选择权限");
         }
+        boolean platformAdmin = projectPermissionService.isPlatformAdmin(currentUser.getId());
         LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getDeleted, 0)
                 .orderByAsc(SysUser::getRealName)
                 .orderByAsc(SysUser::getUsername)
                 .last("LIMIT 80");
+        if (!platformAdmin) {
+            List<Long> memberUserIds = userProjectMapper.selectList(new LambdaQueryWrapper<SysUserProject>()
+                            .eq(SysUserProject::getProjectId, projectId))
+                    .stream().map(SysUserProject::getUserId).filter(Objects::nonNull).distinct().toList();
+            if (memberUserIds.isEmpty()) return List.of();
+            wrapper.in(SysUser::getId, memberUserIds);
+        }
         if (StringUtils.hasText(keyword)) {
             String value = keyword.trim();
             wrapper.and(w -> w.like(SysUser::getUsername, value)
@@ -74,6 +92,7 @@ public class ProjectMemberService {
                 .toList();
     }
 
+    @Transactional
     public ProjectMemberVO saveMember(ProjectMemberRequest request, SysUser currentUser) {
         validateRequest(request);
         if (!projectPermissionService.canManageProjectMembers(currentUser.getId(), request.getProjectId())) {
@@ -83,7 +102,7 @@ public class ProjectMemberService {
         if (user == null) {
             throw BusinessException.notFound("用户不存在");
         }
-        String roleCode = projectPermissionService.normalizeProjectRoleCode(request.getProjectRoleCode());
+        String roleCode = requireEnabledProjectRole(request.getProjectRoleCode());
         Long permissionTemplateId = resolveTemplateId(request.getPermissionTemplateId(), roleCode);
         SysUserProject existing = findUserProject(request.getProjectId(), request.getUserId());
         if (existing == null) {
@@ -104,51 +123,15 @@ public class ProjectMemberService {
             userProjectMapper.updateById(existing);
         }
         projectPermissionService.clearUserProjectsCache(request.getUserId());
+        authService.logout(request.getUserId());
         return findMember(request.getProjectId(), request.getUserId());
     }
 
     public ProjectMemberVO createUserAndJoinProject(CreateProjectUserRequest request, SysUser currentUser) {
-        validateCreateUserRequest(request);
-        if (!projectPermissionService.canManageProjectMembers(currentUser.getId(), request.getProjectId())) {
-            throw BusinessException.forbidden("无新增项目成员权限");
-        }
-        String globalRoleCode = normalizeGlobalRoleCode(request.getGlobalRoleCode());
-        if (ProjectPermissionService.ROLE_PLATFORM_ADMIN.equals(globalRoleCode)
-                && !projectPermissionService.isPlatformAdmin(currentUser.getId())) {
-            throw BusinessException.forbidden("只有平台管理员可以创建平台管理员账号");
-        }
-        Long roleId = userMapper.selectRoleIdByCode(globalRoleCode);
-        if (roleId == null) {
-            throw new BusinessException("全局角色不存在：" + globalRoleCode);
-        }
-        Long existingCount = userMapper.selectCount(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getUsername, request.getUsername().trim()));
-        if (existingCount != null && existingCount > 0) {
-            throw new BusinessException("用户名已存在");
-        }
-
-        SysUser user = new SysUser();
-        user.setUsername(request.getUsername().trim());
-        user.setPassword(StringUtils.hasText(request.getPassword()) ? request.getPassword().trim() : "admin123");
-        user.setPasswordLoginEnabled(request.getPasswordLoginEnabled() == null ? 1 : request.getPasswordLoginEnabled());
-        user.setRealName(StringUtils.hasText(request.getRealName()) ? request.getRealName().trim() : request.getUsername().trim());
-        user.setPhone(StringUtils.hasText(request.getPhone()) ? request.getPhone().trim() : null);
-        user.setEmail(StringUtils.hasText(request.getEmail()) ? request.getEmail().trim() : null);
-        user.setStatus(1);
-        user.setDeleted(0);
-        user.setCreateTime(LocalDateTime.now());
-        user.setUpdateTime(LocalDateTime.now());
-        userMapper.insert(user);
-        userMapper.insertUserRole(user.getId(), roleId);
-
-        ProjectMemberRequest memberRequest = new ProjectMemberRequest();
-        memberRequest.setProjectId(request.getProjectId());
-        memberRequest.setUserId(user.getId());
-        memberRequest.setProjectRoleCode(request.getProjectRoleCode());
-        memberRequest.setPermissionTemplateId(request.getPermissionTemplateId());
-        return saveMember(memberRequest, currentUser);
+        throw BusinessException.of(410, "新账号必须通过 Web 或小程序提交统一注册申请并由平台审核");
     }
 
+    @Transactional
     public void removeMember(Long projectId, Long userId, SysUser currentUser) {
         requireProjectId(projectId);
         if (userId == null) {
@@ -170,6 +153,7 @@ public class ProjectMemberService {
         if (existing != null) {
             userProjectMapper.deleteById(existing.getId());
             projectPermissionService.clearUserProjectsCache(userId);
+            authService.logout(userId);
         }
     }
 
@@ -202,15 +186,17 @@ public class ProjectMemberService {
         existing.setUpdateTime(LocalDateTime.now());
         userProjectMapper.updateById(existing);
         projectPermissionService.clearUserProjectsCache(userId);
+        authService.logout(userId);
         recordMemberOperation(existing, currentUser, "ACTIVE".equals(status) ? "RESTORE_PROJECT_ACCESS" : "DISABLE_PROJECT_ACCESS");
         return findMember(projectId, userId);
     }
 
+    @Transactional
     public void ensureProjectMember(Long projectId, Long userId, String roleCode) {
         if (projectId == null || userId == null) {
             return;
         }
-        String normalized = projectPermissionService.normalizeProjectRoleCode(roleCode);
+        String normalized = requireEnabledProjectRole(roleCode);
         Long permissionTemplateId = permissionTemplateService.defaultTemplateIdForRole(normalized);
         SysUserProject existing = findUserProject(projectId, userId);
         if (existing == null) {
@@ -224,6 +210,7 @@ public class ProjectMemberService {
             userProject.setUpdateTime(LocalDateTime.now());
             userProjectMapper.insert(userProject);
             projectPermissionService.clearUserProjectsCache(userId);
+            authService.logout(userId);
             return;
         }
         if (roleRank(normalized) > roleRank(existing.getProjectRoleCode())) {
@@ -232,11 +219,13 @@ public class ProjectMemberService {
             existing.setUpdateTime(LocalDateTime.now());
             userProjectMapper.updateById(existing);
             projectPermissionService.clearUserProjectsCache(userId);
+            authService.logout(userId);
         } else if (existing.getInspectionPermissionTemplateId() == null && permissionTemplateId != null) {
             existing.setInspectionPermissionTemplateId(permissionTemplateId);
             existing.setUpdateTime(LocalDateTime.now());
             userProjectMapper.updateById(existing);
             projectPermissionService.clearUserProjectsCache(userId);
+            authService.logout(userId);
         }
     }
 
@@ -362,6 +351,19 @@ public class ProjectMemberService {
             return 2;
         }
         return 1;
+    }
+
+    private String requireEnabledProjectRole(String roleCode) {
+        String normalized = projectPermissionService.normalizeProjectRoleCode(roleCode);
+        SystemRole role = systemRoleMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SystemRole>()
+                .eq(SystemRole::getRoleCode, normalized)
+                .eq(SystemRole::getScopeType, "PROJECT")
+                .eq(SystemRole::getEnabled, 1)
+                .last("LIMIT 1"));
+        if (role == null) {
+            throw new BusinessException("项目角色不存在或已停用：" + normalized);
+        }
+        return normalized;
     }
 
     private void recordMemberOperation(SysUserProject member, SysUser operator, String operationType) {

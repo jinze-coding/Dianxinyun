@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { WORKSPACE_THEME } from '@/constants/workspaceTheme';
+import { useAuthStore } from '@/stores/auth';
 import { switchTab } from '@/utils/navigation';
 
 export type WorkspaceTabKey = 'documents' | 'inspection' | 'quality' | 'profile';
@@ -9,6 +10,7 @@ type CompatibleTabKey = WorkspaceTabKey | 'overview' | 'personnel' | 'safety' | 
 const props = defineProps<{
   active: CompatibleTabKey;
 }>();
+const auth = useAuthStore();
 
 const tabs: Array<{
   key: WorkspaceTabKey;
@@ -29,6 +31,8 @@ const canonicalActive = computed<WorkspaceTabKey>(() => {
   return tabs.some((tab) => tab.key === props.active) ? props.active as WorkspaceTabKey : 'inspection';
 });
 
+const visibleTabs = computed(() => tabs.filter((tab) => auth.canAccessRoot(tab.url)));
+
 function openTab(tab: (typeof tabs)[number]) {
   if (canonicalActive.value === tab.key) return;
   switchTab(tab.url);
@@ -38,7 +42,7 @@ function openTab(tab: (typeof tabs)[number]) {
 <template>
   <view class="workspace-tabbar">
     <button
-      v-for="tab in tabs"
+      v-for="tab in visibleTabs"
       :key="tab.key"
       class="workspace-tab"
       :class="{ active: canonicalActive === tab.key }"
@@ -61,7 +65,7 @@ function openTab(tab: (typeof tabs)[number]) {
   left: 0;
   z-index: 40;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(v-bind('visibleTabs.length'), minmax(0, 1fr));
   min-height: 116rpx;
   padding: 8rpx 12rpx env(safe-area-inset-bottom);
   border-top: 1rpx solid rgba(148, 163, 184, 0.2);

@@ -3,10 +3,14 @@ import { computed, ref } from 'vue';
 import { onShow } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
 import { getReviewRecords, reviewInspectionRecord } from '@/api/inspection';
+import { useAuthStore } from '@/stores/auth';
+import { useProjectStore } from '@/stores/project';
 import type { InspectionRecord } from '@/types';
 import { usePageScrollHeight } from '@/utils/navLayout';
 import { getQueryNumber, navigateTo, showToast, switchTab } from '@/utils/navigation';
 
+const authStore = useAuthStore();
+const projectStore = useProjectStore();
 const records = ref<InspectionRecord[]>([]);
 const filter = ref('PENDING');
 const projectId = ref<number>();
@@ -25,12 +29,21 @@ function readRouteContext() {
   const pages = getCurrentPages();
   const current = pages[pages.length - 1] as unknown as { options?: Record<string, string> };
   const parsedProjectId = getQueryNumber(current.options?.projectId, 0);
-  projectId.value = parsedProjectId > 0 ? parsedProjectId : undefined;
-  fromProject.value = current.options?.from === 'project' || Boolean(projectId.value);
+  projectId.value = parsedProjectId > 0
+    ? parsedProjectId
+    : projectStore.state.currentProjectId || undefined;
+  fromProject.value = current.options?.from === 'project' || parsedProjectId > 0;
 }
 
 async function loadRecords() {
+  if (!await authStore.ensureRootAccess('/pages/inspection/index')) return;
+  await projectStore.loadProjects();
   readRouteContext();
+  if (!projectId.value || !await authStore.ensureProjectPermission(
+    '/pages/inspection/index', projectId.value, 'inspection.manage', 'INSPECTION_REVIEW')) {
+    records.value = [];
+    return;
+  }
   const nextRecords = await getReviewRecords({ projectId: projectId.value });
   records.value = nextRecords.filter((item) => reviewStatuses.includes(item.status));
 }
@@ -61,7 +74,7 @@ function goBack() {
     navigateTo(`/pages/project-workbench/index?projectId=${projectId.value}`);
     return;
   }
-  switchTab('/pages/safety/index');
+  switchTab('/pages/inspection/index');
 }
 
 function statusMeta(record: InspectionRecord) {

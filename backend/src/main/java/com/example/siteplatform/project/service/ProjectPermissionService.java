@@ -11,6 +11,7 @@ import com.example.siteplatform.project.entity.SysUserProject;
 import com.example.siteplatform.project.mapper.InspectionPermissionTemplateMapper;
 import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
+import com.example.siteplatform.system.service.SystemPermissionService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -40,6 +41,9 @@ public class ProjectPermissionService {
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
+    @Autowired
+    private SystemPermissionService systemPermissionService;
+
     private static final String USER_PROJECTS_CACHE_PREFIX = "user:projects:";
     public static final String ROLE_PLATFORM_ADMIN = "PLATFORM_ADMIN";
     public static final String ROLE_PROJECT_ADMIN = "PROJECT_ADMIN";
@@ -47,8 +51,7 @@ public class ProjectPermissionService {
     public static final String ROLE_USER = "USER";
 
     public boolean isPlatformAdmin(Long userId) {
-        // 保留开发期 userId=1 兜底，同时支持从角色表判断。
-        return userId == 1L || hasRole(userId, ROLE_PLATFORM_ADMIN);
+        return hasRole(userId, ROLE_PLATFORM_ADMIN);
     }
 
     public boolean isProjectAdmin(Long userId) {
@@ -107,7 +110,26 @@ public class ProjectPermissionService {
         if (isPlatformAdmin(userId)) {
             return true;
         }
-        return hasInspectionPermission(userId, projectId, InspectionPermissionCodes.PERMISSION_MANAGE);
+        SysUserProject membership = findUserProject(userId, projectId);
+        if (membership == null) {
+            return false;
+        }
+        if (systemPermissionService.permissionCodes(userId).contains("system.project.manage")) {
+            return true;
+        }
+        return systemPermissionService
+                .projectRolePermissionCodes(normalizeProjectRoleCode(membership.getProjectRoleCode()))
+                .contains("system.project.manage");
+    }
+
+    public boolean hasSystemPermission(Long userId, Long projectId, String permissionCode) {
+        return systemPermissionService.hasProjectPermission(userId, projectId, permissionCode);
+    }
+
+    public void requireSystemPermission(Long userId, Long projectId, String permissionCode) {
+        if (!hasSystemPermission(userId, projectId, permissionCode)) {
+            throw BusinessException.forbidden("无当前项目操作权限：" + permissionCode);
+        }
     }
 
     public boolean hasInspectionPermission(Long userId, Long projectId, String permissionCode) {
@@ -198,10 +220,13 @@ public class ProjectPermissionService {
             return ROLE_USER;
         }
         String normalized = roleCode.trim().toUpperCase();
-        if (ROLE_PROJECT_ADMIN.equals(normalized) || ROLE_SAFETY_ADMIN.equals(normalized) || ROLE_USER.equals(normalized)) {
-            return normalized;
+        if (ROLE_PLATFORM_ADMIN.equals(normalized)) {
+            throw BusinessException.of(400, "PLATFORM_ADMIN 不能作为项目角色");
         }
-        throw BusinessException.of(400, "项目内职责只支持 PROJECT_ADMIN、SAFETY_ADMIN、USER");
+        if (!normalized.matches("^[A-Z][A-Z0-9_\\-]{1,49}$")) {
+            throw BusinessException.of(400, "项目角色编码需为2-50位大写字母、数字、下划线或横线");
+        }
+        return normalized;
     }
 
     public List<ProjectInfo> getUserProjects(Long userId) {

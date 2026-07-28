@@ -16,6 +16,35 @@ export interface User {
   roles: RoleCode[];
   projectRoles?: UserProjectRole[];
   accessibleProjectIds?: number[];
+  menus?: UserMenu[];
+  permissionCodes?: string[];
+  projectContexts?: ProjectPermissionContext[];
+  passwordLoginEnabled?: boolean | number | string;
+  wechatBindingStatus?: 'BOUND' | 'ACTIVE' | 'UNBOUND' | 'DISABLED';
+  wechatBound?: boolean;
+}
+
+export interface UserMenu {
+  id?: number;
+  code?: string;
+  menuCode?: string;
+  name?: string;
+  menuName?: string;
+  path?: string;
+  routePath?: string;
+  clientType?: 'WEB' | 'MINI_PROGRAM' | 'COMMON' | string;
+  type?: 'DIRECTORY' | 'MENU' | 'BUTTON' | string;
+  resourceType?: 'DIRECTORY' | 'MENU' | 'BUTTON' | string;
+  children?: UserMenu[];
+}
+
+export interface ProjectPermissionContext {
+  projectId: number;
+  projectName?: string;
+  roleCodes?: string[];
+  permissionCodes?: string[];
+  accessStatus?: 'ACTIVE' | 'DISABLED' | string;
+  statusReason?: string;
 }
 
 export interface UserProjectRole {
@@ -27,6 +56,8 @@ export interface UserProjectRole {
   permissionTemplateName?: string;
   permissionTemplateCode?: string;
   permissionCodes?: string[];
+  accessStatus?: 'ACTIVE' | 'DISABLED' | string;
+  statusReason?: string;
 }
 
 export interface ProjectMember {

@@ -4,12 +4,14 @@ import { onLoad } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
 import WorkspaceStatusPill from '@/components/workspace/WorkspaceStatusPill.vue';
 import { getProjectDocumentRecycleBin, purgeProjectDocument, restoreProjectDocument } from '@/api/document';
+import { useAuthStore } from '@/stores/auth';
 import { useProjectStore } from '@/stores/project';
 import type { ProjectDocument } from '@/types';
 import { extensionOf, formatFileSize } from '@/utils/documentFile';
 import { getQueryNumber, showToast, switchTab } from '@/utils/navigation';
 
 const PAGE_SIZE = 20;
+const authStore = useAuthStore();
 const projectStore = useProjectStore();
 const projectId = ref(0);
 const documents = ref<ProjectDocument[]>([]);
@@ -26,8 +28,10 @@ const currentProject = computed(() => projectStore.state.projects.find((item) =>
 const hasMore = computed(() => documents.value.length < total.value);
 
 onLoad(async (query) => {
-  projectId.value = getQueryNumber(query?.projectId, projectStore.state.currentProjectId || 0);
   await projectStore.loadProjects();
+  projectId.value = getQueryNumber(query?.projectId, projectStore.state.currentProjectId || 0);
+  if (!await authStore.ensureProjectPermission(
+    '/pages/documents/index', projectId.value, 'document.manage')) return;
   await load(true);
 });
 

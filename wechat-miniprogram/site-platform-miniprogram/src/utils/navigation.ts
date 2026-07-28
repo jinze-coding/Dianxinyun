@@ -11,7 +11,7 @@ export function navigateTo(url: string) {
 }
 
 export function switchTab(url: string) {
-  uni.switchTab({ url });
+  uni.switchTab({ url, fail: () => uni.reLaunch({ url }) });
 }
 
 export function showToast(title: string) {

@@ -10,6 +10,7 @@ import com.example.siteplatform.document.mapper.DocumentFolderMapper;
 import com.example.siteplatform.document.mapper.ProjectDocumentMapper;
 import com.example.siteplatform.document.vo.DocumentFolderVO;
 import com.example.siteplatform.project.service.ProjectPermissionService;
+import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +33,7 @@ public class DocumentFolderService {
 
     public List<DocumentFolderVO> list(Long projectId, SysUser currentUser) {
         permissionService.checkProjectPermission(currentUser.getId(), projectId);
+        permissionService.requireSystemPermission(currentUser.getId(), projectId, SystemPermissionCodes.DOCUMENT_VIEW);
         return folderMapper.selectList(new LambdaQueryWrapper<DocumentFolder>()
                         .eq(DocumentFolder::getProjectId, projectId)
                         .orderByAsc(DocumentFolder::getSortNo)
@@ -115,6 +117,7 @@ public class DocumentFolderService {
 
     private void checkManage(SysUser currentUser, Long projectId) {
         permissionService.checkProjectPermission(currentUser.getId(), projectId);
+        permissionService.requireSystemPermission(currentUser.getId(), projectId, SystemPermissionCodes.DOCUMENT_MANAGE);
         if (!permissionService.isPlatformAdmin(currentUser.getId())
                 && !permissionService.canManageProject(currentUser.getId(), projectId)) {
             throw BusinessException.forbidden("仅项目管理员可管理资料目录");

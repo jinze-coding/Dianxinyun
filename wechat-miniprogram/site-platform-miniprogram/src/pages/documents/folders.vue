@@ -3,10 +3,12 @@ import { computed, reactive, ref } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
 import { createDocumentFolder, deleteDocumentFolder, getDocumentFolders, updateDocumentFolder } from '@/api/document';
+import { useAuthStore } from '@/stores/auth';
 import { useProjectStore } from '@/stores/project';
 import type { DocumentFolder } from '@/types';
 import { getQueryNumber, showToast, switchTab } from '@/utils/navigation';
 
+const authStore = useAuthStore();
 const projectStore = useProjectStore();
 const projectId = ref(0);
 const folders = ref<DocumentFolder[]>([]);
@@ -17,8 +19,10 @@ const editor = reactive<{ mode: 'create' | 'rename'; folder?: DocumentFolder; na
 const currentProject = computed(() => projectStore.state.projects.find((item) => item.id === projectId.value));
 
 onLoad(async (query) => {
-  projectId.value = getQueryNumber(query?.projectId, projectStore.state.currentProjectId || 0);
   await projectStore.loadProjects();
+  projectId.value = getQueryNumber(query?.projectId, projectStore.state.currentProjectId || 0);
+  if (!await authStore.ensureProjectPermission(
+    '/pages/documents/index', projectId.value, 'document.manage')) return;
   await loadFolders();
 });
 

@@ -14,6 +14,14 @@ let routing = false;
 let readyTimer: ReturnType<typeof setTimeout> | undefined;
 
 onLoad((options) => {
+  const webLoginChallenge = String(options?.webLoginChallenge || '');
+  if (webLoginChallenge) {
+    routing = true;
+    uni.reLaunch({
+      url: `/pages/web-login-confirm/index?webLoginChallenge=${encodeURIComponent(webLoginChallenge)}`
+    });
+    return;
+  }
   const rawScene = String(options?.scene || options?.q || options?.code || '');
   try {
     pendingScene = extractElectricBoxScene(rawScene);

@@ -1,4 +1,50 @@
 <script setup lang="ts">
+import { onShow } from '@dcloudio/uni-app';
+import { getToken } from '@/api/request';
+import { useAuthStore } from '@/stores/auth';
+
+const auth = useAuthStore();
+const PUBLIC_PREFIXES = [
+  'pages/login/',
+  'pages/wechat-bind/',
+  'pages/register/',
+  'pages/registration-status/',
+  'pages/public/',
+  'pages/scan-entry/',
+  'pages/web-login-confirm/'
+];
+const PAGE_TO_ROOT: Array<[string, string]> = [
+  ['pages/documents/', '/pages/documents/index'],
+  ['pages/inspection/', '/pages/inspection/index'],
+  ['pages/quality/', '/pages/quality/index']
+];
+
+async function enforceCurrentPageAccess() {
+  const pages = getCurrentPages();
+  const route = String(pages[pages.length - 1]?.route || '');
+  if (!route || PUBLIC_PREFIXES.some((prefix) => route.startsWith(prefix))) return;
+  if (!getToken()) {
+    uni.reLaunch({ url: '/pages/login/index' });
+    return;
+  }
+  try {
+    if (!auth.state.user) await auth.loadUser();
+    const rule = PAGE_TO_ROOT.find(([prefix]) => route.startsWith(prefix));
+    if (rule && !auth.canAccessRoot(rule[1])) {
+      uni.showToast({ title: '当前账号无此功能权限', icon: 'none' });
+      uni.switchTab({ url: auth.firstAuthorizedPage(), fail: () => uni.reLaunch({ url: auth.firstAuthorizedPage() }) });
+    }
+  } catch {
+    uni.reLaunch({ url: '/pages/login/index' });
+  }
+}
+
+onShow(() => {
+  // 首次冷启动时页面栈可能尚未建立，下一事件循环再次读取可覆盖深链直达子页。
+  setTimeout(() => {
+    enforceCurrentPageAccess();
+  }, 0);
+});
 </script>
 
 <template>

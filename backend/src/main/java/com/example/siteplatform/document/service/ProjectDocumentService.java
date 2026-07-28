@@ -26,6 +26,7 @@ import com.example.siteplatform.file.storage.StoredFile;
 import com.example.siteplatform.log.entity.OperationLog;
 import com.example.siteplatform.log.mapper.OperationLogMapper;
 import com.example.siteplatform.project.service.ProjectPermissionService;
+import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
@@ -84,6 +85,7 @@ public class ProjectDocumentService {
                                                LocalDate endDate, Integer pageNo, Integer pageSize,
                                                SysUser currentUser) {
         permissionService.checkProjectPermission(currentUser.getId(), projectId);
+        permissionService.requireSystemPermission(currentUser.getId(), projectId, SystemPermissionCodes.DOCUMENT_VIEW);
         int page = pageNo == null ? 1 : Math.max(1, pageNo);
         int size = pageSize == null ? 20 : Math.max(1, Math.min(pageSize, 100));
         LambdaQueryWrapper<ProjectDocument> wrapper = new LambdaQueryWrapper<ProjectDocument>()
@@ -124,6 +126,7 @@ public class ProjectDocumentService {
 
     public ProjectDocumentSummaryVO summary(Long projectId, SysUser currentUser) {
         permissionService.checkProjectPermission(currentUser.getId(), projectId);
+        permissionService.requireSystemPermission(currentUser.getId(), projectId, SystemPermissionCodes.DOCUMENT_VIEW);
         LocalDateTime weekAgo = LocalDateTime.now().minusDays(7);
         ProjectDocumentSummaryVO summary = new ProjectDocumentSummaryVO();
         summary.setTotal(count(projectId, null, null));
@@ -143,6 +146,7 @@ public class ProjectDocumentService {
                                            String category, String remark, String changeNote, MultipartFile file,
                                            SysUser currentUser, HttpServletRequest request) {
         permissionService.checkProjectPermission(currentUser.getId(), projectId);
+        permissionService.requireSystemPermission(currentUser.getId(), projectId, SystemPermissionCodes.DOCUMENT_UPLOAD);
         if (file == null || file.isEmpty()) throw new BusinessException("请选择需要上传的文件");
         long targetFolderId = folderId == null ? 0L : folderId;
         folderService.validateFolder(projectId, targetFolderId);
@@ -184,7 +188,9 @@ public class ProjectDocumentService {
                                                   SysUser currentUser, HttpServletRequest request) {
         if (file == null || file.isEmpty()) throw new BusinessException("请选择新版本文件");
         ProjectDocument document = requireDocument(id);
-        checkWrite(currentUser, document);
+        checkRead(currentUser, document);
+        permissionService.requireSystemPermission(currentUser.getId(), document.getProjectId(),
+                SystemPermissionCodes.DOCUMENT_UPLOAD);
         if (!STATUS_ACTIVE.equals(document.getStatus())) throw new BusinessException("归档资料不能上传新版本");
         document = documentMapper.selectForUpdate(id);
         if (document == null) throw BusinessException.notFound("资料不存在");
@@ -325,6 +331,7 @@ public class ProjectDocumentService {
     public List<ProjectDocumentActivityVO> activities(Long projectId, Long documentId, Integer limit,
                                                        SysUser currentUser) {
         permissionService.checkProjectPermission(currentUser.getId(), projectId);
+        permissionService.requireSystemPermission(currentUser.getId(), projectId, SystemPermissionCodes.DOCUMENT_VIEW);
         int safeLimit = Math.max(1, Math.min(limit == null ? 50 : limit, 100));
         LambdaQueryWrapper<OperationLog> wrapper = new LambdaQueryWrapper<OperationLog>()
                 .eq(OperationLog::getBusinessType, logBusinessType(projectId))
@@ -374,16 +381,21 @@ public class ProjectDocumentService {
 
     private void checkRead(SysUser currentUser, ProjectDocument document) {
         permissionService.checkProjectPermission(currentUser.getId(), document.getProjectId());
+        permissionService.requireSystemPermission(currentUser.getId(), document.getProjectId(),
+                SystemPermissionCodes.DOCUMENT_VIEW);
     }
 
     private void checkWrite(SysUser currentUser, ProjectDocument document) {
         checkRead(currentUser, document);
+        permissionService.requireSystemPermission(currentUser.getId(), document.getProjectId(),
+                SystemPermissionCodes.DOCUMENT_MANAGE);
         if (canManage(currentUser, document.getProjectId()) || currentUser.getId().equals(document.getCreatedBy())) return;
         throw BusinessException.forbidden("无资料管理权限");
     }
 
     private void checkManage(SysUser currentUser, Long projectId) {
         permissionService.checkProjectPermission(currentUser.getId(), projectId);
+        permissionService.requireSystemPermission(currentUser.getId(), projectId, SystemPermissionCodes.DOCUMENT_MANAGE);
         if (!canManage(currentUser, projectId)) throw BusinessException.forbidden("仅项目管理员可执行此操作");
     }
 

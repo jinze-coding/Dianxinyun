@@ -2,7 +2,10 @@ package com.example.siteplatform.project.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.siteplatform.auth.entity.SysUser;
+import com.example.siteplatform.auth.service.AuthService;
 import com.example.siteplatform.common.BusinessException;
+import com.example.siteplatform.log.entity.OperationLog;
+import com.example.siteplatform.log.mapper.OperationLogMapper;
 import com.example.siteplatform.project.constant.InspectionPermissionCodes;
 import com.example.siteplatform.project.dto.InspectionPermissionCatalogGroupVO;
 import com.example.siteplatform.project.dto.InspectionPermissionCatalogItemVO;
@@ -11,14 +14,19 @@ import com.example.siteplatform.project.dto.InspectionPermissionTemplateStatusRe
 import com.example.siteplatform.project.dto.InspectionPermissionTemplateVO;
 import com.example.siteplatform.project.entity.InspectionPermissionTemplate;
 import com.example.siteplatform.project.mapper.InspectionPermissionTemplateMapper;
+import com.example.siteplatform.project.mapper.SysUserProjectMapper;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
 
 @Service
 public class InspectionPermissionTemplateService {
@@ -28,6 +36,15 @@ public class InspectionPermissionTemplateService {
 
     @Autowired
     private ProjectPermissionService projectPermissionService;
+
+    @Autowired
+    private SysUserProjectMapper userProjectMapper;
+
+    @Autowired
+    private OperationLogMapper operationLogMapper;
+
+    @Autowired
+    private AuthService authService;
 
     public List<InspectionPermissionTemplateVO> listTemplates(SysUser currentUser) {
         LambdaQueryWrapper<InspectionPermissionTemplate> wrapper = new LambdaQueryWrapper<InspectionPermissionTemplate>()
@@ -62,6 +79,7 @@ public class InspectionPermissionTemplateService {
         );
     }
 
+    @Transactional
     public InspectionPermissionTemplateVO createTemplate(InspectionPermissionTemplateRequest request, SysUser currentUser) {
         requirePlatformAdmin(currentUser);
         validateTemplateRequest(request, false);
@@ -80,18 +98,26 @@ public class InspectionPermissionTemplateService {
         template.setCreateTime(LocalDateTime.now());
         template.setUpdateTime(LocalDateTime.now());
         templateMapper.insert(template);
+        recordOperation(currentUser, template, "CREATE_PERMISSION_TEMPLATE",
+                "创建巡检权限模板：" + template.getTemplateName());
         return toVO(template);
     }
 
+    @Transactional
     public InspectionPermissionTemplateVO updateTemplate(Long id, InspectionPermissionTemplateRequest request, SysUser currentUser) {
         requirePlatformAdmin(currentUser);
         InspectionPermissionTemplate template = requireTemplate(id);
         validateTemplateRequest(request, true);
+        Integer nextEnabled = request.getEnabled() == null
+                ? template.getEnabled()
+                : normalizeEnabled(request.getEnabled());
+        requireBuiltinEnabledUnchanged(template, nextEnabled);
+        Set<Long> affectedUserIds = affectedUserIds(id);
         template.setTemplateName(request.getTemplateName().trim());
         template.setDescription(trimToNull(request.getDescription()));
         template.setPermissionCodes(InspectionPermissionCodes.join(request.getPermissionCodes()));
         if (request.getEnabled() != null) {
-            template.setEnabled(normalizeEnabled(request.getEnabled()));
+            template.setEnabled(nextEnabled);
         }
         if (template.getBuiltin() == null || template.getBuiltin() == 0) {
             String nextCode = StringUtils.hasText(request.getTemplateCode())
@@ -105,18 +131,34 @@ public class InspectionPermissionTemplateService {
         }
         template.setUpdateTime(LocalDateTime.now());
         templateMapper.updateById(template);
+        recordOperation(currentUser, template, "UPDATE_PERMISSION_TEMPLATE",
+                "修改巡检权限模板：" + template.getTemplateName()
+                        + "，受影响用户数：" + affectedUserIds.size());
+        invalidateAffectedUsers(affectedUserIds);
         return toVO(template);
     }
 
+    @Transactional
     public InspectionPermissionTemplateVO updateStatus(Long id, InspectionPermissionTemplateStatusRequest request, SysUser currentUser) {
         requirePlatformAdmin(currentUser);
         if (request == null || request.getEnabled() == null) {
             throw new BusinessException("启停状态不能为空");
         }
         InspectionPermissionTemplate template = requireTemplate(id);
-        template.setEnabled(Boolean.TRUE.equals(request.getEnabled()) ? 1 : 0);
+        Integer nextEnabled = Boolean.TRUE.equals(request.getEnabled()) ? 1 : 0;
+        requireBuiltinEnabledUnchanged(template, nextEnabled);
+        if (Objects.equals(template.getEnabled(), nextEnabled)) {
+            return toVO(template);
+        }
+        Set<Long> affectedUserIds = affectedUserIds(id);
+        template.setEnabled(nextEnabled);
         template.setUpdateTime(LocalDateTime.now());
         templateMapper.updateById(template);
+        recordOperation(currentUser, template, "CHANGE_PERMISSION_TEMPLATE_STATUS",
+                (Integer.valueOf(1).equals(template.getEnabled()) ? "启用" : "停用")
+                        + "巡检权限模板：" + template.getTemplateName()
+                        + "，受影响用户数：" + affectedUserIds.size());
+        invalidateAffectedUsers(affectedUserIds);
         return toVO(template);
     }
 
@@ -150,6 +192,38 @@ public class InspectionPermissionTemplateService {
             throw BusinessException.notFound("权限模板不存在");
         }
         return template;
+    }
+
+    private Set<Long> affectedUserIds(Long templateId) {
+        List<Long> userIds = userProjectMapper.selectActiveUserIdsByInspectionPermissionTemplateId(templateId);
+        return userIds == null ? Set.of() : new LinkedHashSet<>(userIds);
+    }
+
+    private void requireBuiltinEnabledUnchanged(InspectionPermissionTemplate template, Integer nextEnabled) {
+        if (Integer.valueOf(1).equals(template.getBuiltin())
+                && !Objects.equals(template.getEnabled(), nextEnabled)) {
+            throw new BusinessException("内置权限模板不可启停");
+        }
+    }
+
+    private void invalidateAffectedUsers(Set<Long> userIds) {
+        userIds.stream().filter(Objects::nonNull).forEach(userId -> {
+            projectPermissionService.clearUserProjectsCache(userId);
+            authService.logout(userId);
+        });
+    }
+
+    private void recordOperation(SysUser operator, InspectionPermissionTemplate template,
+                                 String operationType, String description) {
+        OperationLog log = new OperationLog();
+        log.setUserId(operator.getId());
+        log.setUsername(operator.getUsername());
+        log.setOperationType(operationType);
+        log.setOperationDesc(description);
+        log.setBusinessType("INSPECTION_PERMISSION_TEMPLATE");
+        log.setBusinessId(template.getId());
+        log.setCreateTime(LocalDateTime.now());
+        operationLogMapper.insert(log);
     }
 
     private void validateTemplateRequest(InspectionPermissionTemplateRequest request, boolean update) {

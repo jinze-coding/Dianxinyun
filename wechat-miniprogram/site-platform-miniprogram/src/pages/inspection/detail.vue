@@ -3,21 +3,37 @@ import { computed, ref } from 'vue';
 import { onShow } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
 import { getInspectionRecordDetail } from '@/api/inspection';
+import { useAuthStore } from '@/stores/auth';
 import type { InspectionRecord } from '@/types';
 import { usePageScrollHeight } from '@/utils/navLayout';
 import { getQueryNumber, showToast, switchTab } from '@/utils/navigation';
 
+const authStore = useAuthStore();
 const record = ref<InspectionRecord>();
 const loading = ref(true);
 const { scrollStyle } = usePageScrollHeight({ minHeight: 260 });
 const photos = computed(() => [...(record.value?.outerPhotos || []), ...(record.value?.innerPhotos || [])]);
 
 onShow(async () => {
+  if (!await authStore.ensureRootAccess('/pages/inspection/index')) return;
   const pages = getCurrentPages();
   const current = pages[pages.length - 1] as unknown as { options?: Record<string, string> };
   loading.value = true;
   try {
-    record.value = await getInspectionRecordDetail(getQueryNumber(current.options?.id, 0));
+    const loadedRecord = await getInspectionRecordDetail(getQueryNumber(current.options?.id, 0));
+    if (!loadedRecord) throw new Error('巡检记录不存在');
+    if (!await authStore.ensureProjectPermission(
+      '/pages/inspection/index',
+      Number(loadedRecord.projectId),
+      'inspection.view',
+      'BOX_VIEW',
+      'INSPECTION_RECORD_VIEW',
+      'SUMMARY_VIEW'
+    )) {
+      record.value = undefined;
+      return;
+    }
+    record.value = loadedRecord;
   } catch (error) {
     record.value = undefined;
     showToast(error instanceof Error ? error.message : '巡检详情加载失败');

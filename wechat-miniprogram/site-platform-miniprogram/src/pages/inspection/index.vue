@@ -8,6 +8,7 @@ import WorkspaceMetricStrip, { type WorkspaceMetric } from '@/components/workspa
 import { WORKSPACE_THEME } from '@/constants/workspaceTheme';
 import { getTodoItems } from '@/api/todo';
 import { useProjectStore } from '@/stores/project';
+import { useAuthStore } from '@/stores/auth';
 import type { TodoItem } from '@/types';
 import { usePageScrollHeight } from '@/utils/navLayout';
 import { navigateTo, showToast } from '@/utils/navigation';
@@ -16,6 +17,7 @@ import { startElectricBoxScan } from '@/utils/electricBoxScan';
 const ACCENT = WORKSPACE_THEME.accent;
 const TINT = WORKSPACE_THEME.tint;
 const projectStore = useProjectStore();
+const authStore = useAuthStore();
 const todos = ref<TodoItem[]>([]);
 const loading = ref(false);
 const errorMessage = ref('');
@@ -24,6 +26,20 @@ const { scrollStyle } = usePageScrollHeight({ bottomRpx: 124, minHeight: 320 });
 
 const projects = computed(() => projectStore.state.projects);
 const currentProject = computed(() => projects.value.find((item) => item.id === projectStore.state.currentProjectId));
+const canView = computed(() => Boolean(currentProject.value)
+  && authStore.hasProjectPermission(
+    currentProject.value!.id,
+    'inspection.view',
+    'BOX_VIEW',
+    'INSPECTION_RECORD_VIEW',
+    'SUMMARY_VIEW'
+  ));
+const canSubmit = computed(() => Boolean(currentProject.value)
+  && authStore.hasProjectPermission(
+    currentProject.value!.id,
+    'inspection.submit',
+    'INSPECTION_DAILY_SUBMIT'
+  ));
 const inspectionTodos = computed(() => todos.value.filter((todo) => todo.type === 'INSPECTION'
   && (!todo.projectId || todo.projectId === currentProject.value?.id)));
 const checkedCount = computed(() => currentProject.value?.todayInspectionCount || 0);
@@ -40,6 +56,7 @@ function hideNativeTabBar() {
 
 onShow(async () => {
   hideNativeTabBar();
+  if (!await authStore.ensureRootAccess('/pages/inspection/index')) return;
   await refresh();
 });
 
@@ -48,6 +65,11 @@ async function refresh() {
   errorMessage.value = '';
   try {
     await projectStore.loadProjects();
+    if (currentProject.value && !canView.value) {
+      todos.value = [];
+      errorMessage.value = '当前项目无巡检查看权限，可切换到其他施工区域';
+      return;
+    }
     todos.value = currentProject.value ? await getTodoItems(currentProject.value.id) : [];
   } catch (error) {
     todos.value = [];
@@ -64,6 +86,10 @@ async function selectProject(projectId: number) {
 
 async function scan() {
   if (scanBusy.value) return;
+  if (!canView.value) {
+    showToast('当前项目无巡检查看权限');
+    return;
+  }
   scanBusy.value = true;
   try {
     await startElectricBoxScan(currentProject.value?.id || 1);
@@ -75,6 +101,10 @@ async function scan() {
 }
 
 function startInspection(todo: TodoItem) {
+  if (!canSubmit.value) {
+    showToast('当前项目无巡检提交权限');
+    return;
+  }
   if (!todo.targetId) {
     showToast('未找到对应电箱');
     return;
@@ -102,7 +132,7 @@ function startInspection(todo: TodoItem) {
         <template v-else-if="currentProject">
           <WorkspaceMetricStrip :metrics="metrics" :accent="ACCENT" :motion-key="`${currentProject.id}-${inspectionTodos.length}`" />
 
-          <button class="scan-primary" :disabled="scanBusy" @tap="scan">
+          <button class="scan-primary" :disabled="scanBusy || !canView" @tap="scan">
             <view class="scan-icon-wrap">
               <image src="/static/design-preview-icons/safety-scan.png" mode="aspectFit" />
             </view>
@@ -119,14 +149,14 @@ function startInspection(todo: TodoItem) {
               <text class="section-note">{{ currentProject.shortName || currentProject.projectName }}</text>
             </view>
             <view class="plain-list">
-              <button v-for="todo in inspectionTodos" :key="todo.targetId" class="plain-row task-row" @tap="startInspection(todo)">
+              <button v-for="todo in inspectionTodos" :key="todo.targetId" class="plain-row task-row" :disabled="!canSubmit" @tap="startInspection(todo)">
                 <view class="task-code-box">{{ (todo.boxCode || '').slice(-3) }}</view>
                 <view class="plain-copy">
                   <text class="task-code">{{ todo.boxCode }}</text>
                   <text class="plain-title">{{ todo.title }}</text>
                   <text class="plain-meta">{{ todo.installLocation || currentProject.projectName }}</text>
                 </view>
-                <text class="task-action">去巡检</text>
+                <text v-if="canSubmit" class="task-action">去巡检</text>
                 <text class="row-arrow"></text>
               </button>
               <view v-if="!inspectionTodos.length" class="empty-state">
@@ -137,7 +167,7 @@ function startInspection(todo: TodoItem) {
             </view>
           </view>
 
-          <button class="records-entry pressable" @tap="navigateTo(`/pages/inspection/records?projectId=${currentProject.id}`)">
+          <button v-if="canView" class="records-entry pressable" @tap="navigateTo(`/pages/inspection/records?projectId=${currentProject.id}`)">
             <view class="records-icon"><image src="/static/design-preview-icons/safety-records.png" mode="aspectFit" /></view>
             <view class="records-copy"><text>查看巡检记录</text><text>按月份、电箱和结果查询</text></view>
             <text class="row-arrow"></text>

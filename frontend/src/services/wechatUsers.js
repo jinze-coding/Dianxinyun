@@ -4,8 +4,8 @@ export function getWechatUsers(params = {}) {
   return get('/wechat-users', params);
 }
 
-export function getWechatUserDetail(userId) {
-  return get(`/wechat-users/${userId}`);
+export function getWechatUserDetail(userId, projectId) {
+  return get(`/wechat-users/${userId}`, projectId ? { projectId } : {});
 }
 
 export function updateWechatBindingStatus(userId, bindingId, data) {

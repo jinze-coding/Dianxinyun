@@ -1,11 +1,38 @@
 package com.example.siteplatform.config;
 
+import com.example.siteplatform.system.security.BusinessModulePermissionInterceptor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
 public class WebCorsConfig implements WebMvcConfigurer {
+
+    private final BusinessModulePermissionInterceptor businessModulePermissionInterceptor;
+
+    public WebCorsConfig(BusinessModulePermissionInterceptor businessModulePermissionInterceptor) {
+        this.businessModulePermissionInterceptor = businessModulePermissionInterceptor;
+    }
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(businessModulePermissionInterceptor)
+                .addPathPatterns(
+                        "/api/v1/project-documents",
+                        "/api/v1/project-documents/**",
+                        "/api/v1/document-folders",
+                        "/api/v1/document-folders/**",
+                        "/api/v1/inspection",
+                        "/api/v1/inspection/**",
+                        "/api/v1/electric-boxes",
+                        "/api/v1/electric-boxes/**",
+                        "/api/v1/quality/issues",
+                        "/api/v1/quality/issues/**",
+                        "/api/v1/files",
+                        "/api/v1/files/**"
+                );
+    }
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {

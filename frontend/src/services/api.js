@@ -15,6 +15,13 @@ function handleUnauthorized() {
   window.dispatchEvent(new CustomEvent('site-platform-auth-expired'));
 }
 
+export function getApiErrorMessage(error, fallback = '请求失败') {
+  return error?.response?.data?.message
+    || error?.response?.data?.error
+    || error?.message
+    || fallback;
+}
+
 export async function ensureFileBlob(blob, fallbackMessage = '文件请求失败') {
   if (!(blob instanceof Blob)) {
     throw new Error(fallbackMessage);
@@ -63,6 +70,9 @@ apiClient.interceptors.response.use(
   },
   (error) => {
     const { response } = error;
+    if (response?.data?.message) {
+      error.message = response.data.message;
+    }
     if (response) {
       switch (response.status) {
         case 401:

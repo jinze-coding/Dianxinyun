@@ -6,11 +6,13 @@ import SafetyPhotoUploader from '@/components/SafetyPhotoUploader.vue';
 import { getElectricBoxDetail } from '@/api/electricBox';
 import { createDefaultCheckItems, getInspectionRecordDetail, getInspectionRecords, submitInspectionRecord } from '@/api/inspection';
 import { deleteFileResources, uploadPhotoIds } from '@/api/file';
+import { useAuthStore } from '@/stores/auth';
 import type { CheckResult, ElectricBox, InspectionRecord } from '@/types';
 import { usePageScrollHeight } from '@/utils/navLayout';
 import { getQueryNumber, showToast, switchTab } from '@/utils/navigation';
 
 const PHOTO_MAX = 4;
+const authStore = useAuthStore();
 const box = ref<ElectricBox>();
 const outerPhotos = ref<string[]>([]);
 const innerPhotos = ref<string[]>([]);
@@ -41,13 +43,25 @@ const naCount = computed(() => items.value.filter((item) => item.result === 'NA'
 const readOnly = computed(() => Boolean(duplicateDailyRecord.value));
 
 onShow(async () => {
+  if (!await authStore.ensureRootAccess('/pages/inspection/index')) return;
   const pages = getCurrentPages();
   const current = pages[pages.length - 1] as unknown as { options?: Record<string, string> };
   const boxId = getQueryNumber(current.options?.boxId, 101);
   const recordId = getQueryNumber(current.options?.recordId, 0);
   duplicateDailyRecord.value = undefined;
   resetDraft();
-  box.value = await getElectricBoxDetail(boxId);
+  const loadedBox = await getElectricBoxDetail(boxId);
+  if (!loadedBox) { showToast('未找到电箱信息'); return; }
+  box.value = loadedBox;
+  if (!await authStore.ensureProjectPermission(
+    '/pages/inspection/index',
+    Number(loadedBox.projectId),
+    'inspection.submit',
+    'INSPECTION_DAILY_SUBMIT'
+  )) {
+    box.value = undefined;
+    return;
+  }
   if (recordId > 0) {
     const existing = await getInspectionRecordDetail(recordId);
     if (existing) applyExistingRecord(existing);

@@ -626,8 +626,8 @@ export function getMockPublicElectricBoxMonthly(publicCode: string, month?: stri
   });
   const effectiveRows = rows.filter((item) => item.required && item.date <= '2026-07-11');
   return {
-    projectName: '电信云平台项目现场综合管理系统',
-    projectShortName: 'A1作业区域',
+    projectName: '',
+    projectShortName: '',
     boxCode: box.boxCode,
     boxName: box.boxName,
     installLocation: box.installLocation,

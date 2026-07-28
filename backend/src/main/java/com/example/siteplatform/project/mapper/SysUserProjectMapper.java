@@ -14,6 +14,21 @@ import java.util.List;
 public interface SysUserProjectMapper extends BaseMapper<SysUserProject> {
 
     @Select("""
+            SELECT DISTINCT user_id
+            FROM sys_user_project
+            WHERE inspection_permission_template_id = #{templateId}
+              AND status = 'ACTIVE'
+            """)
+    List<Long> selectActiveUserIdsByInspectionPermissionTemplateId(@Param("templateId") Long templateId);
+
+    @Select("""
+            SELECT DISTINCT user_id
+            FROM sys_user_project
+            WHERE project_role_code = #{roleCode}
+            """)
+    List<Long> selectUserIdsByProjectRoleCode(@Param("roleCode") String roleCode);
+
+    @Select("""
             SELECT sup.id AS memberId,
                    sup.project_id AS projectId,
                    sup.user_id AS userId,

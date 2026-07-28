@@ -17,6 +17,9 @@ BACKEND_URL="http://127.0.0.1:8080/doc.html"
 WEB_URL="http://127.0.0.1:3002"
 MINIPROGRAM_H5_URL="http://127.0.0.1:3003"
 MINIPROGRAM_APP_JSON="$MINIPROGRAM_DIR/dist/dev/mp-weixin/app.json"
+REDIS_HOST="127.0.0.1"
+REDIS_PORT="${DIANXINYUN_REDIS_PORT:-6380}"
+REDIS_CLI_BIN="${REDIS_CLI_BIN:-}"
 
 mkdir -p "$LOG_DIR"
 
@@ -35,6 +38,25 @@ fail() {
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "缺少命令：$1"
+}
+
+resolve_redis_cli() {
+  if [ -n "$REDIS_CLI_BIN" ] && [ -x "$REDIS_CLI_BIN" ]; then
+    return 0
+  fi
+
+  if command -v redis-cli >/dev/null 2>&1; then
+    REDIS_CLI_BIN="$(command -v redis-cli)"
+    return 0
+  fi
+
+  local bundled_cli="$HOME/.local/opt/redis-stable/bin/redis-cli"
+  if [ -x "$bundled_cli" ]; then
+    REDIS_CLI_BIN="$bundled_cli"
+    return 0
+  fi
+
+  fail "缺少命令：redis-cli"
 }
 
 screen_exists() {
@@ -89,13 +111,14 @@ check_dependencies() {
   require_command lsof
   require_command mvn
   require_command npm
+  resolve_redis_cli
 
   if ! mysqladmin ping -h 127.0.0.1 -u root --silent >/dev/null 2>&1; then
     fail "MySQL 未运行，请先启动本机 MySQL"
   fi
 
-  if ! redis-cli ping >/dev/null 2>&1; then
-    fail "Redis 未运行，请先启动本机 Redis"
+  if ! "$REDIS_CLI_BIN" -h "$REDIS_HOST" -p "$REDIS_PORT" ping >/dev/null 2>&1; then
+    fail "Redis 未运行，请先启动本机 Redis（$REDIS_HOST:$REDIS_PORT）"
   fi
 }
 
@@ -111,7 +134,7 @@ start_backend() {
 
   : > "$LOG_DIR/backend.log"
   screen -dmS "$BACKEND_SESSION" bash -lc \
-    "cd '$BACKEND_DIR' && exec mvn spring-boot:run >> '$LOG_DIR/backend.log' 2>&1"
+    "cd '$BACKEND_DIR' && exec env SPRING_PROFILES_ACTIVE='local' WECHAT_MINI_PROGRAM_MOCK_ENABLED='true' SPRING_DATA_REDIS_HOST='$REDIS_HOST' SPRING_DATA_REDIS_PORT='$REDIS_PORT' mvn spring-boot:run >> '$LOG_DIR/backend.log' 2>&1"
   wait_for_http "共享后端" "$BACKEND_URL" 90
 }
 

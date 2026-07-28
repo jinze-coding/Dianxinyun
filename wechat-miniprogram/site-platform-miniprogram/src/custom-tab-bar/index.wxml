@@ -1,0 +1,2 @@
+<!-- 可见的权限导航由业务根页 AppTabBar 渲染。 -->
+<view class="native-custom-tabbar-placeholder"></view>
