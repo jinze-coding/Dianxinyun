@@ -1,5 +1,7 @@
 package com.example.siteplatform.auth.service;
 
+import com.example.siteplatform.auth.dto.WechatBindingStatusRequest;
+import com.example.siteplatform.auth.dto.WechatUnbindRequest;
 import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.auth.entity.SysUserWechatBinding;
 import com.example.siteplatform.auth.entity.WechatAccessApplication;
@@ -90,6 +92,41 @@ class WechatUserManagementServiceScopeTest {
         assertTrue(result.getOperationLogs().isEmpty());
         verify(bindingMapper, never()).selectList(any());
         verify(operationLogMapper, never()).selectList(any());
+    }
+
+    @Test
+    void bindingStatusWriteFailureReturnsConflictWithoutRevokingSessionsOrAuditingSuccess() {
+        SysUserWechatBinding binding = binding(20L, 2L);
+        WechatBindingStatusRequest request = new WechatBindingStatusRequest();
+        request.setStatus("DISABLED");
+        request.setReason("安全停用");
+        when(permissionService.isPlatformAdmin(1L)).thenReturn(true);
+        when(bindingMapper.selectById(20L)).thenReturn(binding);
+        when(bindingMapper.updateById(binding)).thenReturn(0);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.updateBindingStatus(2L, 20L, request, manager));
+
+        assertEquals(409, exception.getCode());
+        verify(authService, never()).logout(2L);
+        verify(operationLogMapper, never()).insert(any());
+    }
+
+    @Test
+    void unbindWriteFailureReturnsConflictWithoutRevokingSessionsOrAuditingSuccess() {
+        SysUserWechatBinding binding = binding(20L, 2L);
+        WechatUnbindRequest request = new WechatUnbindRequest();
+        request.setReason("解除绑定");
+        when(permissionService.isPlatformAdmin(1L)).thenReturn(true);
+        when(bindingMapper.selectById(20L)).thenReturn(binding);
+        when(bindingMapper.updateById(binding)).thenReturn(0);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.unbind(2L, 20L, request, manager));
+
+        assertEquals(409, exception.getCode());
+        verify(authService, never()).logout(2L);
+        verify(operationLogMapper, never()).insert(any());
     }
 
     private SysUser user(Long id) {

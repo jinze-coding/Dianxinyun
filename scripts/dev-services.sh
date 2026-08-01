@@ -67,6 +67,25 @@ listener_pid() {
   lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null || true
 }
 
+resolve_lan_ipv4() {
+  if [ -n "${DIANXINYUN_LAN_IP:-}" ]; then
+    printf '%s\n' "$DIANXINYUN_LAN_IP"
+    return 0
+  fi
+
+  local interface
+  local address
+  for interface in en0 en1; do
+    address="$(ipconfig getifaddr "$interface" 2>/dev/null || true)"
+    if [ -n "$address" ]; then
+      printf '%s\n' "$address"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 wait_for_http() {
   local name="$1"
   local url="$2"
@@ -118,7 +137,7 @@ check_dependencies() {
   fi
 
   if ! "$REDIS_CLI_BIN" -h "$REDIS_HOST" -p "$REDIS_PORT" ping >/dev/null 2>&1; then
-    fail "Redis 未运行，请先启动本机 Redis（$REDIS_HOST:$REDIS_PORT）"
+    fail "Redis 未运行，请先启动本机 Redis（${REDIS_HOST}:${REDIS_PORT}）"
   fi
 }
 
@@ -134,7 +153,7 @@ start_backend() {
 
   : > "$LOG_DIR/backend.log"
   screen -dmS "$BACKEND_SESSION" bash -lc \
-    "cd '$BACKEND_DIR' && exec env SPRING_PROFILES_ACTIVE='local' WECHAT_MINI_PROGRAM_MOCK_ENABLED='true' SPRING_DATA_REDIS_HOST='$REDIS_HOST' SPRING_DATA_REDIS_PORT='$REDIS_PORT' mvn spring-boot:run >> '$LOG_DIR/backend.log' 2>&1"
+    "cd '$BACKEND_DIR' && exec env SPRING_PROFILES_ACTIVE='local' WECHAT_MINI_PROGRAM_MOCK_ENABLED='true' REDIS_HOST='$REDIS_HOST' REDIS_PORT='$REDIS_PORT' KNIFE4J_ENABLE='true' API_DOCS_ENABLED='true' SWAGGER_UI_ENABLED='true' mvn spring-boot:run >> '$LOG_DIR/backend.log' 2>&1"
   wait_for_http "共享后端" "$BACKEND_URL" 90
 }
 
@@ -155,15 +174,29 @@ start_web() {
 }
 
 start_miniprogram() {
+  local watcher_pids
+  local watcher_count
+  local lan_ip
+
   if screen_exists "$MINIPROGRAM_SESSION"; then
-    info "小程序微信编译监听已运行"
-    return 0
+    watcher_pids="$(miniprogram_watcher_pids)"
+    set -- $watcher_pids
+    watcher_count=$#
+    if [ "$watcher_count" -eq 1 ]; then
+      info "小程序微信编译监听已运行"
+      return 0
+    fi
+    warn "检测到 $watcher_count 个小程序编译监听，将清理后重新启动"
+    stop_screen "$MINIPROGRAM_SESSION" "小程序微信编译监听"
+    stop_miniprogram_watchers
   fi
+
+  lan_ip="$(resolve_lan_ipv4)" || fail "无法识别局域网 IPv4；请设置 DIANXINYUN_LAN_IP 后重试"
 
   : > "$LOG_DIR/miniprogram.log"
   rm -f "$MINIPROGRAM_APP_JSON"
   screen -dmS "$MINIPROGRAM_SESSION" bash -lc \
-    "cd '$MINIPROGRAM_DIR' && exec env VITE_USE_MOCK=false npm run dev:mp-weixin:real >> '$LOG_DIR/miniprogram.log' 2>&1"
+    "cd '$MINIPROGRAM_DIR' && exec env VITE_USE_MOCK=false VITE_API_BASE_URL='http://$lan_ip:8080/api/v1' npm run dev:mp-weixin:local >> '$LOG_DIR/miniprogram.log' 2>&1"
   wait_for_file "小程序" "$MINIPROGRAM_APP_JSON" 90
 }
 
@@ -186,11 +219,16 @@ start_miniprogram_h5() {
 stop_screen() {
   local session="$1"
   local label="$2"
+  local session_ids
+  local session_id
 
-  if screen_exists "$session"; then
-    screen -S "$session" -X quit >/dev/null 2>&1 || true
-    info "$label 已停止"
-  fi
+  session_ids="$(screen -ls 2>/dev/null | awk -v target="$session" '$1 ~ ("[.]" target "$") { print $1 }')"
+  [ -z "$session_ids" ] && return 0
+
+  while IFS= read -r session_id; do
+    [ -n "$session_id" ] && screen -S "$session_id" -X quit >/dev/null 2>&1 || true
+  done <<< "$session_ids"
+  info "$label 已停止"
 }
 
 stop_port() {
@@ -215,21 +253,30 @@ stop_port() {
   info "$label 端口 $port 已释放"
 }
 
+miniprogram_watcher_pids() {
+  ps -axo pid=,command= | awk -v root="$MINIPROGRAM_DIR" '
+    ($2 == "node") && (index($0, root "/node_modules/") > 0) &&
+    (($0 ~ /vite-plugin-uni\/bin\/uni[.]js -p mp-weixin/) ||
+     ($0 ~ /node_modules\/[.]bin\/uni -p mp-weixin/)) {
+        print $1
+    }
+  '
+}
+
 stop_miniprogram_watchers() {
-  local pattern="$MINIPROGRAM_DIR/node_modules/.bin/uni -p mp-weixin"
   local pids
   local attempt=0
 
-  pids="$(pgrep -f "$pattern" 2>/dev/null || true)"
+  pids="$(miniprogram_watcher_pids)"
   [ -z "$pids" ] && return 0
 
   kill $pids >/dev/null 2>&1 || true
-  while [ "$attempt" -lt 20 ] && [ -n "$(pgrep -f "$pattern" 2>/dev/null || true)" ]; do
+  while [ "$attempt" -lt 20 ] && [ -n "$(miniprogram_watcher_pids)" ]; do
     attempt=$((attempt + 1))
     sleep 0.25
   done
 
-  pids="$(pgrep -f "$pattern" 2>/dev/null || true)"
+  pids="$(miniprogram_watcher_pids)"
   if [ -n "$pids" ]; then
     kill -9 $pids >/dev/null 2>&1 || true
   fi
@@ -254,10 +301,19 @@ show_status() {
   local web_state="未运行"
   local miniprogram_state="未运行"
   local miniprogram_h5_state="未运行"
+  local watcher_pids
+  local watcher_count
 
   curl -fsS --max-time 2 "$BACKEND_URL" >/dev/null 2>&1 && backend_state="运行中"
   curl -fsS --max-time 2 "$WEB_URL" >/dev/null 2>&1 && web_state="运行中"
-  screen_exists "$MINIPROGRAM_SESSION" && miniprogram_state="编译监听中"
+  watcher_pids="$(miniprogram_watcher_pids)"
+  set -- $watcher_pids
+  watcher_count=$#
+  if screen_exists "$MINIPROGRAM_SESSION"; then
+    miniprogram_state="编译监听中（${watcher_count} 个进程）"
+  elif [ "$watcher_count" -gt 0 ]; then
+    miniprogram_state="存在 ${watcher_count} 个遗留监听"
+  fi
   curl -fsS --max-time 2 "$MINIPROGRAM_H5_URL" >/dev/null 2>&1 && miniprogram_h5_state="运行中"
 
   printf '共享后端：%s  %s\n' "$backend_state" "$BACKEND_URL"

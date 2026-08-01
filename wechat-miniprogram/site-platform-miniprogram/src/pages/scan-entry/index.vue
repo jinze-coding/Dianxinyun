@@ -117,6 +117,15 @@ function showFailure(text: string) {
   message.value = text;
   detail.value = '请返回巡检首页后重新扫码';
   failed.value = true;
+  routing = false;
+}
+
+function retry() {
+  if (!pendingScene || routing) return;
+  message.value = '正在重新识别巡检码';
+  detail.value = '网络恢复后将自动进入对应页面';
+  failed.value = false;
+  void beginRouting();
 }
 
 function leave() {
@@ -129,7 +138,10 @@ function leave() {
     <view class="route-mark" :class="{ failed }"><text>{{ failed ? '!' : '码' }}</text></view>
     <text class="route-title">{{ message }}</text>
     <text class="route-desc">{{ detail }}</text>
-    <button v-if="failed" class="route-back" @tap="leave">返回巡检首页</button>
+    <view v-if="failed" class="route-actions">
+      <button v-if="pendingScene" class="route-back primary" @tap="retry">重新识别</button>
+      <button class="route-back" @tap="leave">返回巡检首页</button>
+    </view>
   </view>
 </template>
 
@@ -141,7 +153,9 @@ function leave() {
 .route-mark.failed text { display: flex; align-items: center; justify-content: center; font-size: 30rpx; font-weight: 850; }
 .route-title { margin-top: 22rpx; font-size: 25rpx; font-weight: 750; }
 .route-desc { margin-top: 8rpx; color: #98a2b3; font-size: 20rpx; }
-.route-back { display: flex; min-width: 240rpx; height: 70rpx; align-items: center; justify-content: center; margin-top: 30rpx; padding: 0 24rpx; border: 1rpx solid var(--inspection-border); border-radius: 16rpx; background: var(--inspection-soft); color: var(--inspection-primary-deep); font-size: 22rpx; font-weight: 750; line-height: 1; }
+.route-actions { display: flex; gap: 14rpx; margin-top: 30rpx; }
+.route-back { display: flex; min-width: 210rpx; height: 70rpx; align-items: center; justify-content: center; margin: 0; padding: 0 24rpx; border: 1rpx solid var(--inspection-border); border-radius: 16rpx; background: var(--inspection-soft); color: var(--inspection-primary-deep); font-size: 22rpx; font-weight: 750; line-height: 1; }
 .route-back::after { border: 0; }
 .route-back:active { background: var(--inspection-soft-strong); }
+.route-back.primary { border-color: var(--inspection-primary-deep); background: var(--inspection-primary-deep); color: #fff; }
 </style>

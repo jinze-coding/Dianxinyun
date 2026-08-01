@@ -2,7 +2,7 @@ import { getMockTodos } from '@/mock/runtime';
 import type { TodoItem } from '@/types';
 import { USE_MOCK, request } from './request';
 
-const TODO_TYPES: TodoItem['type'][] = ['INSPECTION'];
+const TODO_TYPES: TodoItem['type'][] = ['INSPECTION', 'REVIEW', 'RECTIFICATION', 'RECHECK'];
 const TODO_PRIORITIES: NonNullable<TodoItem['priority']>[] = ['normal', 'warning', 'danger'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -51,6 +51,7 @@ function normalizeTodoItem(value: unknown, index: number): TodoItem {
     installLocation: toText(record.installLocation, '-'),
     dueText: toText(record.dueText, '-'),
     targetId: toNumber(record.targetId, 0),
+    businessType: toText(record.businessType, ''),
     priority: normalizePriority(record.priority),
     reviewDueTime: record.reviewDueTime === null ? null : toText(record.reviewDueTime, ''),
     assignedReviewerId: record.assignedReviewerId === null ? null : toNumber(record.assignedReviewerId, 0),
@@ -66,8 +67,15 @@ function normalizeTodoItems(value: unknown): TodoItem[] {
 
 export async function getTodoItems(projectId?: number): Promise<TodoItem[]> {
   if (USE_MOCK) {
-    return normalizeTodoItems(getMockTodos()).filter((item) => item.type === 'INSPECTION');
+    return normalizeTodoItems(getMockTodos());
   }
-  const data = await request<unknown>(`/inspection/todos${projectId ? `?projectId=${projectId}` : ''}`);
-  return normalizeTodoItems(data).filter((item) => item.type === 'INSPECTION');
+  const suffix = projectId ? `?projectId=${projectId}` : '';
+  const [inspectionData, qualityData] = await Promise.all([
+    request<unknown>(`/inspection/todos${suffix}`),
+    request<unknown>(`/quality/issues/todos${suffix}`)
+  ]);
+  return [
+    ...normalizeTodoItems(inspectionData),
+    ...normalizeTodoItems(qualityData)
+  ];
 }

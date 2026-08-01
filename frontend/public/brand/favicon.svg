@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="智慧营造">
+  <path fill="#092d88" d="M7 16 32 2l25 14v27L32 57 7 43Zm6 3v20l19 11 19-11V19L32 30Z" fill-rule="evenodd"/>
+  <path fill="#08b8e8" d="m32 30 25-14v8L32 38Z"/>
+  <path fill="#0b369b" d="m7 27 25 14v8L7 35Z"/>
+  <path fill="#08b8e8" d="m32 41 25-14v8L32 49Z"/>
+  <path fill="#0b369b" d="m7 39 25 14v8L7 47Z"/>
+  <path fill="#08b8e8" d="m32 53 25-14v8L32 64Z"/>
+</svg>

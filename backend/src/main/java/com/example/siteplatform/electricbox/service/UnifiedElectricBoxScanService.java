@@ -49,9 +49,13 @@ public class UnifiedElectricBoxScanService {
         boolean authenticated = currentUser != null;
         boolean projectAuthorized = authenticated
                 && permissionService.getInspectionPermissionCodes(currentUser.getId(), box.getProjectId()).size() > 0;
+        boolean publicAccessEnabled = Integer.valueOf(1).equals(box.getPublicAccessEnabled());
+        if (!projectAuthorized && !publicAccessEnabled) {
+            throw BusinessException.forbidden("该电箱公开扫码访问已停用");
+        }
         boolean writable = "ACTIVE".equals(box.getStatus());
         boolean inScope = scopeService.isRequired(box, LocalDate.now());
-        InspectionRecord todayRecord = findTodayRecord(box);
+        InspectionRecord todayRecord = projectAuthorized ? findTodayRecord(box) : null;
         List<String> actions = new ArrayList<>();
         String directAction = "UNAVAILABLE";
         if (projectAuthorized) {
@@ -76,7 +80,7 @@ public class UnifiedElectricBoxScanService {
                 }
             }
         }
-        if (Integer.valueOf(1).equals(box.getPublicAccessEnabled())) {
+        if (publicAccessEnabled) {
             actions.add("VIEW_PUBLIC_MONTHLY");
             if ("UNAVAILABLE".equals(directAction)) {
                 directAction = "VIEW_PUBLIC_MONTHLY";
@@ -86,7 +90,7 @@ public class UnifiedElectricBoxScanService {
         UnifiedElectricBoxScanVO vo = new UnifiedElectricBoxScanVO();
         vo.setSceneCode(sceneCode);
         vo.setMode(!actions.isEmpty() && projectAuthorized ? "INTERNAL" :
-                Integer.valueOf(1).equals(box.getPublicAccessEnabled()) ? "PUBLIC_READ_ONLY" : "UNAVAILABLE");
+                publicAccessEnabled ? "PUBLIC_READ_ONLY" : "UNAVAILABLE");
         vo.setReason(resolveReason(box, authenticated, projectAuthorized, inScope));
         vo.setElectricBoxId(projectAuthorized ? box.getId() : null);
         vo.setProjectId(projectAuthorized ? box.getProjectId() : null);
@@ -95,7 +99,7 @@ public class UnifiedElectricBoxScanService {
         vo.setBoxName(box.getBoxName());
         vo.setInstallLocation(box.getInstallLocation());
         vo.setStatus(box.getStatus());
-        vo.setPublicAccessEnabled(Integer.valueOf(1).equals(box.getPublicAccessEnabled()));
+        vo.setPublicAccessEnabled(publicAccessEnabled);
         vo.setInspectionRequired(inScope);
         vo.setAuthenticated(authenticated);
         vo.setProjectAuthorized(projectAuthorized);

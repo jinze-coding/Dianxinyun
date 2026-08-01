@@ -17,6 +17,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -37,6 +40,7 @@ class DocumentFolderServiceTest {
         admin = new SysUser();
         admin.setId(2L);
         admin.setRealName("项目管理员");
+        lenient().when(folderMapper.insert(any())).thenReturn(1);
     }
 
     @Test
@@ -59,6 +63,19 @@ class DocumentFolderServiceTest {
         when(permissionService.isPlatformAdmin(9L)).thenReturn(false);
 
         assertThrows(BusinessException.class, () -> service.create(request(0L, "施工图纸"), member));
+    }
+
+    @Test
+    void createReturnsConflictWhenFolderInsertDidNotTakeEffect() {
+        when(permissionService.canManageProject(2L, 1L)).thenReturn(true);
+        when(folderMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
+        when(folderMapper.insert(any())).thenReturn(0);
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.create(request(0L, "施工图纸"), admin));
+
+        assertEquals(409, error.getCode());
+        verify(documentMapper, never()).selectCount(any());
     }
 
     private DocumentFolderCreateRequest request(Long parentId, String name) {

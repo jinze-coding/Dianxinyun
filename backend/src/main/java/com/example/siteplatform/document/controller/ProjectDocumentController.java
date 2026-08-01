@@ -5,6 +5,7 @@ import com.example.siteplatform.auth.service.AuthService;
 import com.example.siteplatform.common.PageResult;
 import com.example.siteplatform.common.Result;
 import com.example.siteplatform.document.dto.ProjectDocumentBatchRequest;
+import com.example.siteplatform.document.dto.ProjectDocumentClientActionRequest;
 import com.example.siteplatform.document.dto.ProjectDocumentUpdateRequest;
 import com.example.siteplatform.document.service.ProjectDocumentContent;
 import com.example.siteplatform.document.service.ProjectDocumentService;
@@ -12,13 +13,13 @@ import com.example.siteplatform.document.vo.ProjectDocumentActivityVO;
 import com.example.siteplatform.document.vo.ProjectDocumentDetailVO;
 import com.example.siteplatform.document.vo.ProjectDocumentSummaryVO;
 import com.example.siteplatform.document.vo.ProjectDocumentVO;
+import com.example.siteplatform.file.security.FileUploadPolicy;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.core.io.Resource;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -117,6 +118,15 @@ public class ProjectDocumentController {
         return Result.success(documentService.uploadVersion(id, changeNote, file, currentUser(token), request));
     }
 
+    @PostMapping("/{id}/client-actions")
+    public Result<ProjectDocumentActivityVO> recordClientAction(
+            @PathVariable Long id,
+            @Valid @RequestBody ProjectDocumentClientActionRequest action,
+            @RequestHeader("Authorization") String token,
+            HttpServletRequest request) {
+        return Result.success(documentService.recordClientAction(id, action, currentUser(token), request));
+    }
+
     @PutMapping("/{id}")
     public Result<ProjectDocumentDetailVO> update(@PathVariable Long id,
                                                   @RequestBody ProjectDocumentUpdateRequest update,
@@ -185,18 +195,16 @@ public class ProjectDocumentController {
     }
 
     private ResponseEntity<Resource> contentResponse(ProjectDocumentContent content, boolean inline) {
-        ContentDisposition disposition = (inline ? ContentDisposition.inline() : ContentDisposition.attachment())
+        boolean safeInline = inline && FileUploadPolicy.canPreviewInline(content.fileName());
+        ContentDisposition disposition = (safeInline ? ContentDisposition.inline() : ContentDisposition.attachment())
                 .filename(content.fileName(), StandardCharsets.UTF_8).build();
-        MediaType mediaType;
-        try {
-            mediaType = MediaType.parseMediaType(content.mimeType());
-        } catch (Exception ignored) {
-            mediaType = MediaType.APPLICATION_OCTET_STREAM;
-        }
         return ResponseEntity.ok()
-                .contentType(mediaType)
+                .contentType(FileUploadPolicy.responseMediaType(content.fileName()))
                 .contentLength(content.fileSize())
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .header("X-Content-Type-Options", "nosniff")
+                .header("Content-Security-Policy", "sandbox")
+                .header("Cross-Origin-Resource-Policy", "same-origin")
                 .body(content.resource());
     }
 

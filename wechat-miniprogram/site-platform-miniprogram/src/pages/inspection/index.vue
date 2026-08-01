@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { onShow } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
 import AppTabBar from '@/components/AppTabBar.vue';
+import WorkspaceAreaSheet from '@/components/workspace/WorkspaceAreaSheet.vue';
 import WorkspaceAreaSwitcher from '@/components/workspace/WorkspaceAreaSwitcher.vue';
 import WorkspaceMetricStrip, { type WorkspaceMetric } from '@/components/workspace/WorkspaceMetricStrip.vue';
 import { WORKSPACE_THEME } from '@/constants/workspaceTheme';
@@ -22,6 +23,7 @@ const todos = ref<TodoItem[]>([]);
 const loading = ref(false);
 const errorMessage = ref('');
 const scanBusy = ref(false);
+const areaSheetOpen = ref(false);
 const { scrollStyle } = usePageScrollHeight({ bottomRpx: 124, minHeight: 320 });
 
 const projects = computed(() => projectStore.state.projects);
@@ -118,7 +120,14 @@ function startInspection(todo: TodoItem) {
     <AppNavBar title="巡检" :show-back="false" />
     <scroll-view class="workspace-scroll" scroll-y enable-flex :style="scrollStyle">
       <view class="workspace-content">
-        <WorkspaceAreaSwitcher :project="currentProject" :projects="projects" :accent="ACCENT" :tint="TINT" @select="selectProject" />
+        <WorkspaceAreaSwitcher
+          :project="currentProject"
+          :projects="projects"
+          :accent="ACCENT"
+          :tint="TINT"
+          :open="areaSheetOpen"
+          @open="areaSheetOpen = true"
+        />
 
         <view v-if="loading && !currentProject" class="state-panel">
           <text class="state-title">正在加载巡检任务</text>
@@ -175,7 +184,16 @@ function startInspection(todo: TodoItem) {
         </template>
       </view>
     </scroll-view>
-    <AppTabBar active="inspection" />
+    <WorkspaceAreaSheet
+      :open="areaSheetOpen"
+      :project="currentProject"
+      :projects="projects"
+      :accent="ACCENT"
+      :tint="TINT"
+      @close="areaSheetOpen = false"
+      @select="selectProject"
+    />
+    <AppTabBar v-if="!areaSheetOpen" active="inspection" />
   </view>
 </template>
 

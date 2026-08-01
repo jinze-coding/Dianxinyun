@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { DEFAULT_THEME_ID, getThemeById } from './constants/themes';
-import { PROJECTS, PROJECT_INFO, DATA_BY_PROJECT } from './constants/mockData';
 import { NAV_ITEMS, PAGE_IDS } from './constants/dicts';
 import { isLoggedIn, getCurrentUser, logout } from './services/auth';
 import { getProjectList, addProject, updateProject, deleteProject } from './services/project';
@@ -37,6 +36,8 @@ import QualityManagementPage from './pages/QualityManagement';
 import DocumentManagementPage from './pages/DocumentManagement';
 import SystemManagementPage from './pages/SystemManagement';
 import { canAccessPage, hasProjectPermission, isPlatformAdmin } from './utils/permissions';
+import { buildElectricBoxQrLabelHtml, normalizeQrImageSource } from './utils/html';
+import { requireProjectList } from './utils/projectList';
 import StatusBadge from './components/StatusBadge';
 import SectionCard from './components/SectionCard';
 import PersonFormModal from './components/PersonFormModal';
@@ -210,7 +211,7 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
   };
 
   const handleDeleteProject = async (id) => {
-    if (!window.confirm('确认删除此项目？')) return;
+    if (!window.confirm('仅空项目可以删除。确认删除此项目？')) return;
     try {
       const res = await deleteProject(id);
       if (res.code === 200) {
@@ -221,7 +222,7 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
           if (remaining) onProjectChange(remaining.id);
         }
       } else { alert(res.message || '删除失败'); }
-    } catch (e) { alert('删除失败，请重试'); }
+    } catch (e) { alert(e?.response?.data?.message || '删除失败，请重试'); }
   };
 
   const T = theme;
@@ -673,13 +674,47 @@ const MONITOR_LAYOUT_MAP = {
 };
 
 const normalizeDeviceStatus = (status) => {
-  const map = { running: '运行中', stopped: '停机', abnormal: '异常', maintenance: '维修中' };
-  return map[status] || status || '未知';
+  if (!status) return '未知';
+  const normalized = String(status).trim().toLowerCase().replace('-', '_');
+  const map = {
+    running: '运行中',
+    运行中: '运行中',
+    正常: '运行中',
+    stopped: '停机',
+    停机: '停机',
+    已停机: '停机',
+    停用: '停机',
+    abnormal: '异常',
+    alarm: '异常',
+    danger: '异常',
+    异常: '异常',
+    告警: '异常',
+    maintenance: '维修中',
+    维修中: '维修中',
+    维护中: '维修中',
+  };
+  return map[normalized] || status;
 };
 
 const normalizeDeviceType = (type) => {
-  const map = { tower_crane: '塔吊', elevator: '施工电梯', pump: '泵车' };
-  return map[type] || type || '其他';
+  if (!type) return '其他';
+  const normalized = String(type).trim().toLowerCase().replace('-', '_');
+  const map = {
+    tower_crane: '塔吊',
+    塔吊: '塔吊',
+    塔式起重机: '塔吊',
+    elevator: '施工电梯',
+    施工电梯: '施工电梯',
+    升降机: '施工电梯',
+    monitor: '监测设备',
+    监测设备: '监测设备',
+    环境监测: '监测设备',
+    pump: '泵车',
+    泵车: '泵车',
+    other: '其他',
+    其他: '其他',
+  };
+  return map[normalized] || type;
 };
 
 const mapCameraResource = (camera) => ({
@@ -1117,12 +1152,12 @@ function DeviceListModal({ devices, onClose, theme: T }) {
 function OverviewPage({ projectId, theme: T, compactMode, projectList, onEnterCameraPage, cameraConfig, onRefreshProjects }) {
   const currentProjectInfo = projectList?.find(p => p.id === projectId) || {};
   const info = currentProjectInfo;
-  const mockData = DATA_BY_PROJECT[projectId] || {};
 
   const [fullscreenCam, setFullscreenCam] = useState(null);
   const [cameras, setCameras] = useState([]);
   const [devices, setDevices] = useState([]);
   const [monitorLoading, setMonitorLoading] = useState(false);
+  const [monitorError, setMonitorError] = useState('');
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editForm, setEditForm] = useState({});
@@ -1159,30 +1194,33 @@ function OverviewPage({ projectId, theme: T, compactMode, projectList, onEnterCa
   const layouts = MONITOR_LAYOUT_MAP;
   // 计算项目进度
   const progressPercent = calculateProjectProgress(info?.startDate, info?.endDate);
-  const stats = { ...(mockData?.stats || { onsite: 0, todayNewOnsite: 0 }), progressPercent };
+  const stats = { onsite: 0, todayNewOnsite: 0, progressPercent };
   const onlineCount = cameras.filter(c => c.online === true).length;
   const totalCameras = cameras.length;
   const runningDeviceCount = devices.filter(device => device.status === '运行中').length;
 
   const fetchOverviewMonitorData = useCallback(async () => {
     setMonitorLoading(true);
+    setMonitorError('');
     try {
       const [cameraRes, deviceRes] = await Promise.all([
         getCameraList(projectId),
         getDeviceList(projectId),
       ]);
 
-      if (cameraRes.code === 200 && cameraRes.data) {
-        setCameras(cameraRes.data.map(mapCameraResource));
+      if (cameraRes.code !== 200) {
+        throw new Error(cameraRes.message || '摄像头数据加载失败');
       }
-
-      if (deviceRes.code === 200 && deviceRes.data) {
-        setDevices(deviceRes.data.map(mapDeviceResource));
+      if (deviceRes.code !== 200) {
+        throw new Error(deviceRes.message || '设备数据加载失败');
       }
+      setCameras((cameraRes.data || []).map(mapCameraResource));
+      setDevices((deviceRes.data || []).map(mapDeviceResource));
     } catch (e) {
       console.error('获取监控与设备数据失败', e);
-      setCameras((mockData?.cameras || []).map(mapCameraResource));
-      setDevices((mockData?.devices || []).map(mapDeviceResource));
+      setCameras([]);
+      setDevices([]);
+      setMonitorError(e?.message || '监控与设备数据加载失败');
     } finally {
       setMonitorLoading(false);
     }
@@ -1355,6 +1393,11 @@ function OverviewPage({ projectId, theme: T, compactMode, projectList, onEnterCa
         <StatCard label="设备运行" value={`${runningDeviceCount}/${devices.length}`} sub={`${devices.length - runningDeviceCount} 台非运行`} color={T.warning} theme={T} />
         <StatCard label="项目进度" value={`${stats.progressPercent}%`} sub={info?.phase} color={T.accent2} theme={T} />
       </div>
+      {monitorError && (
+        <div style={{ padding: '9px 12px', borderRadius: 6, border: `1px solid ${T.danger}`, background: `${T.danger}12`, color: T.danger, fontSize: 12 }}>
+          {monitorError}
+        </div>
+      )}
 
       {/* 主内容区 */}
       <div style={{ display: 'flex', gap: 0, flex: 1, minHeight: 0 }}>
@@ -1840,13 +1883,51 @@ function OverviewPage({ projectId, theme: T, compactMode, projectList, onEnterCa
 
 // 页面：人员与安全
 // ============================================
-function PersonnelPage({ projectId, theme: T, compactMode }) {
-  const mockData = DATA_BY_PROJECT[projectId];
+const PERSONNEL_STATUS_LABELS = {
+  WAIT_EDUCATION: '待教育',
+  EDUCATED: '已教育',
+  LEFT: '已离场',
+};
 
+const TRAINING_STATUS_LABELS = {
+  NOT_STARTED: '未开始',
+  IN_PROGRESS: '进行中',
+  COMPLETED: '已完成',
+};
+
+const toPersonnelStatusLabel = (status) => {
+  if (!status) return '待教育';
+  return PERSONNEL_STATUS_LABELS[String(status).trim().toUpperCase()] || status;
+};
+
+const toTrainingStatusLabel = (status) => {
+  if (!status) return '未开始';
+  return TRAINING_STATUS_LABELS[String(status).trim().toUpperCase()] || status;
+};
+
+const toPersonnelViewModel = (person = {}) => ({
+  ...person,
+  status: toPersonnelStatusLabel(person.status),
+  note: person.remark ?? person.note ?? '',
+});
+
+const buildPersonnelWritePayload = (person = {}) => ({
+  name: person.name,
+  gender: person.gender,
+  idcard: person.idcard,
+  phone: person.phone,
+  unit: person.unit,
+  role: person.role,
+  entryTime: person.entryTime,
+  remark: person.note ?? person.remark,
+});
+
+function PersonnelPage({ projectId, theme: T, compactMode }) {
   const [personnel, setPersonnel] = useState([]);
   const [trainings, setTrainings] = useState([]);
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   // 搜索草稿/应用双状态
   const [draftSearch, setDraftSearch] = useState('');
@@ -1870,7 +1951,6 @@ function PersonnelPage({ projectId, theme: T, compactMode }) {
   const [editTrainingTimeFocused, setEditTrainingTimeFocused] = useState(false);
 
   const [fileTypeFilter, setFileTypeFilter] = useState('全部');
-  const [previewFile, setPreviewFile] = useState(null);
 
   const statusFilters = ['全部', '待教育', '已教育', '已离场'];
   const fileTypes = ['全部', '培训资料', '签字文件', '证书'];
@@ -1988,6 +2068,7 @@ function PersonnelPage({ projectId, theme: T, compactMode }) {
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
+      setLoadError('');
       try {
         const [personnelRes, trainingRes, fileRes] = await Promise.all([
           getPersonnelList(projectId),
@@ -1995,52 +2076,44 @@ function PersonnelPage({ projectId, theme: T, compactMode }) {
           getFileList(projectId),
         ]);
 
-        if (personnelRes.code === 200 && personnelRes.data) {
-          setPersonnel(personnelRes.data.map(p => ({
-            id: p.id,
-            name: p.name,
-            gender: p.gender,
-            idcard: p.idcard,
-            phone: p.phone,
-            unit: p.unit,
-            role: p.role,
-            entryTime: p.entryTime,
-            status: p.status,
-          })));
+        if (personnelRes.code !== 200) {
+          throw new Error(personnelRes.message || '人员数据加载失败');
         }
-
-        if (trainingRes.code === 200 && trainingRes.data) {
-          setTrainings(trainingRes.data.map(t => ({
-            id: t.id,
-            name: t.batchName,
-            eduType: t.eduType,
-            time: t.time,
-            place: t.place || t.trainingPlace,
-            trainer: t.trainer,
-            status: t.status,
-            personIds: t.personIds || [],
-            files: t.files || [],
-            courseHours: t.courseHours,
-            examType: t.examType,
-            trainingMaterial: t.trainingMaterial,
-            note: t.remark,
-          })));
+        if (trainingRes.code !== 200) {
+          throw new Error(trainingRes.message || '培训数据加载失败');
         }
-
-        if (fileRes.code === 200 && fileRes.data) {
-          setFiles(fileRes.data.map(f => ({
-            id: f.id,
-            name: f.fileName,
-            fileType: f.fileType,
-            batchName: f.businessType,
-            uploader: f.uploaderId,
-            time: f.createTime,
-          })));
+        if (fileRes.code !== 200) {
+          throw new Error(fileRes.message || '附件数据加载失败');
         }
+        setPersonnel((personnelRes.data || []).map(toPersonnelViewModel));
+        setTrainings((trainingRes.data || []).map(t => ({
+          id: t.id,
+          name: t.batchName,
+          eduType: t.eduType,
+          time: t.time,
+          place: t.place || t.trainingPlace,
+          trainer: t.trainer,
+          status: toTrainingStatusLabel(t.status),
+          personIds: t.personIds || [],
+          files: t.files || [],
+          courseHours: t.courseHours,
+          examType: t.examType,
+          trainingMaterial: t.trainingMaterial,
+          note: t.remark,
+        })));
+        setFiles((fileRes.data || []).map(f => ({
+          id: f.id,
+          name: f.fileName,
+          fileType: f.fileType,
+          batchName: f.businessType,
+          uploader: f.uploaderId,
+          time: f.createTime,
+        })));
       } catch (e) {
-        setPersonnel(mockData?.personnel || []);
-        setTrainings(mockData?.trainings || []);
-        setFiles(mockData?.files || []);
+        setPersonnel([]);
+        setTrainings([]);
+        setFiles([]);
+        setLoadError(e?.message || '人员、培训与附件数据加载失败');
       } finally {
         setLoading(false);
       }
@@ -2083,14 +2156,20 @@ function PersonnelPage({ projectId, theme: T, compactMode }) {
       const now = new Date();
       const pad = n => String(n).padStart(2, '0');
       const entryTime = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:00`;
-      const res = await addPersonnel({ ...addForm, projectId, entryTime, status: '待教育' });
+      const res = await addPersonnel({
+        ...buildPersonnelWritePayload({ ...addForm, entryTime }),
+        projectId,
+      });
       if (res.code === 200) {
-        setPersonnel(prev => [...prev, {
-          id: res.data.id || res.data,
+        const responsePerson = res.data && typeof res.data === 'object' ? res.data : {};
+        setPersonnel(prev => [...prev, toPersonnelViewModel({
           ...addForm,
-          entryTime,
-          status: '待教育',
-        }]);
+          ...responsePerson,
+          id: responsePerson.id ?? res.data,
+          entryTime: responsePerson.entryTime ?? entryTime,
+          status: responsePerson.status ?? '待教育',
+          remark: responsePerson.remark ?? addForm.note,
+        })]);
         setAddForm({ name: '', gender: '男', idcard: '', phone: '', unit: '', role: '普工', note: '' });
         setShowAddModal(false);
       } else {
@@ -2101,14 +2180,45 @@ function PersonnelPage({ projectId, theme: T, compactMode }) {
     }
   };
 
-  const handleEditPerson = () => {
-    setPersonnel(personnel.map(p => p.id === editingPerson.id ? editingPerson : p));
-    setEditingPerson(null);
+  const handleEditPerson = async () => {
+    if (!editingPerson?.id) return;
+    try {
+      const res = await updatePersonnel(editingPerson.id, buildPersonnelWritePayload(editingPerson));
+      if (res.code !== 200) {
+        alert(res.message || '保存失败');
+        return;
+      }
+      const responsePerson = res.data && typeof res.data === 'object' ? res.data : {};
+      const updatedPerson = toPersonnelViewModel({
+        ...editingPerson,
+        ...responsePerson,
+        id: editingPerson.id,
+        status: responsePerson.status ?? editingPerson.status,
+        remark: responsePerson.remark ?? editingPerson.note,
+      });
+      setPersonnel(prev => prev.map(person => person.id === updatedPerson.id ? updatedPerson : person));
+      setSelectedPerson(prev => prev?.id === updatedPerson.id ? updatedPerson : prev);
+      setEditingPerson(null);
+    } catch (error) {
+      console.error('更新人员失败', error);
+      alert(error.message || '保存失败，请重试');
+    }
   };
 
-  const handleDeletePerson = (p) => {
-    if (window.confirm(`确认删除 ${p.name}？此操作不可撤销。`)) {
-      setPersonnel(personnel.filter(x => p.id !== x.id));
+  const handleDeletePerson = async (person) => {
+    if (!window.confirm(`确认删除 ${person.name}？此操作不可撤销。`)) return;
+    try {
+      const res = await deletePersonnel(person.id);
+      if (res.code !== 200) {
+        alert(res.message || '删除失败');
+        return;
+      }
+      setPersonnel(prev => prev.filter(item => item.id !== person.id));
+      setSelectedPerson(prev => prev?.id === person.id ? null : prev);
+      setEditingPerson(prev => prev?.id === person.id ? null : prev);
+    } catch (error) {
+      console.error('删除人员失败', error);
+      alert(error.message || '删除失败，请重试');
     }
   };
 
@@ -2207,10 +2317,61 @@ function PersonnelPage({ projectId, theme: T, compactMode }) {
     return newFiles;
   };
 
-  const handleMarkComplete = (training) => {
-    if (!window.confirm(`确认标记「${training.name}」为已完成？\n关联的 ${training.personIds.length} 人状态将自动更新为"已教育"`)) return;
-    setTrainings(trainings.map(t => t.id === training.id ? { ...t, status: '已完成' } : t));
-    setPersonnel(personnel.map(p => training.personIds.includes(p.id) ? { ...p, status: '已教育' } : p));
+  const handleStandaloneTrainingFileUpload = async (file) => {
+    if (!file) return;
+    try {
+      const res = await uploadFile({
+        file,
+        projectId,
+        fileName: file.name,
+        fileType: '培训资料',
+        businessType: 'safety_education',
+      });
+      if (res.code !== 200 || !res.data?.id) {
+        throw new Error(res.message || '培训资料上传失败');
+      }
+      setFiles(prev => [{
+        id: res.data.id,
+        name: res.data.fileName || file.name,
+        fileType: res.data.fileType || '培训资料',
+        batchName: res.data.businessType || 'safety_education',
+        uploader: res.data.uploaderName || res.data.uploaderId,
+        time: res.data.createTime,
+      }, ...prev]);
+    } catch (error) {
+      console.error('培训资料上传失败', error);
+      alert(error.message || '培训资料上传失败，请重试');
+    }
+  };
+
+  const handleStandaloneTrainingFileAction = async (file, action) => {
+    try {
+      await action(file);
+    } catch (error) {
+      console.error('培训资料操作失败', error);
+      alert(error.message || '培训资料操作失败，请重试');
+    }
+  };
+
+  const handleMarkComplete = async (training) => {
+    const personIds = training.personIds || [];
+    if (!window.confirm(`确认标记「${training.name}」为已完成？\n关联的 ${personIds.length} 人状态将自动更新为"已教育"`)) return;
+    try {
+      const res = await markTrainingComplete(training.id);
+      if (res.code !== 200) {
+        alert(res.message || '标记完成失败');
+        return;
+      }
+      setTrainings(prev => prev.map(item => item.id === training.id ? { ...item, status: '已完成' } : item));
+      setPersonnel(prev => prev.map(person => (
+        personIds.includes(person.id) && person.status !== '已离场'
+          ? { ...person, status: '已教育' }
+          : person
+      )));
+    } catch (error) {
+      console.error('标记培训完成失败', error);
+      alert(error.message || '标记完成失败，请重试');
+    }
   };
 
   const eligiblePersonnel = personnel.filter(p => p.status === '待教育');
@@ -2234,6 +2395,11 @@ function PersonnelPage({ projectId, theme: T, compactMode }) {
           </div>
         ))}
       </div>
+      {loadError && (
+        <div style={{ padding: '9px 12px', borderRadius: 6, border: `1px solid ${T.danger}`, background: `${T.danger}12`, color: T.danger, fontSize: 12 }}>
+          {loadError}
+        </div>
+      )}
 
       {/* 三栏内容区 */}
       <div style={{ display: 'flex', gap: 12, flex: 1, minHeight: 0 }}>
@@ -2384,14 +2550,21 @@ function PersonnelPage({ projectId, theme: T, compactMode }) {
             <div style={{ background: T.cardBg, border: `1px solid ${T.borderColor}`, borderRadius: T.radius, display: 'flex', flexDirection: 'column', overflow: 'hidden', height: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: `1px solid ${T.borderColor}`, flexShrink: 0 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary }}>培训资料上传</span>
-                <button type="button" onClick={() => {
-                  setUploadForm({ name: '', type: '培训资料', businessRef: '', note: '' });
-                  setSelectedFile(null);
-                  setShowUploadModal(true);
-                }} style={{
+                <label style={{
                   padding: '4px 10px', fontSize: 10, borderRadius: 4, cursor: 'pointer',
                   background: T.accent, border: 'none', color: '#fff',
-                }}>上传文件</button>
+                }}>
+                  上传文件
+                  <input
+                    type="file"
+                    accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.jpg,.jpeg,.png"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      handleStandaloneTrainingFileUpload(e.target.files?.[0]);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
               </div>
               <div style={{ flex: 1, overflow: 'auto', padding: 12 }}>
                 <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 8 }}>
@@ -2418,8 +2591,8 @@ function PersonnelPage({ projectId, theme: T, compactMode }) {
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
                         <span style={{ fontSize: 10, color: T.textMuted }}>{f.uploader} · {f.time?.split(' ')[0] || ''}</span>
                         <div style={{ display: 'flex', gap: 6 }}>
-                          <button onClick={() => setPreviewFile(f)} style={{ fontSize: 10, color: T.accent, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>预览</button>
-                          <button onClick={() => handleDownload(f)} style={{ fontSize: 10, color: T.textMuted, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>下载</button>
+                          <button onClick={() => handleStandaloneTrainingFileAction(f, previewTrainingFile)} style={{ fontSize: 10, color: T.accent, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>预览</button>
+                          <button onClick={() => handleStandaloneTrainingFileAction(f, downloadTrainingFile)} style={{ fontSize: 10, color: T.textMuted, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>下载</button>
                         </div>
                       </div>
                     </div>
@@ -2435,12 +2608,8 @@ function PersonnelPage({ projectId, theme: T, compactMode }) {
                     accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.jpg,.jpeg,.png"
                     style={{ display: 'none' }}
                     onChange={(e) => {
-                      const files = Array.from(e.target.files);
-                      if (files.length > 0) {
-                        setSelectedFile(files[0]);
-                        setUploadForm({ name: files[0].name, type: '培训资料', businessRef: '', note: '' });
-                        setShowUploadModal(true);
-                      }
+                      handleStandaloneTrainingFileUpload(e.target.files?.[0]);
+                      e.target.value = '';
                     }}
                   />
                   <div style={{ fontSize: 11, color: T.textMuted }}>点击或拖拽上传</div>
@@ -3233,6 +3402,11 @@ const currentMonth = () => {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
 };
 
+const currentDate = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+};
+
 const dateAfterDays = (days) => {
   const date = new Date();
   date.setDate(date.getDate() + days);
@@ -3310,13 +3484,20 @@ function InspectionEmpty({ text, theme: T }) {
 
 function InspectionPhotoStrip({ fileIds = [], theme: T }) {
   const [urls, setUrls] = useState({});
+  const [loadErrors, setLoadErrors] = useState({});
+  const [previewIndex, setPreviewIndex] = useState(null);
+  const [zoom, setZoom] = useState(1);
 
   useEffect(() => {
     let disposed = false;
     const objectUrls = [];
     async function load() {
       const next = {};
-      for (const id of fileIds.filter(Boolean)) {
+      const nextErrors = {};
+      setUrls({});
+      setLoadErrors({});
+      setPreviewIndex(null);
+      for (const id of Array.from(new Set(fileIds.filter(Boolean)))) {
         try {
           const url = await downloadFileAsObjectUrl(id);
           if (disposed) {
@@ -3327,9 +3508,18 @@ function InspectionPhotoStrip({ fileIds = [], theme: T }) {
           }
         } catch (err) {
           console.error('巡检照片下载失败', err);
+          const status = Number(err?.response?.status || 0);
+          nextErrors[id] = status === 401
+            ? '登录已失效'
+            : status === 403
+              ? '无权查看'
+              : '加载失败';
         }
       }
-      if (!disposed) setUrls(next);
+      if (!disposed) {
+        setUrls(next);
+        setLoadErrors(nextErrors);
+      }
     }
     load();
     return () => {
@@ -3338,33 +3528,487 @@ function InspectionPhotoStrip({ fileIds = [], theme: T }) {
     };
   }, [fileIds.join(',')]);
 
+  const previewPhotos = fileIds
+    .map((id, index) => ({ id, index, url: urls[id] }))
+    .filter(item => Boolean(item.id && item.url));
+  const activePhoto = previewIndex === null ? null : previewPhotos[previewIndex];
+
+  const closePreview = useCallback(() => {
+    setPreviewIndex(null);
+    setZoom(1);
+  }, []);
+
+  const showPreviousPhoto = useCallback(() => {
+    setPreviewIndex(index => {
+      if (index === null || previewPhotos.length <= 1) return index;
+      return (index - 1 + previewPhotos.length) % previewPhotos.length;
+    });
+    setZoom(1);
+  }, [previewPhotos.length]);
+
+  const showNextPhoto = useCallback(() => {
+    setPreviewIndex(index => {
+      if (index === null || previewPhotos.length <= 1) return index;
+      return (index + 1) % previewPhotos.length;
+    });
+    setZoom(1);
+  }, [previewPhotos.length]);
+
+  useEffect(() => {
+    if (previewIndex === null) return undefined;
+    if (!previewPhotos.length) {
+      closePreview();
+      return undefined;
+    }
+    if (previewIndex >= previewPhotos.length) {
+      setPreviewIndex(previewPhotos.length - 1);
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closePreview();
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        showPreviousPhoto();
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        showNextPhoto();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [closePreview, previewIndex, previewPhotos.length, showNextPhoto, showPreviousPhoto]);
+
   if (!fileIds.length) {
     return <div style={{ color: T.textMuted, fontSize: 12 }}>暂无照片</div>;
   }
 
   return (
-    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-      {fileIds.map((id, index) => (
-        <div key={`${id}-${index}`} style={{
-          width: 92,
-          height: 70,
-          borderRadius: 6,
-          border: `1px solid ${T.borderColor}`,
-          background: T.surface2,
-          overflow: 'hidden',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: T.textMuted,
-          fontSize: 11,
-        }}>
-          {urls[id] ? (
-            <img src={urls[id]} alt={`现场照片${index + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          ) : (
-            <span>文件 #{id}</span>
+    <>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {fileIds.map((id, index) => {
+          const photoIndex = previewPhotos.findIndex(item => item.index === index);
+          return (
+            <button
+              key={`${id}-${index}`}
+              type="button"
+              aria-label={urls[id]
+                ? `放大查看现场照片${index + 1}`
+                : loadErrors[id]
+                  ? `现场照片${index + 1}${loadErrors[id]}`
+                  : `现场照片${index + 1}加载中`}
+              disabled={!urls[id]}
+              onClick={() => {
+                setPreviewIndex(photoIndex);
+                setZoom(1);
+              }}
+              style={{
+                width: 92,
+                height: 70,
+                padding: 0,
+                borderRadius: 6,
+                border: `1px solid ${T.borderColor}`,
+                background: T.surface2,
+                overflow: 'hidden',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: T.textMuted,
+                fontSize: 11,
+                cursor: urls[id] ? 'zoom-in' : 'default',
+              }}
+            >
+              {urls[id] ? (
+                <img src={urls[id]} alt={`现场照片${index + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : loadErrors[id] ? (
+                <span style={{ color: loadErrors[id] === '加载失败' ? T.danger : T.warning }}>{loadErrors[id]}</span>
+              ) : (
+                <span>照片加载中</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {activePhoto && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`现场照片预览，第 ${previewIndex + 1} 张，共 ${previewPhotos.length} 张`}
+          onClick={closePreview}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1200,
+            display: 'flex',
+            flexDirection: 'column',
+            background: 'rgba(8, 20, 38, 0.9)',
+          }}
+        >
+          <div
+            onClick={event => event.stopPropagation()}
+            style={{
+              minHeight: 64,
+              padding: '10px 18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              color: '#fff',
+              background: 'rgba(8, 20, 38, 0.72)',
+              borderBottom: '1px solid rgba(255,255,255,0.16)',
+            }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap' }}>
+              现场照片 {previewIndex + 1} / {previewPhotos.length}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, flexWrap: 'wrap' }}>
+              <button type="button" disabled={previewPhotos.length <= 1} onClick={showPreviousPhoto} style={inspectionLightboxButtonStyle(previewPhotos.length <= 1)}>上一张</button>
+              <button type="button" disabled={zoom <= 0.5} onClick={() => setZoom(value => Math.max(0.5, value - 0.25))} style={inspectionLightboxButtonStyle(zoom <= 0.5)}>缩小</button>
+              <span style={{ minWidth: 48, textAlign: 'center', fontSize: 12 }}>{Math.round(zoom * 100)}%</span>
+              <button type="button" disabled={zoom >= 3} onClick={() => setZoom(value => Math.min(3, value + 0.25))} style={inspectionLightboxButtonStyle(zoom >= 3)}>放大</button>
+              <button type="button" disabled={zoom === 1} onClick={() => setZoom(1)} style={inspectionLightboxButtonStyle(zoom === 1)}>还原</button>
+              <button type="button" disabled={previewPhotos.length <= 1} onClick={showNextPhoto} style={inspectionLightboxButtonStyle(previewPhotos.length <= 1)}>下一张</button>
+            </div>
+            <button type="button" onClick={closePreview} style={inspectionLightboxButtonStyle(false)}>关闭</button>
+          </div>
+          <div
+            onClick={closePreview}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflow: 'auto',
+              padding: 24,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <img
+              src={activePhoto.url}
+              alt={`现场照片${previewIndex + 1}大图`}
+              onClick={event => event.stopPropagation()}
+              style={zoom === 1
+                ? { maxWidth: 'calc(100vw - 56px)', maxHeight: 'calc(100vh - 120px)', objectFit: 'contain' }
+                : { width: `${Math.round(80 * zoom)}vw`, maxWidth: 'none', maxHeight: 'none', height: 'auto', objectFit: 'contain', cursor: 'grab' }}
+            />
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+const inspectionLightboxButtonStyle = (disabled) => ({
+  minHeight: 34,
+  padding: '0 11px',
+  borderRadius: 6,
+  border: '1px solid rgba(255,255,255,0.3)',
+  background: disabled ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.14)',
+  color: disabled ? 'rgba(255,255,255,0.38)' : '#fff',
+  fontSize: 12,
+  cursor: disabled ? 'not-allowed' : 'pointer',
+});
+
+const formatInspectionBoxOption = (box) => {
+  if (!box) return '';
+  return [box.boxCode, box.boxName, box.installLocation].filter(Boolean).join(' · ');
+};
+
+function InspectionBoxCombobox({ projectId, value, selectedBox, fallbackOptions = [], onChange, theme: T }) {
+  const rootRef = useRef(null);
+  const inputRef = useRef(null);
+  const requestSequenceRef = useRef(0);
+  const [open, setOpen] = useState(false);
+  const [keyword, setKeyword] = useState('');
+  const [options, setOptions] = useState(fallbackOptions);
+  const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  const selectedLabel = value
+    ? (formatInspectionBoxOption(selectedBox) || `电箱 #${value}`)
+    : '';
+
+  const closeAndRestore = useCallback(() => {
+    setOpen(false);
+    setKeyword(selectedLabel);
+    setLoading(false);
+    setActiveIndex(0);
+  }, [selectedLabel]);
+
+  useEffect(() => {
+    if (!open) {
+      setKeyword(selectedLabel);
+    }
+  }, [open, selectedLabel]);
+
+  useEffect(() => {
+    setOptions(fallbackOptions);
+  }, [fallbackOptions]);
+
+  useEffect(() => {
+    if (!open || !projectId) return undefined;
+    const requestId = ++requestSequenceRef.current;
+    const timer = window.setTimeout(async () => {
+      setLoading(true);
+      setSearchError('');
+      try {
+        const searchKeyword = keyword === selectedLabel ? '' : keyword.trim();
+        const response = await getElectricBoxList({
+          projectId,
+          keyword: searchKeyword || undefined,
+        });
+        if (requestId !== requestSequenceRef.current) return;
+        if (response.code === 200) {
+          setOptions(response.data || []);
+        } else {
+          setOptions([]);
+          setSearchError(response.message || '电箱搜索失败');
+        }
+      } catch (error) {
+        if (requestId !== requestSequenceRef.current) return;
+        setOptions([]);
+        setSearchError(error.message || '电箱搜索失败');
+      } finally {
+        if (requestId === requestSequenceRef.current) setLoading(false);
+      }
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      requestSequenceRef.current += 1;
+    };
+  }, [keyword, open, projectId, selectedLabel]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handleOutsideClick = (event) => {
+      if (!rootRef.current?.contains(event.target)) closeAndRestore();
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [closeAndRestore, open]);
+
+  useEffect(() => {
+    setActiveIndex(index => {
+      if (keyword.trim() && keyword !== selectedLabel && options.length && index === 0) return 1;
+      return Math.min(index, options.length);
+    });
+  }, [keyword, options.length, selectedLabel]);
+
+  const chooseOption = (box) => {
+    onChange?.(box ? String(box.id) : '', box || null);
+    setKeyword(box ? formatInspectionBoxOption(box) : '');
+    setOpen(false);
+    setLoading(false);
+    setActiveIndex(0);
+  };
+
+  const handleKeyDown = (event) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex(index => Math.min(options.length, index + 1));
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex(index => Math.max(0, index - 1));
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      if (!open) {
+        setOpen(true);
+      } else if (loading) {
+        return;
+      } else if (activeIndex === 0) {
+        chooseOption(null);
+      } else if (options[activeIndex - 1]) {
+        chooseOption(options[activeIndex - 1]);
+      }
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      closeAndRestore();
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      setActiveIndex(0);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      setActiveIndex(options.length);
+    } else if (event.key === 'Tab') {
+      closeAndRestore();
+    }
+  };
+
+  return (
+    <div ref={rootRef} style={{ position: 'relative', width: 290, maxWidth: '100%' }}>
+      <div style={{ position: 'relative' }}>
+        <input
+          ref={inputRef}
+          role="combobox"
+          aria-expanded={open}
+          aria-controls="inspection-box-options"
+          aria-autocomplete="list"
+          value={keyword}
+          placeholder="搜索电箱编号、名称、位置或负责电工"
+          onFocus={event => {
+            setOpen(true);
+            event.currentTarget.select();
+          }}
+          onChange={event => {
+            setKeyword(event.target.value);
+            setOpen(true);
+            setOptions([]);
+            setLoading(true);
+            setSearchError('');
+            setActiveIndex(0);
+          }}
+          onKeyDown={handleKeyDown}
+          style={{
+            width: '100%',
+            minHeight: 34,
+            padding: value ? '6px 60px 6px 10px' : '6px 32px 6px 10px',
+            borderRadius: 6,
+            border: `1px solid ${open ? T.accent : T.borderColor}`,
+            background: T.cardBg,
+            color: T.textPrimary,
+            fontSize: 12,
+            outline: 'none',
+            boxSizing: 'border-box',
+          }}
+        />
+        {value && (
+          <button
+            type="button"
+            title="清空电箱筛选"
+            aria-label="清空电箱筛选，恢复全部电箱"
+            onClick={() => {
+              chooseOption(null);
+              window.setTimeout(() => inputRef.current?.focus(), 0);
+            }}
+            style={{
+              position: 'absolute',
+              right: 30,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: 24,
+              height: 24,
+              padding: 0,
+              border: 0,
+              background: 'transparent',
+              color: T.textMuted,
+              cursor: 'pointer',
+              fontSize: 16,
+            }}
+          >×</button>
+        )}
+        <button
+          type="button"
+          aria-label={open ? '收起电箱选项' : '展开电箱选项'}
+          onClick={() => {
+            setOpen(value => !value);
+            window.setTimeout(() => inputRef.current?.focus(), 0);
+          }}
+          style={{
+            position: 'absolute',
+            right: 4,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: 24,
+            height: 24,
+            padding: 0,
+            border: 0,
+            background: 'transparent',
+            color: T.textMuted,
+            cursor: 'pointer',
+            fontSize: 11,
+          }}
+        >{open ? '▲' : '▼'}</button>
+      </div>
+
+      {open && (
+        <div
+          id="inspection-box-options"
+          role="listbox"
+          style={{
+            position: 'absolute',
+            zIndex: 30,
+            top: 'calc(100% + 5px)',
+            left: 0,
+            width: 380,
+            maxWidth: 'min(380px, calc(100vw - 48px))',
+            maxHeight: 310,
+            overflowY: 'auto',
+            padding: 6,
+            borderRadius: 8,
+            border: `1px solid ${T.borderColor}`,
+            background: T.cardBg,
+            boxShadow: '0 12px 30px rgba(35, 63, 104, 0.18)',
+          }}
+        >
+          <button
+            type="button"
+            role="option"
+            aria-selected={!value}
+            onMouseEnter={() => setActiveIndex(0)}
+            onClick={() => chooseOption(null)}
+            style={{
+              width: '100%',
+              padding: '9px 10px',
+              border: 0,
+              borderRadius: 6,
+              textAlign: 'left',
+              background: activeIndex === 0 ? T.activeItemBg : 'transparent',
+              color: !value ? T.accent : T.textPrimary,
+              cursor: 'pointer',
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 800 }}>全部电箱</div>
+            <div style={{ marginTop: 2, color: T.textMuted, fontSize: 10 }}>清空电箱条件，查看当前项目全部记录</div>
+          </button>
+
+          {loading && <div style={{ padding: '11px 10px', color: T.textMuted, fontSize: 11 }}>正在搜索电箱…</div>}
+          {!loading && searchError && <div style={{ padding: '11px 10px', color: T.danger, fontSize: 11 }}>{searchError}</div>}
+          {!loading && !searchError && options.map((box, index) => {
+            const optionIndex = index + 1;
+            const selected = String(box.id) === String(value);
+            return (
+              <button
+                key={box.id}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                onMouseEnter={() => setActiveIndex(optionIndex)}
+                onClick={() => chooseOption(box)}
+                style={{
+                  width: '100%',
+                  padding: '9px 10px',
+                  border: 0,
+                  borderRadius: 6,
+                  textAlign: 'left',
+                  background: activeIndex === optionIndex ? T.activeItemBg : 'transparent',
+                  color: selected ? T.accent : T.textPrimary,
+                  cursor: 'pointer',
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 800 }}>{box.boxCode || `电箱 #${box.id}`}{box.boxName ? ` · ${box.boxName}` : ''}</div>
+                <div style={{ marginTop: 2, color: T.textMuted, fontSize: 10 }}>{box.installLocation || '未填写安装位置'}</div>
+              </button>
+            );
+          })}
+          {!loading && !searchError && !options.length && (
+            <div style={{ padding: '18px 10px', textAlign: 'center', color: T.textMuted, fontSize: 11 }}>
+              {keyword.trim() && keyword !== selectedLabel
+                ? `未找到匹配“${keyword.trim()}”的电箱`
+                : '当前项目暂无可选电箱'}
+            </div>
           )}
         </div>
-      ))}
+      )}
     </div>
   );
 }
@@ -3432,6 +4076,8 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState('');
   const [month, setMonth] = useState(currentMonth());
+  const [summaryPeriodMode, setSummaryPeriodMode] = useState('MONTH');
+  const [checkDate, setCheckDate] = useState(currentDate());
   const [boxKeyword, setBoxKeyword] = useState('');
   const [boxStatus, setBoxStatus] = useState('');
   const [recordStatus, setRecordStatus] = useState('');
@@ -3439,6 +4085,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   const [reviewOverdueFilter, setReviewOverdueFilter] = useState('');
   const [rectificationStatus, setRectificationStatus] = useState('');
   const [summaryBoxId, setSummaryBoxId] = useState('');
+  const [selectedSummaryBox, setSelectedSummaryBox] = useState(null);
   const [recordInspectorId, setRecordInspectorId] = useState('');
   const [recordResult, setRecordResult] = useState('');
   const [selectedRecord, setSelectedRecord] = useState(null);
@@ -3499,14 +4146,17 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     setLoading(true);
     setErrorText('');
     try {
+      const periodParams = summaryPeriodMode === 'DAY'
+        ? { checkDate: checkDate || currentDate() }
+        : { month };
       const [boxRes, recordRes, summaryRes, memberRes, userRes, settingRes] = await Promise.all([
         getElectricBoxList({ projectId, status: boxStatus || undefined }),
         getInspectionRecords({
           projectId,
           status: 'COMPLETED',
-          month,
+          ...periodParams,
         }),
-        getInspectionSummary({ projectId, month, boxId: summaryBoxId || undefined }),
+        getInspectionSummary({ projectId, boxId: summaryBoxId || undefined, ...periodParams }),
         getProjectMembers(projectId),
         canManageMembers ? getProjectUserOptions(projectId, memberKeyword || undefined) : Promise.resolve({ code: 200, data: [] }),
         getProjectInspectionSetting(projectId),
@@ -3526,11 +4176,17 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     } finally {
       setLoading(false);
     }
-  }, [projectId, boxStatus, month, summaryBoxId, memberKeyword, canManageMembers]);
+  }, [projectId, boxStatus, summaryPeriodMode, checkDate, month, summaryBoxId, memberKeyword, canManageMembers]);
 
   useEffect(() => {
     loadInspectionData();
   }, [loadInspectionData]);
+
+  useEffect(() => {
+    setSummaryBoxId('');
+    setSelectedSummaryBox(null);
+    setRecordInspectorId('');
+  }, [projectId]);
 
   const loadPermissionData = useCallback(async () => {
     if (activeTab !== 'permission' || !canManageMembers) return;
@@ -3652,16 +4308,6 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     return rectificationReviewAllowed || (currentUserId > 0 && Number(item.assigneeId || 0) === currentUserId);
   };
 
-  const normalizeQrImageSource = (imageContent) => {
-    const content = String(imageContent || '').trim();
-    if (!content) return '';
-    if (content.startsWith('data:image/')) return content;
-    if (content.startsWith('<svg')) {
-      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}`;
-    }
-    return content;
-  };
-
   const buildQrLabelData = async (box) => {
     const unifiedRes = await getElectricBoxUnifiedCode(box.id);
     if (unifiedRes.code !== 200) throw new Error(unifiedRes.message || '统一巡检码生成失败');
@@ -3674,30 +4320,14 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     };
   };
 
-  const buildLabelHtml = (box, qrData) => `
-    <section class="qr-label">
-      <header>
-        <strong>${box.boxCode || ''}</strong>
-        <span>${box.boxName || '现场电箱'}</span>
-      </header>
-      <p>${box.installLocation || ''}</p>
-      <div class="qr-grid">
-        <div class="qr-block">
-          ${String(qrData.unifiedSvg || '').startsWith('data:image/') ? `<img src="${qrData.unifiedSvg}" alt="统一电箱巡检码" />` : (qrData.unifiedSvg || '')}
-          <b>统一电箱巡检码</b>
-          <small>内部人员巡检 / 外部人员查看月度记录共用</small>
-          <small>${qrData.unifiedPayload || ''}</small>
-        </div>
-      </div>
-      <footer>请勿覆盖、撕毁或转贴。二维码换绑后旧码不可继续巡检。</footer>
-    </section>
-  `;
+  const buildLabelHtml = (box, qrData) => buildElectricBoxQrLabelHtml(box, qrData);
 
   const buildPrintDocument = (labels) => `
     <!doctype html>
     <html>
       <head>
         <meta charset="utf-8" />
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'" />
         <title>电箱二维码贴纸</title>
         <style>
           * { box-sizing: border-box; }
@@ -3711,6 +4341,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
           .qr-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
           .qr-block { text-align: center; min-width: 0; }
           .qr-block svg, .qr-block img { width: 168px; height: 168px; object-fit: contain; border: 1px solid #e2e8f0; border-radius: 6px; }
+          .qr-missing { width: 168px; height: 168px; margin: 0 auto; display: grid; place-items: center; border: 1px dashed #cbd5e1; border-radius: 6px; color: #94a3b8; font-size: 11px; }
           .qr-block b { display: block; margin-top: 5px; color: #0f766e; font-size: 12px; }
           .qr-block small { display: block; margin-top: 3px; color: #64748b; font-size: 8px; word-break: break-all; line-height: 1.25; }
           footer { margin-top: 8px; color: #94a3b8; font-size: 10px; }
@@ -4145,6 +4776,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
       alert('浏览器阻止了打印窗口，请允许弹窗后重试');
       return;
     }
+    printWindow.opener = null;
     printWindow.document.write('<p style="font-family:sans-serif;padding:20px">正在生成二维码贴纸...</p>');
     try {
       const labels = [];
@@ -4604,8 +5236,10 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   };
 
   const exportSummary = async () => {
+    if (summaryPeriodMode === 'DAY') return;
     try {
-      const selectedExportBox = boxes.find(item => String(item.id) === String(summaryBoxId));
+      const selectedExportBox = selectedSummaryBox
+        || boxes.find(item => String(item.id) === String(summaryBoxId));
       const blob = await exportInspectionRecords({
         projectId,
         templateCode: 'ELECTRIC_BOX_DAILY',
@@ -4834,10 +5468,18 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
 
   const renderSummaryFilters = () => (
     <div style={filterBarStyle}>
-      <select value={summaryBoxId} onChange={e => setSummaryBoxId(e.target.value)} style={fieldStyle}>
-        <option value="">全部电箱</option>
-        {boxes.map(box => <option key={box.id} value={box.id}>{box.boxCode} · {box.installLocation}</option>)}
-      </select>
+      <InspectionBoxCombobox
+        projectId={projectId}
+        value={summaryBoxId}
+        selectedBox={selectedSummaryBox || boxes.find(box => String(box.id) === String(summaryBoxId))}
+        fallbackOptions={boxes}
+        onChange={(boxId, box) => {
+          setSummaryBoxId(boxId);
+          setSelectedSummaryBox(box);
+          setRecordInspectorId('');
+        }}
+        theme={T}
+      />
       <select value={recordInspectorId} onChange={e => setRecordInspectorId(e.target.value)} style={fieldStyle}>
         <option value="">全部巡检员</option>
         {recordInspectors.map(inspector => <option key={inspector.id} value={inspector.id}>{inspector.name}</option>)}
@@ -4847,8 +5489,68 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
         <option value="NORMAL">正常</option>
         <option value="ABNORMAL">有异常</option>
       </select>
-      <input type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ ...fieldStyle, colorScheme: 'dark' }} />
-      {(summaryExportAllowed || singleBoxExportAllowed) && actionButton(summaryBoxId ? '导出本箱月表' : '导出项目月表', exportSummary)}
+      <div
+        role="group"
+        aria-label="巡检记录统计周期"
+        style={{ display: 'inline-flex', padding: 3, borderRadius: 7, border: `1px solid ${T.borderColor}`, background: T.surface2 }}
+      >
+        {[['MONTH', '按月'], ['DAY', '按日']].map(([mode, label]) => {
+          const active = summaryPeriodMode === mode;
+          return (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={active}
+              onClick={() => {
+                if (mode === 'DAY' && !checkDate) {
+                  setCheckDate(currentDate());
+                }
+                if (mode === 'MONTH') {
+                  setMonth((checkDate || currentDate()).slice(0, 7));
+                }
+                setSummaryPeriodMode(mode);
+                setRecordInspectorId('');
+              }}
+              style={{
+                minHeight: 28,
+                padding: '0 12px',
+                border: active ? `1px solid ${T.accent}` : '1px solid transparent',
+                borderRadius: 5,
+                background: active ? T.cardBg : 'transparent',
+                color: active ? T.accent : T.textSecondary,
+                fontSize: 12,
+                fontWeight: active ? 800 : 600,
+                cursor: 'pointer',
+              }}
+            >{label}</button>
+          );
+        })}
+      </div>
+      {summaryPeriodMode === 'DAY' ? (
+        <input
+          type="date"
+          value={checkDate}
+          max={currentDate()}
+          onChange={event => {
+            setCheckDate(event.target.value || currentDate());
+            setRecordInspectorId('');
+          }}
+          style={{ ...fieldStyle, colorScheme: 'light' }}
+        />
+      ) : (
+        <input
+          type="month"
+          value={month}
+          onChange={event => {
+            setMonth(event.target.value);
+            setRecordInspectorId('');
+          }}
+          style={{ ...fieldStyle, colorScheme: 'light' }}
+        />
+      )}
+      {summaryPeriodMode === 'MONTH'
+        && (summaryExportAllowed || singleBoxExportAllowed)
+        && actionButton(summaryBoxId ? '导出本箱月表' : '导出项目月表', exportSummary)}
       {actionButton('刷新', loadInspectionData, 'secondary')}
     </div>
   );
@@ -5012,18 +5714,34 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
 
   const renderSummaryTab = () => {
     const rate = summary?.shouldCheck ? Math.round((summary.checked || 0) / summary.shouldCheck * 100) : 0;
+    const isDaily = summaryPeriodMode === 'DAY';
+    const isSingleBox = Boolean(summaryBoxId);
+    const summaryTitle = isDaily ? '当日巡检统计' : '月度巡检统计';
+    const summaryDescription = isDaily
+      ? `${checkDate || '-'}，按电箱统计`
+      : `${month || '-'}，${isSingleBox ? '当前电箱按天统计' : '按电箱与日期统计（单位：箱次）'}`;
+    const summaryMetrics = isDaily
+      ? [
+        ['应检电箱', summary?.shouldCheck || 0, T.textPrimary],
+        ['已检电箱', summary?.checked || 0, T.success],
+        ['未检电箱', summary?.missed || 0, T.warning],
+        ['异常电箱', summary?.abnormal || 0, T.danger],
+        ['当日完成率', `${rate}%`, T.accent],
+      ]
+      : [
+        [isSingleBox ? '应检天数' : '应检箱次', summary?.shouldCheck || 0, T.textPrimary],
+        [isSingleBox ? '已检天数' : '已检箱次', summary?.checked || 0, T.success],
+        [isSingleBox ? '未检天数' : '未检箱次', summary?.missed || 0, T.warning],
+        [isSingleBox ? '异常天数' : '异常箱次', summary?.abnormal || 0, T.danger],
+        ['月度完成率', `${rate}%`, T.accent],
+      ];
     return (
       <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 12, minHeight: 0, flex: 1 }}>
         <div style={{ background: T.cardBg, border: `1px solid ${T.borderColor}`, borderRadius: 7, padding: 14, minHeight: 0 }}>
-          <div style={{ fontSize: 13, color: T.textPrimary, fontWeight: 800, marginBottom: 12 }}>月度巡检记录</div>
+          <div style={{ fontSize: 13, color: T.textPrimary, fontWeight: 800 }}>{summaryTitle}</div>
+          <div style={{ fontSize: 10, color: T.textMuted, marginTop: 4, marginBottom: 12 }}>{summaryDescription}</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            {[
-              ['应检', summary?.shouldCheck || 0, T.textPrimary],
-              ['已检', summary?.checked || 0, T.success],
-              ['漏检', summary?.missed || 0, T.warning],
-              ['异常', summary?.abnormal || 0, T.danger],
-              ['完成率', `${rate}%`, T.accent],
-            ].map(([label, value, color]) => (
+            {summaryMetrics.map(([label, value, color]) => (
               <div key={label} style={{ background: T.surface2, border: `1px solid ${T.borderColor}`, borderRadius: 6, padding: 10 }}>
                 <div style={{ fontSize: 10, color: T.textMuted }}>{label}</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color, marginTop: 4 }}>{value}</div>
@@ -5032,7 +5750,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
           </div>
           <div style={{ marginTop: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: T.textSecondary, marginBottom: 6 }}>
-              <span>月度完成率</span><span>{rate}%</span>
+              <span>{isDaily ? '当日完成率' : '月度完成率'}</span><span>{rate}%</span>
             </div>
             <div style={{ height: 8, background: T.surface2, borderRadius: 99, overflow: 'hidden' }}>
               <div style={{ width: `${Math.min(rate, 100)}%`, height: '100%', background: T.accent }} />
@@ -5041,7 +5759,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
         </div>
         <div style={{ background: T.cardBg, border: `1px solid ${T.borderColor}`, borderRadius: 7, overflow: 'hidden', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: 12, borderBottom: `1px solid ${T.borderColor}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontSize: 13, color: T.textPrimary, fontWeight: 800 }}>巡检记录明细</span>
+            <span style={{ fontSize: 13, color: T.textPrimary, fontWeight: 800 }}>{isDaily ? '当日巡检记录明细' : '月度巡检记录明细'}</span>
             <span style={{ color: T.textMuted, fontSize: 11 }}>当前筛选 {filteredSummaryRecords.length} 条</span>
           </div>
           <div style={{ ...tableHeaderStyle, gridTemplateColumns: '1fr 1fr 1fr 0.8fr 1.4fr 70px' }}>
@@ -5440,7 +6158,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <div>
             <div style={{ fontSize: 16, color: T.textPrimary, fontWeight: 900 }}>导入电箱台账</div>
-            <div style={{ color: T.textMuted, fontSize: 11, marginTop: 4 }}>先预检，存在 ERROR 时不会提交；WARN 可继续导入</div>
+            <div style={{ color: T.textMuted, fontSize: 11, marginTop: 4 }}>仅支持模板生成的 .xlsx（最大 10MB）；先预检，存在 ERROR 时不会提交</div>
           </div>
           <button onClick={() => setShowImportModal(false)} style={{ background: 'transparent', border: 'none', color: T.textMuted, cursor: 'pointer', fontSize: 18 }}>×</button>
         </div>
@@ -5448,7 +6166,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
         <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 10, alignItems: 'center', marginBottom: 12 }}>
           <input
             type="file"
-            accept=".xlsx,.xls"
+            accept=".xlsx"
             onChange={e => {
               setImportFile(e.target.files?.[0] || null);
               setImportResult(null);
@@ -5759,8 +6477,10 @@ function ElectricInspectionPage({ projectId, theme: T, currentUser }) {
 export default function App() {
   const [isAuth, setIsAuth] = useState(isLoggedIn());
   const [currentPage, setCurrentPage] = useState(PAGE_IDS.ELECTRIC_INSPECTION);
-  const [currentProject, setCurrentProject] = useState(1);
+  const [currentProject, setCurrentProject] = useState(null);
   const [projectList, setProjectList] = useState([]);
+  const [projectListLoading, setProjectListLoading] = useState(isAuth);
+  const [projectListError, setProjectListError] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
   const [currentUserError, setCurrentUserError] = useState('');
   const [showCameraPage, setShowCameraPage] = useState(false);
@@ -5772,25 +6492,34 @@ export default function App() {
   const theme = getThemeById(DEFAULT_THEME_ID);
   const compactMode = false;
   const visibleNavItems = useMemo(
-    () => currentUser ? NAV_ITEMS.filter((item) => canAccessPage(currentUser, item.id)) : [],
-    [currentUser],
+    () => currentUser && currentProject !== null
+      ? NAV_ITEMS.filter((item) => canAccessPage(currentUser, item.id, currentProject))
+      : [],
+    [currentProject, currentUser],
   );
-  const canAccessSystem = currentUser ? canAccessPage(currentUser, PAGE_IDS.SYSTEM_MANAGEMENT) : false;
+  const canAccessSystem = currentUser ? canAccessPage(currentUser, PAGE_IDS.SYSTEM_MANAGEMENT, currentProject) : false;
 
   // 获取项目列表
   const fetchProjectList = useCallback(async () => {
+    setProjectListLoading(true);
+    setProjectListError('');
     try {
       const res = await getProjectList();
-      if (res.code === 200 && res.data) {
-        setProjectList(res.data);
-        if (res.data.length > 0) {
-          setCurrentProject(prevProjectId => (
-            res.data.some(project => project.id === prevProjectId) ? prevProjectId : res.data[0].id
-          ));
-        }
-      }
+      const projects = requireProjectList(res);
+      setProjectList(projects);
+      setCurrentProject(prevProjectId => {
+        if (projects.length === 0) return null;
+        return projects.some(project => project.id === prevProjectId)
+          ? prevProjectId
+          : projects[0].id;
+      });
     } catch (e) {
       console.error('获取项目列表失败', e);
+      setProjectList([]);
+      setCurrentProject(null);
+      setProjectListError(e?.message || '作业区域加载失败');
+    } finally {
+      setProjectListLoading(false);
     }
   }, []);
 
@@ -5827,6 +6556,10 @@ export default function App() {
     const handleAuthExpired = () => {
       setCurrentUser(null);
       setCurrentUserError('');
+      setProjectList([]);
+      setCurrentProject(null);
+      setProjectListError('');
+      setProjectListLoading(false);
       setIsAuth(false);
     };
     window.addEventListener('site-platform-auth-expired', handleAuthExpired);
@@ -5834,6 +6567,10 @@ export default function App() {
   }, []);
 
   const handleLogin = useCallback(() => {
+    setProjectList([]);
+    setCurrentProject(null);
+    setProjectListError('');
+    setProjectListLoading(true);
     setIsAuth(true);
     setCurrentPage(PAGE_IDS.ELECTRIC_INSPECTION);
   }, []);
@@ -5847,6 +6584,10 @@ export default function App() {
     }
     setCurrentUser(null);
     setCurrentUserError('');
+    setProjectList([]);
+    setCurrentProject(null);
+    setProjectListError('');
+    setProjectListLoading(false);
     setIsAuth(false);
   }, []);
 
@@ -5942,6 +6683,46 @@ export default function App() {
         visibleNavItems={visibleNavItems}
         canAccessSystem={canAccessSystem}
       />
+      {(projectListLoading || projectListError || projectList.length === 0) && (
+        <div
+          role={projectListError ? 'alert' : 'status'}
+          style={{
+            minHeight: 38,
+            padding: '8px 18px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 10,
+            borderBottom: `1px solid ${projectListError ? theme.danger : theme.borderColor}`,
+            background: projectListError ? `${theme.danger}12` : theme.surface2,
+            color: projectListError ? theme.danger : theme.textSecondary,
+            fontSize: 12,
+            flexShrink: 0,
+          }}
+        >
+          <span>
+            {projectListLoading
+              ? '正在加载作业区域…'
+              : projectListError || '当前账号暂无可访问的作业区域'}
+          </span>
+          {!projectListLoading && (
+            <button
+              onClick={fetchProjectList}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 4,
+                border: `1px solid ${projectListError ? theme.danger : theme.borderColor}`,
+                background: theme.cardBg,
+                color: projectListError ? theme.danger : theme.textSecondary,
+                cursor: 'pointer',
+                fontSize: 11,
+              }}
+            >
+              重新加载
+            </button>
+          )}
+        </div>
+      )}
       <main style={{ flex: 1, overflow: 'hidden' }}>
         {renderPage()}
       </main>

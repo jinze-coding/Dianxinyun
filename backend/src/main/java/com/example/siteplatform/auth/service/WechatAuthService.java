@@ -19,6 +19,8 @@ import com.example.siteplatform.project.service.ProjectPermissionService;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import org.springframework.dao.DuplicateKeyException;
 
@@ -152,6 +154,7 @@ public class WechatAuthService {
             throw conflict("微信绑定状态已变化，请刷新后重试");
         }
         authService.logout(user.getId());
+        authService.repeatLogoutAfterCommit(user.getId());
     }
 
     @Transactional
@@ -314,13 +317,36 @@ public class WechatAuthService {
     public PendingWechatIdentity consumePendingIdentity(String sessionToken) {
         PendingWechatIdentity identity = pendingIdentity(sessionToken);
         String normalizedToken = sessionToken.trim();
+        String sessionKey = SESSION_PREFIX + normalizedToken;
+        String consumedKey = SESSION_CONSUMED_PREFIX + normalizedToken;
         Boolean claimed = redisTemplate.opsForValue().setIfAbsent(
-                SESSION_CONSUMED_PREFIX + normalizedToken, "1", 10, TimeUnit.MINUTES);
+                consumedKey, "1", 10, TimeUnit.MINUTES);
         if (!Boolean.TRUE.equals(claimed)) {
             throw conflict("微信登录会话已使用，请重新登录");
         }
-        redisTemplate.delete(SESSION_PREFIX + normalizedToken);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                        restorePendingIdentity(sessionKey, consumedKey, identity);
+                    } else if (status == TransactionSynchronization.STATUS_COMMITTED) {
+                        redisTemplate.delete(consumedKey);
+                    }
+                }
+            });
+        }
+        redisTemplate.delete(sessionKey);
         return identity;
+    }
+
+    private void restorePendingIdentity(String sessionKey, String consumedKey, PendingWechatIdentity identity) {
+        redisTemplate.opsForHash().putAll(sessionKey, Map.of(
+                "appId", identity.appId(),
+                "openid", identity.openid(),
+                "unionid", identity.unionid() == null ? "" : identity.unionid()));
+        redisTemplate.expire(sessionKey, 10, TimeUnit.MINUTES);
+        redisTemplate.delete(consumedKey);
     }
 
     public PendingWechatIdentity identityForCode(String code) {

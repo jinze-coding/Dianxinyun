@@ -26,4 +26,5 @@ public class RoleSaveRequest {
     private Integer enabled;
     private List<Long> menuIds;
     private List<Long> permissionIds;
+    private List<String> businessModuleCodes;
 }

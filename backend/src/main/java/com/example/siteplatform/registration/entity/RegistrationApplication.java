@@ -21,6 +21,7 @@ public class RegistrationApplication {
     private String desiredProjectIds;
     private String desiredProjectText;
     private String sourceType;
+    private String registrationMode;
     private String phoneVerificationType;
     private String appId;
     private String openid;

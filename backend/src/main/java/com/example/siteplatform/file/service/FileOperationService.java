@@ -137,8 +137,6 @@ public class FileOperationService {
 
     private String resolveIp(HttpServletRequest request) {
         if (request == null) return null;
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (StringUtils.hasText(forwarded)) return forwarded.split(",")[0].trim();
         return request.getRemoteAddr();
     }
 }

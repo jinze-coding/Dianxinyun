@@ -1,5 +1,6 @@
 package com.example.siteplatform.file.storage;
 
+import com.example.siteplatform.file.security.FileUploadPolicy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -36,8 +37,10 @@ public class LocalFileStorageService implements FileStorageService {
         try (InputStream inputStream = file.getInputStream()) {
             Files.copy(inputStream, target, StandardCopyOption.REPLACE_EXISTING);
         }
-        return new StoredFile(provider(), storageKey, file.getOriginalFilename(), file.getContentType(),
-                StorageSupport.extension(file.getOriginalFilename()), file.getSize(), sha256);
+        String originalFileName = FileUploadPolicy.safeOriginalFileName(file.getOriginalFilename());
+        return new StoredFile(provider(), storageKey, originalFileName,
+                FileUploadPolicy.responseMediaType(originalFileName).toString(),
+                StorageSupport.extension(originalFileName), file.getSize(), sha256);
     }
 
     @Override
@@ -57,8 +60,7 @@ public class LocalFileStorageService implements FileStorageService {
 
     private Path resolve(String storageKey) {
         Path raw = Paths.get(storageKey);
-        if (raw.isAbsolute()) return raw.normalize();
-        Path resolved = root.resolve(storageKey).normalize();
+        Path resolved = raw.isAbsolute() ? raw.normalize() : root.resolve(raw).normalize();
         if (!resolved.startsWith(root)) throw new IllegalArgumentException("非法文件存储路径");
         return resolved;
     }

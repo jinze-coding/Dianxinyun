@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -38,5 +39,38 @@ class LocalFileStorageServiceTest {
     void rejectsPathTraversal() {
         LocalFileStorageService service = new LocalFileStorageService(tempDir.toString());
         assertThrows(IllegalArgumentException.class, () -> service.exists("../outside.txt"));
+    }
+
+    @Test
+    void acceptsLegacyAbsolutePathInsideUploadRoot() throws Exception {
+        Path uploadRoot = Files.createDirectories(tempDir.resolve("uploads"));
+        LocalFileStorageService service = new LocalFileStorageService(uploadRoot.toString());
+        Path managedFile = uploadRoot.resolve("legacy/inside.txt").toAbsolutePath();
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "inside.txt", "text/plain", "managed".getBytes(StandardCharsets.UTF_8));
+
+        service.store(managedFile.toString(), file);
+
+        assertTrue(service.exists(managedFile.toString()));
+        assertEquals("managed", service.load(managedFile.toString())
+                .getContentAsString(StandardCharsets.UTF_8));
+        service.delete(managedFile.toString());
+        assertFalse(Files.exists(managedFile));
+    }
+
+    @Test
+    void rejectsAbsolutePathOutsideUploadRootForEveryOperation() throws Exception {
+        Path uploadRoot = Files.createDirectories(tempDir.resolve("uploads"));
+        Path outside = tempDir.resolve("outside.txt").toAbsolutePath();
+        Files.writeString(outside, "must-stay", StandardCharsets.UTF_8);
+        LocalFileStorageService service = new LocalFileStorageService(uploadRoot.toString());
+        MockMultipartFile replacement = new MockMultipartFile(
+                "file", "outside.txt", "text/plain", "overwrite".getBytes(StandardCharsets.UTF_8));
+
+        assertThrows(IllegalArgumentException.class, () -> service.store(outside.toString(), replacement));
+        assertThrows(IllegalArgumentException.class, () -> service.exists(outside.toString()));
+        assertThrows(IllegalArgumentException.class, () -> service.load(outside.toString()));
+        assertThrows(IllegalArgumentException.class, () -> service.delete(outside.toString()));
+        assertEquals("must-stay", Files.readString(outside, StandardCharsets.UTF_8));
     }
 }

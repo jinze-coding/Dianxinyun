@@ -5,18 +5,21 @@ import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.auth.mapper.SysUserMapper;
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.project.service.ProjectPermissionService;
+import com.example.siteplatform.system.constant.BusinessModuleCodes;
 import com.example.siteplatform.system.dto.MenuVO;
 import com.example.siteplatform.system.entity.SystemMenu;
 import com.example.siteplatform.system.entity.SystemPermission;
 import com.example.siteplatform.system.mapper.SystemMenuMapper;
 import com.example.siteplatform.system.mapper.SystemPermissionMapper;
+import com.example.siteplatform.system.mapper.SystemRoleBusinessModuleMapper;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class SystemPermissionService {
@@ -24,12 +27,15 @@ public class SystemPermissionService {
     private final SystemMenuMapper menuMapper;
     private final SystemPermissionMapper permissionMapper;
     private final SysUserMapper userMapper;
+    private final SystemRoleBusinessModuleMapper roleBusinessModuleMapper;
 
     public SystemPermissionService(SystemMenuMapper menuMapper, SystemPermissionMapper permissionMapper,
-                                   SysUserMapper userMapper) {
+                                   SysUserMapper userMapper,
+                                   SystemRoleBusinessModuleMapper roleBusinessModuleMapper) {
         this.menuMapper = menuMapper;
         this.permissionMapper = permissionMapper;
         this.userMapper = userMapper;
+        this.roleBusinessModuleMapper = roleBusinessModuleMapper;
     }
 
     public boolean isPlatformAdmin(Long userId) {
@@ -39,18 +45,24 @@ public class SystemPermissionService {
     }
 
     public List<String> permissionCodes(Long userId) {
+        Set<String> effectiveModules = businessModuleCodes(userId);
         if (isPlatformAdmin(userId)) {
-            return permissionMapper.selectList(new LambdaQueryWrapper<SystemPermission>()
+            List<String> codes = permissionMapper.selectList(new LambdaQueryWrapper<SystemPermission>()
                             .eq(SystemPermission::getEnabled, 1)
                             .eq(SystemPermission::getDeleted, 0)
                             .orderByAsc(SystemPermission::getPermissionCode))
                     .stream().map(SystemPermission::getPermissionCode).distinct().toList();
+            return filterBusinessPermissionCodes(codes, effectiveModules);
         }
         List<String> codes = permissionMapper.selectPlatformCodesByUserId(userId);
-        return codes == null ? List.of() : codes;
+        return filterBusinessPermissionCodes(codes, effectiveModules);
     }
 
     public boolean hasPermission(Long userId, String permissionCode) {
+        String businessModule = BusinessModuleCodes.fromPermissionCode(permissionCode);
+        if (businessModule != null && !businessModuleCodes(userId).contains(businessModule)) {
+            return false;
+        }
         if (isPlatformAdmin(userId)) return true;
         List<String> codes = permissionMapper.selectCodesByUserId(userId);
         return codes != null && codes.contains(permissionCode);
@@ -68,16 +80,40 @@ public class SystemPermissionService {
 
     public boolean hasProjectPermission(Long userId, Long projectId, String permissionCode) {
         if (userId == null || projectId == null || permissionCode == null) return false;
+        String businessModule = BusinessModuleCodes.fromPermissionCode(permissionCode);
+        if (businessModule != null && !businessModuleCodes(userId, projectId).contains(businessModule)) {
+            return false;
+        }
         if (isPlatformAdmin(userId)) return true;
         List<String> codes = permissionMapper.selectCodesByUserIdAndProject(userId, projectId);
         return codes != null && codes.contains(permissionCode);
     }
 
     public List<String> projectRolePermissionCodes(String roleCode) {
-        if (roleCode == null || roleCode.isBlank()) return List.of();
-        List<String> codes = permissionMapper.selectCodesByProjectRole(
-                roleCode.trim().toUpperCase(Locale.ROOT));
-        return codes == null ? List.of() : codes;
+        return List.of();
+    }
+
+    /** 当前用户在指定有效项目内由全部项目角色聚合出的权限。 */
+    public List<String> projectPermissionCodes(Long userId, Long projectId) {
+        if (userId == null || projectId == null) return List.of();
+        Set<String> effectiveModules = businessModuleCodes(userId, projectId);
+        if (isPlatformAdmin(userId)) {
+            List<String> codes = permissionMapper.selectList(new LambdaQueryWrapper<SystemPermission>()
+                            .eq(SystemPermission::getEnabled, 1)
+                            .eq(SystemPermission::getDeleted, 0)
+                            .orderByAsc(SystemPermission::getPermissionCode))
+                    .stream().map(SystemPermission::getPermissionCode).distinct().toList();
+            return filterBusinessPermissionCodes(codes, effectiveModules);
+        }
+        List<String> codes = permissionMapper.selectProjectCodesByUserIdAndProject(userId, projectId);
+        return filterBusinessPermissionCodes(codes, effectiveModules);
+    }
+
+    /** 当前用户在指定有效项目中由项目角色获得的可见菜单编码。 */
+    public List<String> projectMenuCodes(Long userId, Long projectId) {
+        if (userId == null || projectId == null) return List.of();
+        List<String> codes = menuMapper.selectEnabledCodesByUserIdAndProject(userId, projectId);
+        return filterBusinessMenuCodes(codes, businessModuleCodes(userId, projectId));
     }
 
     public void requirePermission(SysUser user, String permissionCode) {
@@ -123,12 +159,13 @@ public class SystemPermissionService {
     }
 
     public List<MenuVO> menuTree(Long userId) {
-        List<SystemMenu> menus = isPlatformAdmin(userId)
-                ? menuMapper.selectList(new LambdaQueryWrapper<SystemMenu>()
-                        .eq(SystemMenu::getEnabled, 1).eq(SystemMenu::getVisible, 1)
-                        .eq(SystemMenu::getDeleted, 0)
-                        .orderByAsc(SystemMenu::getSortOrder).orderByAsc(SystemMenu::getId))
-                : menuMapper.selectEnabledByUserId(userId);
+        Set<String> effectiveModules = businessModuleCodes(userId);
+        List<SystemMenu> menus = menuMapper.selectEnabledByUserId(userId).stream()
+                .filter(menu -> {
+                    String businessModule = BusinessModuleCodes.fromMenuCode(menu.getMenuCode());
+                    return businessModule == null || effectiveModules.contains(businessModule);
+                })
+                .toList();
         Map<Long, MenuVO> byId = new LinkedHashMap<>();
         menus.forEach(menu -> byId.put(menu.getId(), MenuVO.from(menu)));
         List<MenuVO> roots = new ArrayList<>();
@@ -138,5 +175,50 @@ public class SystemPermissionService {
             else parent.getChildren().add(item);
         }
         return roots;
+    }
+
+    /** 当前用户任一有效作用域中的模块，用于没有 projectId 的旧接口拦截。 */
+    public Set<String> businessModuleCodes(Long userId) {
+        if (userId == null) return Set.of();
+        List<String> codes = roleBusinessModuleMapper.selectModuleCodesByUserId(userId);
+        return normalizeBusinessModuleCodes(codes);
+    }
+
+    /** 当前项目中有效的平台/项目角色共同授予的模块。 */
+    public Set<String> businessModuleCodes(Long userId, Long projectId) {
+        if (userId == null || projectId == null) return Set.of();
+        List<String> codes = roleBusinessModuleMapper.selectModuleCodesByUserIdAndProject(userId, projectId);
+        return normalizeBusinessModuleCodes(codes);
+    }
+
+    public boolean hasBusinessModule(Long userId, Long projectId, String moduleCode) {
+        return businessModuleCodes(userId, projectId).contains(moduleCode);
+    }
+
+    private Set<String> normalizeBusinessModuleCodes(List<String> codes) {
+        if (codes == null || codes.isEmpty()) return Set.of();
+        Set<String> result = new LinkedHashSet<>();
+        for (String code : codes) {
+            if (BusinessModuleCodes.isBusinessModule(code)) {
+                result.add(code.trim().toUpperCase(java.util.Locale.ROOT));
+            }
+        }
+        return Set.copyOf(result);
+    }
+
+    private List<String> filterBusinessPermissionCodes(List<String> codes, Set<String> effectiveModules) {
+        if (codes == null || codes.isEmpty()) return List.of();
+        return codes.stream().filter(code -> {
+            String businessModule = BusinessModuleCodes.fromPermissionCode(code);
+            return businessModule == null || effectiveModules.contains(businessModule);
+        }).distinct().toList();
+    }
+
+    private List<String> filterBusinessMenuCodes(List<String> codes, Set<String> effectiveModules) {
+        if (codes == null || codes.isEmpty()) return List.of();
+        return codes.stream().filter(code -> {
+            String businessModule = BusinessModuleCodes.fromMenuCode(code);
+            return businessModule == null || effectiveModules.contains(businessModule);
+        }).distinct().toList();
     }
 }

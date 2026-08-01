@@ -18,6 +18,7 @@ public class QualityIssue {
     private Long id;
     private Long projectId;
     private String issueNo;
+    private String requestKey;
     private String title;
     private String location;
     private String description;
@@ -35,6 +36,7 @@ public class QualityIssue {
     private LocalDateTime reviewTime;
     private Long createdById;
     private String createdByName;
+    private Integer version;
 
     @TableLogic
     private Integer deleted;

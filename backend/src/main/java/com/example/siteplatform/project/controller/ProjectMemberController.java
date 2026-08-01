@@ -9,6 +9,7 @@ import com.example.siteplatform.project.dto.ProjectMemberVO;
 import com.example.siteplatform.project.dto.ProjectMemberStatusRequest;
 import com.example.siteplatform.project.dto.ProjectUserOptionVO;
 import com.example.siteplatform.project.service.ProjectMemberService;
+import com.example.siteplatform.system.entity.SystemRole;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +54,14 @@ public class ProjectMemberController {
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
         return Result.success(projectMemberService.listUserOptions(projectId, keyword, currentUser));
+    }
+
+    @Operation(summary = "查询当前项目可分配角色")
+    @GetMapping("/roles")
+    public Result<List<SystemRole>> listAssignableRoles(
+            @RequestParam Long projectId,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(projectMemberService.listAssignableRoles(projectId, authService.getCurrentUser(token)));
     }
 
     @Operation(summary = "已停用：新账号必须通过统一注册审批")

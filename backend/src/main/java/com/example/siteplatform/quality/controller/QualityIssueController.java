@@ -2,16 +2,22 @@ package com.example.siteplatform.quality.controller;
 
 import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.auth.service.AuthService;
+import com.example.siteplatform.common.PageResult;
 import com.example.siteplatform.common.Result;
 import com.example.siteplatform.quality.dto.QualityIssueCreateRequest;
 import com.example.siteplatform.quality.dto.QualityAssignRequest;
 import com.example.siteplatform.quality.dto.QualityRectificationRequest;
 import com.example.siteplatform.quality.dto.QualityReviewRequest;
+import com.example.siteplatform.quality.dto.QualityVoidRequest;
+import com.example.siteplatform.quality.service.QualityAssigneeService;
 import com.example.siteplatform.quality.service.QualityIssueService;
+import com.example.siteplatform.quality.vo.QualityAssigneeVO;
 import com.example.siteplatform.quality.vo.QualityIssueSummaryVO;
 import com.example.siteplatform.quality.vo.QualityIssueVO;
+import com.example.siteplatform.quality.vo.QualityTodoVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,6 +39,9 @@ public class QualityIssueController {
     private QualityIssueService qualityIssueService;
 
     @Autowired
+    private QualityAssigneeService qualityAssigneeService;
+
+    @Autowired
     private AuthService authService;
 
     @Operation(summary = "获取质量问题列表")
@@ -46,6 +55,20 @@ public class QualityIssueController {
         return Result.success(qualityIssueService.listIssues(projectId, status, keyword, currentUser));
     }
 
+    @Operation(summary = "分页获取质量问题列表")
+    @GetMapping("/page")
+    public Result<PageResult<QualityIssueVO>> pageIssues(
+            @RequestParam Long projectId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "1") Integer pageNo,
+            @RequestParam(defaultValue = "20") Integer pageSize,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(qualityIssueService.pageIssues(
+                projectId, status, keyword, pageNo, pageSize, currentUser));
+    }
+
     @Operation(summary = "获取质量问题统计")
     @GetMapping("/summary")
     public Result<QualityIssueSummaryVO> getSummary(
@@ -53,6 +76,24 @@ public class QualityIssueController {
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
         return Result.success(qualityIssueService.getSummary(projectId, currentUser));
+    }
+
+    @Operation(summary = "获取当前用户的质量整改与复查待办")
+    @GetMapping("/todos")
+    public Result<List<QualityTodoVO>> listTodos(
+            @RequestParam(required = false) Long projectId,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(qualityIssueService.listTodos(projectId, currentUser));
+    }
+
+    @Operation(summary = "查询当前项目可指派的质量整改人")
+    @GetMapping("/assignees")
+    public Result<List<QualityAssigneeVO>> listAssignees(
+            @RequestParam Long projectId,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(qualityAssigneeService.listEligibleAssignees(projectId, currentUser));
     }
 
     @Operation(summary = "获取质量问题详情")
@@ -67,7 +108,7 @@ public class QualityIssueController {
     @Operation(summary = "发起质量检查问题")
     @PostMapping
     public Result<QualityIssueVO> createIssue(
-            @RequestBody QualityIssueCreateRequest request,
+            @Valid @RequestBody QualityIssueCreateRequest request,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
         return Result.success(qualityIssueService.createIssue(request, currentUser));
@@ -77,7 +118,7 @@ public class QualityIssueController {
     @PostMapping("/{id}/rectify")
     public Result<QualityIssueVO> submitRectification(
             @PathVariable Long id,
-            @RequestBody QualityRectificationRequest request,
+            @Valid @RequestBody QualityRectificationRequest request,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
         return Result.success(qualityIssueService.submitRectification(id, request, currentUser));
@@ -87,7 +128,7 @@ public class QualityIssueController {
     @PostMapping("/{id}/review")
     public Result<QualityIssueVO> reviewIssue(
             @PathVariable Long id,
-            @RequestBody QualityReviewRequest request,
+            @Valid @RequestBody QualityReviewRequest request,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
         return Result.success(qualityIssueService.reviewIssue(id, request, currentUser));
@@ -97,9 +138,19 @@ public class QualityIssueController {
     @PostMapping("/{id}/assign")
     public Result<QualityIssueVO> assignIssue(
             @PathVariable Long id,
-            @RequestBody QualityAssignRequest request,
+            @Valid @RequestBody QualityAssignRequest request,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
         return Result.success(qualityIssueService.assignIssue(id, request, currentUser));
+    }
+
+    @Operation(summary = "作废误建质量问题")
+    @PostMapping("/{id}/void")
+    public Result<QualityIssueVO> voidIssue(
+            @PathVariable Long id,
+            @Valid @RequestBody QualityVoidRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(qualityIssueService.voidIssue(id, request, currentUser));
     }
 }

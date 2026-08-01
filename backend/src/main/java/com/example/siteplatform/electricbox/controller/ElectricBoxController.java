@@ -57,9 +57,10 @@ public class ElectricBoxController {
     public Result<List<ElectricBoxVO>> list(
             @RequestParam(required = false) Long projectId,
             @RequestParam(required = false) String status,
+            @RequestParam(required = false) String keyword,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
-        return Result.success(electricBoxService.list(projectId, status, currentUser));
+        return Result.success(electricBoxService.list(projectId, status, keyword, currentUser));
     }
 
     @Operation(summary = "获取电箱详情")

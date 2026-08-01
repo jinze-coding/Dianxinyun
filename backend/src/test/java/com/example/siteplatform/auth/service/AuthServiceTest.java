@@ -17,15 +17,22 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -141,5 +148,94 @@ class AuthServiceTest {
         assertSame(user, service.getCurrentUser(miniToken));
         verify(setOperations, atLeastOnce()).add(argThat(key -> key.equals("auth:user-sessions:1")), anyString());
         verify(setOperations).remove(argThat(key -> key.equals("auth:user-sessions:1")), anyString());
+    }
+
+    @Test
+    void quickRegistrationAccountCanOnlyUseTheInitialPasswordSetupPath() {
+        user.setPassword("$2a$10$placeholder");
+        user.setPasswordLoginEnabled(0);
+        user.setPasswordResetRequired(1);
+        user.setCredentialVersion(1);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(jwtConfig.validateToken("quick-token")).thenReturn(true);
+        when(jwtConfig.getUserIdFromToken("quick-token")).thenReturn(1L);
+        when(jwtConfig.getCredentialVersionFromToken("quick-token")).thenReturn(1);
+        when(valueOperations.get(anyString())).thenReturn(1L);
+        when(userMapper.selectById(1L)).thenReturn(user);
+
+        BusinessException blocked = assertThrows(BusinessException.class,
+                () -> service.getCurrentUser("quick-token"));
+
+        assertEquals(403, blocked.getCode());
+        assertSame(user, service.getCurrentUserAllowInitialPasswordSetup("quick-token"));
+    }
+
+    @Test
+    void initialPasswordSetupEnablesPasswordLoginInvalidatesOldSessionsAndIssuesFreshToken() {
+        user.setPassword("$2a$10$placeholder");
+        user.setPasswordLoginEnabled(0);
+        user.setPasswordResetRequired(1);
+        user.setCredentialVersion(1);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
+        when(jwtConfig.validateToken("quick-token")).thenReturn(true);
+        when(jwtConfig.getUserIdFromToken("quick-token")).thenReturn(1L);
+        when(jwtConfig.getCredentialVersionFromToken("quick-token")).thenReturn(1);
+        when(valueOperations.get(anyString())).thenReturn(1L);
+        when(userMapper.selectById(1L)).thenReturn(user);
+        when(userMapper.updateById(user)).thenReturn(1);
+        when(jwtConfig.generateToken(1L, "admin", 2)).thenReturn("fresh-token");
+
+        var response = service.setupInitialPassword("quick-token", "QuickPass1");
+
+        assertEquals("fresh-token", response.getToken());
+        assertEquals(1, user.getPasswordLoginEnabled());
+        assertEquals(0, user.getPasswordResetRequired());
+        assertEquals(2, user.getCredentialVersion());
+        assertTrue(new PasswordCredentialService().matches("QuickPass1", user.getPassword()));
+        verify(userMapper).updateById(user);
+    }
+
+    @Test
+    void initialPasswordSetupDoesNotIssueTokenWhenPasswordWriteAffectsNoRow() {
+        user.setPassword("$2a$10$placeholder");
+        user.setPasswordLoginEnabled(0);
+        user.setPasswordResetRequired(1);
+        user.setCredentialVersion(1);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(jwtConfig.validateToken("quick-token")).thenReturn(true);
+        when(jwtConfig.getUserIdFromToken("quick-token")).thenReturn(1L);
+        when(jwtConfig.getCredentialVersionFromToken("quick-token")).thenReturn(1);
+        when(valueOperations.get(anyString())).thenReturn(1L);
+        when(userMapper.selectById(1L)).thenReturn(user);
+        when(userMapper.updateById(user)).thenReturn(0);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.setupInitialPassword("quick-token", "QuickPass1"));
+
+        assertEquals(409, exception.getCode());
+        verify(jwtConfig, never()).generateToken(1L, "admin", 2);
+    }
+
+    @Test
+    void permissionChangeRepeatsSessionInvalidationAfterTransactionCommit() {
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
+        when(setOperations.members("auth:user-sessions:1")).thenReturn(Set.of("fingerprint"));
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.logout(1L);
+            service.repeatLogoutAfterCommit(1L);
+
+            verify(redisTemplate).delete("auth:user-sessions:1");
+            assertEquals(1, TransactionSynchronizationManager.getSynchronizations().size());
+
+            TransactionSynchronizationManager.getSynchronizations()
+                    .forEach(TransactionSynchronization::afterCommit);
+
+            verify(redisTemplate, times(2)).delete("auth:user-sessions:1");
+            verify(redisTemplate, times(2)).delete("auth:token:1");
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 }

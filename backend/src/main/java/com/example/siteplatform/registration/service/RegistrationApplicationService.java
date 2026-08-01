@@ -3,7 +3,9 @@ package com.example.siteplatform.registration.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.example.siteplatform.auth.entity.SysUser;
+import com.example.siteplatform.auth.entity.SysUserWechatBinding;
 import com.example.siteplatform.auth.mapper.SysUserMapper;
+import com.example.siteplatform.auth.mapper.SysUserWechatBindingMapper;
 import com.example.siteplatform.auth.service.AuthService;
 import com.example.siteplatform.auth.service.CaptchaService;
 import com.example.siteplatform.auth.service.WechatAuthService;
@@ -12,7 +14,9 @@ import com.example.siteplatform.common.PageResult;
 import com.example.siteplatform.log.entity.OperationLog;
 import com.example.siteplatform.log.mapper.OperationLogMapper;
 import com.example.siteplatform.project.entity.SysUserProject;
+import com.example.siteplatform.project.entity.SysUserProjectRole;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
+import com.example.siteplatform.project.mapper.SysUserProjectRoleMapper;
 import com.example.siteplatform.project.service.InspectionPermissionTemplateService;
 import com.example.siteplatform.project.service.ProjectPermissionService;
 import com.example.siteplatform.registration.dto.RegistrationApplicationVO;
@@ -41,6 +45,9 @@ import java.util.Locale;
 @Service
 public class RegistrationApplicationService {
 
+    public static final String REGISTRATION_MODE_STANDARD = "STANDARD";
+    public static final String REGISTRATION_MODE_WECHAT_QUICK = "WECHAT_QUICK";
+
     private final RegistrationApplicationMapper applicationMapper;
     private final SysUserMapper userMapper;
     private final SystemRoleMapper roleMapper;
@@ -52,6 +59,12 @@ public class RegistrationApplicationService {
     private final OperationLogMapper operationLogMapper;
     private final ObjectMapper objectMapper;
     private final SecureRandom secureRandom = new SecureRandom();
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private SysUserProjectRoleMapper userProjectRoleMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private SysUserWechatBindingMapper wechatBindingMapper;
 
     public RegistrationApplicationService(RegistrationApplicationMapper applicationMapper, SysUserMapper userMapper,
                                           SystemRoleMapper roleMapper, SysUserProjectMapper userProjectMapper,
@@ -78,6 +91,14 @@ public class RegistrationApplicationService {
         }
         String source = normalizeSource(StringUtils.hasText(request.getSourceType())
                 ? request.getSourceType() : request.getSource());
+        String registrationMode = normalizeRegistrationMode(request.getRegistrationMode(), source);
+        boolean wechatQuick = REGISTRATION_MODE_WECHAT_QUICK.equals(registrationMode);
+        if (wechatQuick && (!StringUtils.hasText(request.getWechatCode()) || !StringUtils.hasText(request.getPhoneCode()))) {
+            throw new BusinessException("微信快捷注册需要重新授权微信身份和手机号");
+        }
+        if (!wechatQuick && !StringUtils.hasText(request.getPassword())) {
+            throw new BusinessException("请设置登录密码");
+        }
         WechatAuthService.PendingWechatIdentity wechatIdentity = null;
         if ("WEB".equals(source)) {
             captchaService.verifyAndConsume(request.getCaptchaId(), request.getCaptchaCode());
@@ -86,7 +107,6 @@ public class RegistrationApplicationService {
                     ? wechatAuthService.identityForCode(request.getWechatCode())
                     : wechatAuthService.consumePendingIdentity(request.getWechatSessionToken());
         }
-        String username = request.getUsername().trim();
         String phone;
         String phoneVerificationType;
         if ("MINI".equals(source) && StringUtils.hasText(request.getPhoneCode())) {
@@ -100,16 +120,24 @@ public class RegistrationApplicationService {
         if (!StringUtils.hasText(phone) || !phone.matches("^1\\d{10}$")) {
             throw new BusinessException("手机号格式不正确");
         }
+        String submittedUsername = trimToNull(request.getUsername());
+        if (submittedUsername != null && !phone.equals(submittedUsername)) {
+            throw new BusinessException("注册账号默认使用手机号，请勿单独填写用户名");
+        }
+        // 新账号的唯一登录账号固定为手机号码。即使旧客户端省略 username，
+        // 审批通过后创建的 sys_user 也始终使用同一手机号作为登录名。
+        String username = phone;
         if (userMapper.selectCount(new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username)) > 0) {
             throw conflict("账号已存在，请直接登录");
         }
         if (userMapper.selectCount(new LambdaQueryWrapper<SysUser>().eq(SysUser::getPhone, phone)) > 0) {
             throw conflict("手机号已关联系统账号，请绑定已有账号");
         }
+        ensureWechatIdentityAvailable(wechatIdentity);
         String statusToken = randomToken();
         RegistrationApplication application = new RegistrationApplication();
         application.setUsername(username);
-        application.setPasswordHash(authService.hashPassword(request.getPassword()));
+        application.setPasswordHash(wechatQuick ? null : authService.hashPassword(request.getPassword()));
         application.setRealName(request.getRealName().trim());
         application.setPhone(phone);
         application.setEmail(trimToNull(request.getEmail()));
@@ -123,6 +151,7 @@ public class RegistrationApplicationService {
         application.setDesiredProjectText(trimToNull(StringUtils.hasText(request.getDesiredProjectText())
                 ? request.getDesiredProjectText() : request.getDesiredProjectName()));
         application.setSourceType(source);
+        application.setRegistrationMode(registrationMode);
         application.setPhoneVerificationType(phoneVerificationType);
         if (wechatIdentity != null) {
             application.setAppId(wechatIdentity.appId());
@@ -208,13 +237,19 @@ public class RegistrationApplicationService {
         if (request == null || !StringUtils.hasText(request.getReviewComment())) {
             throw new BusinessException("审批意见不能为空");
         }
+        // 注册审核只创建普通系统账号和项目成员关系；平台全局身份不属于业务授权，
+        // 只能由系统初始化或受保护运维流程维护。必须在建账号前校验，避免出现可回滚范围外的副作用。
+        if (request.getRoleIds() != null && !request.getRoleIds().isEmpty()) {
+            throw new BusinessException("注册审核不授予平台全局身份");
+        }
         ensureAccountAvailable(application);
         SysUser user = new SysUser();
+        boolean wechatQuick = isWechatQuick(application);
         user.setUsername(application.getUsername());
-        user.setPassword(application.getPasswordHash());
-        user.setPasswordLoginEnabled(1);
+        user.setPassword(wechatQuick ? authService.createUnusablePasswordHash() : application.getPasswordHash());
+        user.setPasswordLoginEnabled(wechatQuick ? 0 : 1);
         user.setCredentialVersion(1);
-        user.setPasswordResetRequired(0);
+        user.setPasswordResetRequired(wechatQuick ? 1 : 0);
         user.setRealName(application.getRealName());
         user.setPhone(application.getPhone());
         user.setEmail(application.getEmail());
@@ -228,17 +263,6 @@ public class RegistrationApplicationService {
             throw conflict("申请账号已被占用，请刷新后重新审核");
         }
 
-        List<Long> globalRoleIds = request.getRoleIds() == null || request.getRoleIds().isEmpty()
-                ? defaultUserRoleIds() : request.getRoleIds();
-        for (Long roleId : globalRoleIds.stream().distinct().toList()) {
-            SystemRole role = roleMapper.selectById(roleId);
-            if (role == null || !"PLATFORM".equalsIgnoreCase(role.getScopeType())
-                    || Integer.valueOf(0).equals(role.getEnabled())
-                    || Integer.valueOf(1).equals(role.getDeleted())) {
-                throw new BusinessException("平台角色不存在：" + roleId);
-            }
-            userMapper.insertUserRole(user.getId(), roleId);
-        }
         if (request.getProjectAssignments() != null) {
             for (RegistrationReviewRequest.ProjectAssignment assignment : request.getProjectAssignments()) {
                 createProjectAssignment(user.getId(), assignment);
@@ -273,40 +297,40 @@ public class RegistrationApplicationService {
 
     private void createProjectAssignment(Long userId, RegistrationReviewRequest.ProjectAssignment assignment) {
         if (assignment == null || assignment.getProjectId() == null) throw new BusinessException("项目授权不能为空");
-        String projectRoleCode = ProjectPermissionService.ROLE_USER;
-        if (assignment.getRoleIds() != null && !assignment.getRoleIds().isEmpty()) {
-            if (assignment.getRoleIds().size() > 1) {
-                throw new BusinessException("同一项目只能分配一个项目角色");
-            }
-            SystemRole role = roleMapper.selectById(assignment.getRoleIds().get(0));
+        if (assignment.getRoleIds() == null || assignment.getRoleIds().isEmpty()) {
+            throw new BusinessException("项目至少需要分配一个项目角色");
+        }
+        List<SystemRole> roles = new java.util.ArrayList<>();
+        for (Long roleId : assignment.getRoleIds().stream().filter(java.util.Objects::nonNull).distinct().toList()) {
+            SystemRole role = roleMapper.selectById(roleId);
             if (role == null || !"PROJECT".equalsIgnoreCase(role.getScopeType())
                     || Integer.valueOf(0).equals(role.getEnabled())
                     || Integer.valueOf(1).equals(role.getDeleted())) {
-                throw new BusinessException("项目角色不存在：" + assignment.getRoleIds().get(0));
+                throw new BusinessException("项目角色不存在：" + roleId);
             }
-            projectRoleCode = role.getRoleCode();
+            roles.add(role);
         }
+        if (roles.isEmpty()) throw new BusinessException("项目至少需要分配一个项目角色");
         SysUserProject userProject = new SysUserProject();
         userProject.setUserId(userId);
         userProject.setProjectId(assignment.getProjectId());
-        userProject.setProjectRoleCode(projectRoleCode);
-        userProject.setInspectionPermissionTemplateId(
-                inspectionTemplateService.defaultTemplateIdForRole(projectRoleCode));
+        userProject.setProjectRoleCode(roles.stream()
+                .sorted(java.util.Comparator.comparing((SystemRole role) -> Integer.valueOf(1).equals(role.getProjectManagerRole())).reversed()
+                        .thenComparing(SystemRole::getRoleCode))
+                .map(SystemRole::getRoleCode).findFirst().orElse(null));
+        userProject.setInspectionPermissionTemplateId(null);
         userProject.setStatus("ACTIVE");
         userProject.setCreateTime(LocalDateTime.now());
         userProject.setUpdateTime(LocalDateTime.now());
         userProjectMapper.insert(userProject);
-    }
-
-    private List<Long> defaultUserRoleIds() {
-        SystemRole role = roleMapper.selectOne(new LambdaQueryWrapper<SystemRole>()
-                .eq(SystemRole::getRoleCode, ProjectPermissionService.ROLE_USER)
-                .eq(SystemRole::getScopeType, "PLATFORM")
-                .eq(SystemRole::getEnabled, 1)
-                .eq(SystemRole::getDeleted, 0)
-                .last("LIMIT 1"));
-        if (role == null) throw new BusinessException("系统默认用户角色不存在");
-        return List.of(role.getId());
+        for (SystemRole role : roles) {
+            SysUserProjectRole relation = new SysUserProjectRole();
+            relation.setUserId(userId);
+            relation.setProjectId(assignment.getProjectId());
+            relation.setRoleId(role.getId());
+            relation.setCreateTime(LocalDateTime.now());
+            userProjectRoleMapper.insert(relation);
+        }
     }
 
     private RegistrationApplication requirePending(Long id) {
@@ -317,7 +341,9 @@ public class RegistrationApplicationService {
                         .last("LIMIT 1 FOR UPDATE"));
         if (application == null) throw BusinessException.notFound("注册申请不存在");
         if (!"PENDING".equals(application.getStatus())) throw conflict("该申请已处理");
-        if (!StringUtils.hasText(application.getPasswordHash())) throw new BusinessException("申请密码已清除，不能批准");
+        if (!isWechatQuick(application) && !StringUtils.hasText(application.getPasswordHash())) {
+            throw new BusinessException("申请密码已清除，不能批准");
+        }
         return application;
     }
 
@@ -329,6 +355,27 @@ public class RegistrationApplicationService {
         if (userMapper.selectCount(new LambdaQueryWrapper<SysUser>()
                 .eq(SysUser::getPhone, application.getPhone())) > 0) {
             throw conflict("申请手机号已关联系统账号");
+        }
+    }
+
+    private void ensureWechatIdentityAvailable(WechatAuthService.PendingWechatIdentity identity) {
+        if (identity == null) return;
+        Long openidCount = wechatBindingMapper.selectCount(new LambdaQueryWrapper<SysUserWechatBinding>()
+                .eq(SysUserWechatBinding::getAppId, identity.appId())
+                .eq(SysUserWechatBinding::getOpenid, identity.openid())
+                .eq(SysUserWechatBinding::getStatus, "ACTIVE")
+                .last("LIMIT 1"));
+        if (openidCount != null && openidCount > 0) {
+            throw conflict("该微信已绑定系统账号，请直接登录或绑定已有账号");
+        }
+        if (!StringUtils.hasText(identity.unionid())) return;
+        Long unionidCount = wechatBindingMapper.selectCount(new LambdaQueryWrapper<SysUserWechatBinding>()
+                .eq(SysUserWechatBinding::getAppId, identity.appId())
+                .eq(SysUserWechatBinding::getUnionid, identity.unionid())
+                .eq(SysUserWechatBinding::getStatus, "ACTIVE")
+                .last("LIMIT 1"));
+        if (unionidCount != null && unionidCount > 0) {
+            throw conflict("该微信已绑定系统账号，请直接登录或绑定已有账号");
         }
     }
 
@@ -379,6 +426,7 @@ public class RegistrationApplicationService {
         vo.setDesiredProjectIds(readProjectIds(application.getDesiredProjectIds()));
         vo.setDesiredProjectText(application.getDesiredProjectText());
         vo.setSourceType(application.getSourceType());
+        vo.setRegistrationMode(application.getRegistrationMode());
         vo.setPhoneVerificationType(application.getPhoneVerificationType());
         vo.setStatus(application.getStatus());
         vo.setCreatedUserId(application.getCreatedUserId());
@@ -396,6 +444,21 @@ public class RegistrationApplicationService {
             throw new BusinessException("申请来源只支持 WEB 或 MINI");
         }
         return normalized;
+    }
+
+    private String normalizeRegistrationMode(String mode, String source) {
+        String normalized = StringUtils.hasText(mode) ? mode.trim().toUpperCase(Locale.ROOT) : REGISTRATION_MODE_STANDARD;
+        if (!REGISTRATION_MODE_STANDARD.equals(normalized) && !REGISTRATION_MODE_WECHAT_QUICK.equals(normalized)) {
+            throw new BusinessException("注册方式不支持");
+        }
+        if (REGISTRATION_MODE_WECHAT_QUICK.equals(normalized) && !"MINI".equals(source)) {
+            throw new BusinessException("微信快捷注册仅支持微信小程序");
+        }
+        return normalized;
+    }
+
+    private boolean isWechatQuick(RegistrationApplication application) {
+        return application != null && REGISTRATION_MODE_WECHAT_QUICK.equalsIgnoreCase(application.getRegistrationMode());
     }
 
     private String normalizePhoneVerification(String type) {

@@ -196,11 +196,14 @@ public class WechatUserManagementService {
         if ("ACTIVE".equals(status)) ensureNoOtherActiveBinding(binding);
         binding.setStatus(status); binding.setUpdateTime(LocalDateTime.now());
         try {
-            bindingMapper.updateById(binding);
+            if (bindingMapper.updateById(binding) != 1) {
+                throw BusinessException.of(409, "微信绑定状态已变化，请刷新后重试");
+            }
         } catch (DuplicateKeyException exception) {
             throw BusinessException.of(409, "微信或系统账号已有其他有效绑定，请刷新后重试");
         }
         authService.logout(userId);
+        authService.repeatLogoutAfterCommit(userId);
         record(userId, operator, "ACTIVE".equals(status) ? "RESTORE_WECHAT_BINDING" : "DISABLE_WECHAT_BINDING",
                 "微信绑定" + bindingId + "状态变更为" + status, request.getReason());
         return toBindingVO(binding);
@@ -212,8 +215,11 @@ public class WechatUserManagementService {
         if (request == null || !StringUtils.hasText(request.getReason())) throw new BusinessException("解绑原因不能为空");
         SysUserWechatBinding binding = requireBinding(userId, bindingId);
         binding.setStatus("UNBOUND"); binding.setUpdateTime(LocalDateTime.now());
-        bindingMapper.updateById(binding);
+        if (bindingMapper.updateById(binding) != 1) {
+            throw BusinessException.of(409, "微信绑定状态已变化，请刷新后重试");
+        }
         authService.logout(userId);
+        authService.repeatLogoutAfterCommit(userId);
         record(userId, operator, "UNBIND_WECHAT", "解除微信绑定" + bindingId, request.getReason());
         return toBindingVO(binding);
     }

@@ -1,5 +1,6 @@
 package com.example.siteplatform.file.storage;
 
+import com.example.siteplatform.file.security.FileUploadPolicy;
 import io.minio.BucketExistsArgs;
 import io.minio.GetObjectArgs;
 import io.minio.MakeBucketArgs;
@@ -53,13 +54,13 @@ public class MinioFileStorageService implements FileStorageService {
                     .bucket(bucket)
                     .object(storageKey)
                     .stream(inputStream, file.getSize(), -1L);
-            if (StringUtils.hasText(file.getContentType())) {
-                builder.contentType(file.getContentType());
-            }
+            builder.contentType(FileUploadPolicy.responseMediaType(file.getOriginalFilename()).toString());
             minio.putObject(builder.build());
         }
-        return new StoredFile(provider(), storageKey, file.getOriginalFilename(), file.getContentType(),
-                StorageSupport.extension(file.getOriginalFilename()), file.getSize(), sha256);
+        String originalFileName = FileUploadPolicy.safeOriginalFileName(file.getOriginalFilename());
+        return new StoredFile(provider(), storageKey, originalFileName,
+                FileUploadPolicy.responseMediaType(originalFileName).toString(),
+                StorageSupport.extension(originalFileName), file.getSize(), sha256);
     }
 
     @Override

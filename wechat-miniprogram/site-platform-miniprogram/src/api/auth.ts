@@ -91,6 +91,13 @@ export async function getCurrentUser(): Promise<User> {
   return request<User>('/auth/user-info');
 }
 
+export async function setupInitialPassword(newPassword: string): Promise<LoginResponse> {
+  return request<LoginResponse>('/auth/initial-password', {
+    method: 'POST',
+    data: { newPassword }
+  });
+}
+
 export async function logout() {
   try {
     if (!USE_MOCK) {

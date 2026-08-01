@@ -35,10 +35,13 @@ public interface SystemPermissionMapper extends BaseMapper<SystemPermission> {
             INNER JOIN sys_role r ON r.id = rp.role_id
             LEFT JOIN sys_user_role ur
               ON ur.role_id = r.id AND r.scope_type = 'PLATFORM' AND ur.user_id = #{userId}
-            LEFT JOIN sys_user_project up
+            LEFT JOIN sys_user_project_role upr
               ON r.scope_type = 'PROJECT'
-             AND up.user_id = #{userId}
-             AND up.project_role_code = r.role_code
+             AND upr.user_id = #{userId}
+             AND upr.role_id = r.id
+            LEFT JOIN sys_user_project up
+              ON up.user_id = upr.user_id
+             AND up.project_id = upr.project_id
              AND up.status = 'ACTIVE'
             WHERE (ur.user_id IS NOT NULL OR up.user_id IS NOT NULL)
               AND p.enabled = 1 AND p.deleted = 0
@@ -56,11 +59,14 @@ public interface SystemPermissionMapper extends BaseMapper<SystemPermission> {
               ON ur.role_id = r.id
              AND r.scope_type = 'PLATFORM'
              AND ur.user_id = #{userId}
-            LEFT JOIN sys_user_project up
+            LEFT JOIN sys_user_project_role upr
               ON r.scope_type = 'PROJECT'
-             AND up.user_id = #{userId}
-             AND up.project_id = #{projectId}
-             AND up.project_role_code = r.role_code
+             AND upr.user_id = #{userId}
+             AND upr.project_id = #{projectId}
+             AND upr.role_id = r.id
+            LEFT JOIN sys_user_project up
+              ON up.user_id = upr.user_id
+             AND up.project_id = upr.project_id
              AND up.status = 'ACTIVE'
             WHERE (ur.user_id IS NOT NULL OR up.user_id IS NOT NULL)
               AND p.enabled = 1 AND p.deleted = 0
@@ -75,11 +81,18 @@ public interface SystemPermissionMapper extends BaseMapper<SystemPermission> {
             FROM sys_permission p
             INNER JOIN sys_role_permission rp ON rp.permission_id = p.id
             INNER JOIN sys_role r ON r.id = rp.role_id
-            WHERE r.role_code = #{roleCode}
+            INNER JOIN sys_user_project_role upr ON upr.role_id = r.id
+            INNER JOIN sys_user_project up
+              ON up.user_id = upr.user_id
+             AND up.project_id = upr.project_id
+             AND up.status = 'ACTIVE'
+            WHERE upr.user_id = #{userId}
+              AND upr.project_id = #{projectId}
               AND r.scope_type = 'PROJECT'
               AND r.enabled = 1 AND r.deleted = 0
               AND p.enabled = 1 AND p.deleted = 0
             ORDER BY p.permission_code
             """)
-    List<String> selectCodesByProjectRole(@Param("roleCode") String roleCode);
+    List<String> selectProjectCodesByUserIdAndProject(@Param("userId") Long userId,
+                                                       @Param("projectId") Long projectId);
 }

@@ -12,29 +12,19 @@
 ### 1. 准备数据库
 
 ```bash
-# 当前 39 表基线只执行：
-# mysql ... < src/main/resources/sql/migrations/20260728_unified_registration_rbac_wechat_login.sql
-# init.sql 仅用于全新空库，禁止在已有数据环境重复执行。
-# 全新空库执行 init.sql 后仍需继续应用适用的增量迁移。
+# 当前本地 dianxinyun 已是 47 表基线，不执行 init.sql。
+# 只有明确创建全新空库时才运行仓库根目录工具：
+DIANXINYUN_INIT_CONFIRM='CREATE_EMPTY_DATABASE_ONLY:dianxinyun' \
+  ../scripts/init-empty-database.sh
+# 工具拒绝已有任何表的数据库；完成后仍需继续应用适用的增量迁移。
 ```
 
 ### 2. 配置数据库连接
 
-编辑 `src/main/resources/application.yml`：
-
-```yaml
-spring:
-  datasource:
-    url: jdbc:mysql://localhost:3306/dianxinyun?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false
-    username: root
-    password: your_password  # 修改为你的密码
-
-  data:
-    redis:
-      host: localhost
-      port: 6379
-      password: your_redis_password  # 如果有密码的话
-```
+本地默认连接 `localhost:3306/dianxinyun` 和 `localhost:6379`。需要覆盖时使用
+`DB_URL / DB_USERNAME / DB_PASSWORD` 和
+`REDIS_HOST / REDIS_PORT / REDIS_PASSWORD / REDIS_DATABASE`，不要把密码写入 YAML。
+完整生产变量模板见 `.env.example`；Spring Boot 不会自动读取该文件，应由部署平台注入。
 
 文件默认保存到本地 `./uploads`。工程资料库也支持 MinIO，通过环境变量切换，不要把密钥写入配置文件：
 
@@ -45,6 +35,10 @@ export MINIO_BUCKET=site-platform
 export MINIO_ACCESS_KEY=your_access_key
 export MINIO_SECRET_KEY=your_secret_key
 ```
+
+上传由后端同时校验大小、扩展名和文件头。巡检/质量流程照片最大 15MB；工程资料最大
+50MB，支持 PDF、栅格图片、Office/WPS、CAD、安全文本和常见压缩包；HTML、SVG、脚本
+及可执行文件会被拒绝。电箱导入只接受模板生成的 `.xlsx`，最大 10MB。
 
 ### 3. 启动 Redis（如果未运行）
 
@@ -60,6 +54,9 @@ redis-server
 mvn clean compile
 SPRING_PROFILES_ACTIVE=local \
 WECHAT_MINI_PROGRAM_MOCK_ENABLED=true \
+KNIFE4J_ENABLE=true \
+API_DOCS_ENABLED=true \
+SWAGGER_UI_ENABLED=true \
 mvn spring-boot:run
 ```
 
@@ -67,31 +64,51 @@ mvn spring-boot:run
 
 ```bash
 mvn clean package
+SPRING_PROFILES_ACTIVE=prod \
+FORWARD_HEADERS_STRATEGY=NATIVE \
+DB_URL='jdbc:mysql://数据库地址:3306/dianxinyun?sslMode=VERIFY_IDENTITY' \
+DB_USERNAME=site_platform \
+DB_PASSWORD=<database-secret> \
+REDIS_HOST=<redis-host> \
+REDIS_PASSWORD=<redis-secret> \
+JWT_SECRET=<至少32字节且仅属于该环境的随机密钥> \
 WECHAT_MINI_PROGRAM_APP_ID=正式AppID \
-WECHAT_MINI_PROGRAM_APP_SECRET=正式AppSecret \
+WECHAT_MINI_PROGRAM_APP_SECRET=<wechat-app-secret> \
+WECHAT_MINI_PROGRAM_PRODUCTION=true \
 WECHAT_MINI_PROGRAM_LEGAL_DOMAIN=https://正式域名 \
 WECHAT_MINI_PROGRAM_PUBLIC_FALLBACK_URL=https://正式域名/扫码回跳地址 \
+KNIFE4J_ENABLE=false \
+API_DOCS_ENABLED=false \
+SWAGGER_UI_ENABLED=false \
 java -jar target/site-platform-1.0.0.jar
 ```
 
+`local/dev/test` Profile 可使用仓库内仅供联调的开发 JWT 密钥。其他环境若未配置
+`JWT_SECRET`、仍使用开发默认值，或密钥不足 32 字节，后端会在监听端口前直接拒绝启动。
+生产还必须通过受信 Nginx 设置 `X-Forwarded-For` 和 `X-Forwarded-Proto`，并配置
+`FORWARD_HEADERS_STRATEGY=NATIVE`；否则后端拒绝启动，避免所有用户共享代理 IP 限流。
+
 ### 5. 访问 API 文档
 
-启动成功后，访问 Swagger UI：
+本地开发显式开启文档后，访问 Knife4j UI：
 - http://localhost:8080/doc.html
+
+生产环境的 Knife4j、Swagger UI 和 `/v3/api-docs` 固定关闭；尝试开启会导致启动失败。
+关闭时 `/doc.html`、`/webjars/**`、`/swagger-ui/**` 和 `/v3/api-docs/**` 均返回 `404`。
 
 ## 管理员凭证
 
 系统不提供默认测试账号或明文密码。历史非 BCrypt 密码会被标记为待重置且禁止登录。
 如需恢复平台管理员，可在一次启动中同时提供
 `ADMIN_RESET_USERNAME` 与 `ADMIN_RESET_PASSWORD`；启动成功后立即移除这两个环境变量。
-全新空库执行 `init.sql` 时也只会预留一个不可登录的管理员主体；必须先应用
+全新空库通过 `scripts/init-empty-database.sh` 建立基线时只会预留一个不可登录的管理员主体；必须先应用
 `20260728_unified_registration_rbac_wechat_login.sql`，再使用上述变量显式设置密码。
 
 示例（请替换占位值，成功启动后从运行环境中删除变量）：
 
 ```bash
 ADMIN_RESET_USERNAME='<平台管理员账号>' \
-ADMIN_RESET_PASSWORD='<新的高强度密码>' \
+ADMIN_RESET_PASSWORD=<one-time-strong-password>
 SPRING_PROFILES_ACTIVE=local \
 mvn spring-boot:run
 ```
@@ -143,9 +160,9 @@ src/main/java/com/example/siteplatform/
 
 ## 技术栈
 
-- Spring Boot 3.2.5
+- Spring Boot 3.5.14
 - MyBatis-Plus 3.5.6
 - MySQL 8.x
 - Redis
-- JWT (jjwt 0.12.6)
-- Knife4j (Swagger文档)
+- JWT (jjwt 0.11.5)
+- springdoc-openapi 2.8.17 + Knife4j UI 4.5.0

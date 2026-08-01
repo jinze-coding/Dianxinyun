@@ -23,6 +23,8 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
 import java.util.Map;
@@ -120,6 +122,60 @@ class WechatAuthServiceTest {
         assertEquals("openid-1", first.openid());
         assertEquals(409, second.getCode());
         verify(redisTemplate).delete("wechat:login-session:session-1");
+    }
+
+    @Test
+    void rolledBackRegistrationRestoresClaimedWechatIdentitySession() {
+        Map<String, String> session = Map.of(
+                "appId", "wx-app", "openid", "openid-1", "unionid", "unionid-1");
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(hashOperations.entries("wechat:login-session:session-1"))
+                .thenReturn(Map.copyOf(session));
+        when(valueOperations.setIfAbsent(
+                "wechat:login-session-consumed:session-1", "1", 10, TimeUnit.MINUTES))
+                .thenReturn(true);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.consumePendingIdentity("session-1");
+
+            TransactionSynchronizationManager.getSynchronizations().forEach(
+                    synchronization -> synchronization.afterCompletion(
+                            TransactionSynchronization.STATUS_ROLLED_BACK));
+
+            verify(hashOperations).putAll("wechat:login-session:session-1", session);
+            verify(redisTemplate).expire(
+                    "wechat:login-session:session-1", 10, TimeUnit.MINUTES);
+            verify(redisTemplate).delete("wechat:login-session-consumed:session-1");
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
+    void committedRegistrationRemovesTemporaryClaimWithoutRestoringSession() {
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(hashOperations.entries("wechat:login-session:session-1"))
+                .thenReturn(Map.of("appId", "wx-app", "openid", "openid-1", "unionid", ""));
+        when(valueOperations.setIfAbsent(
+                "wechat:login-session-consumed:session-1", "1", 10, TimeUnit.MINUTES))
+                .thenReturn(true);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.consumePendingIdentity("session-1");
+
+            TransactionSynchronizationManager.getSynchronizations().forEach(
+                    synchronization -> synchronization.afterCompletion(
+                            TransactionSynchronization.STATUS_COMMITTED));
+
+            verify(redisTemplate).delete("wechat:login-session-consumed:session-1");
+            verify(hashOperations, never()).putAll(
+                    "wechat:login-session:session-1", Map.of(
+                            "appId", "wx-app", "openid", "openid-1", "unionid", ""));
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     @Test

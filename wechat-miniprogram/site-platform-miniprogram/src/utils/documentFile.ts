@@ -11,6 +11,10 @@ interface ChooseMessageFileResult {
   tempFiles?: Array<{ path: string; name?: string; size?: number }>;
 }
 
+interface WechatFileActionResult {
+  errMsg?: string;
+}
+
 declare const wx: {
   chooseMessageFile: (options: {
     count: number;
@@ -18,14 +22,43 @@ declare const wx: {
     success: (result: ChooseMessageFileResult) => void;
     fail: (error: { errMsg?: string }) => void;
   }) => void;
+  canIUse?: (schema: string) => boolean;
+  shareFileMessage?: (options: {
+    filePath: string;
+    fileName?: string;
+    success: () => void;
+    fail: (error: WechatFileActionResult) => void;
+  }) => void;
 };
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'];
-const OPEN_DOCUMENT_EXTENSIONS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt'];
+const OPEN_DOCUMENT_EXTENSIONS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'];
+const PROJECT_DOCUMENT_EXTENSIONS = [
+  ...IMAGE_EXTENSIONS,
+  ...OPEN_DOCUMENT_EXTENSIONS,
+  'heic', 'heif', 'wps', 'et', 'dps', 'rtf', 'txt', 'md', 'csv',
+  'dwg', 'dxf', 'ofd', 'zip', 'rar', '7z'
+];
+
+export interface PreparedProjectDocumentFile {
+  filePath: string;
+  fileName: string;
+  extension: string;
+  versionId?: number;
+}
 
 function ensureSize(file: LocalDocumentFile) {
   if (file.size > MAX_FILE_SIZE) throw new Error('单个文件不能超过 50MB');
+  return file;
+}
+
+function ensureSupportedDocumentFile(file: LocalDocumentFile) {
+  ensureSize(file);
+  const extension = extensionOf(file.name);
+  if (!PROJECT_DOCUMENT_EXTENSIONS.includes(extension)) {
+    throw new Error(`不支持上传 .${extension || '未知'} 格式的资料`);
+  }
   return file;
 }
 
@@ -38,7 +71,7 @@ export function chooseMessageDocument(): Promise<LocalDocumentFile> {
       success: (result) => {
         const file = result.tempFiles?.[0];
         if (!file?.path) { reject(new Error('未选择文件')); return; }
-        try { resolve(ensureSize({ path: file.path, name: file.name || `项目资料_${Date.now()}`, size: Number(file.size || 0) })); }
+        try { resolve(ensureSupportedDocumentFile({ path: file.path, name: file.name || `项目资料_${Date.now()}`, size: Number(file.size || 0) })); }
         catch (error) { reject(error); }
       },
       fail: (error) => reject(new Error(error.errMsg?.includes('cancel') ? '已取消选择' : error.errMsg || '文件选择失败'))
@@ -53,7 +86,7 @@ export function chooseMessageDocument(): Promise<LocalDocumentFile> {
       success: (result) => {
         const file = result.tempFiles?.[0];
         if (!file?.path) { reject(new Error('未选择文件')); return; }
-        try { resolve(ensureSize({ path: file.path, name: file.name || `项目资料_${Date.now()}`, size: Number(file.size || 0) })); }
+        try { resolve(ensureSupportedDocumentFile({ path: file.path, name: file.name || `项目资料_${Date.now()}`, size: Number(file.size || 0) })); }
         catch (error) { reject(error); }
       },
       fail: (error) => reject(new Error(error.errMsg?.includes('cancel') ? '已取消选择' : error.errMsg || '文件选择失败'))
@@ -86,6 +119,10 @@ export function extensionOf(fileName?: string) {
   return fileName.split('.').pop()?.toLowerCase() || '';
 }
 
+function normalizedExtension(fileName?: string, fileExtension?: string) {
+  return extensionOf(fileName) || String(fileExtension || '').replace(/^\./, '').toLowerCase();
+}
+
 export function formatFileSize(size?: number) {
   const bytes = Number(size || 0);
   if (bytes < 1024) return `${bytes} B`;
@@ -96,26 +133,91 @@ export function formatFileSize(size?: number) {
 export async function openProjectDocument(document: ProjectDocument, version?: ProjectDocumentVersion, preview = true) {
   const selected = version || document.currentVersion;
   const filePath = await downloadProjectDocumentFile(document.id, selected?.id, preview);
-  const extension = extensionOf(selected?.fileName || selected?.fileExtension);
-  if (IMAGE_EXTENSIONS.includes(extension) || filePath.endsWith('.svg')) {
+  const extension = normalizedExtension(selected?.fileName, selected?.fileExtension);
+  if (IMAGE_EXTENSIONS.includes(extension)) {
     uni.previewImage({ urls: [filePath], current: filePath });
     return;
   }
   if (OPEN_DOCUMENT_EXTENSIONS.includes(extension)) {
     await new Promise<void>((resolve, reject) => {
-      uni.openDocument({ filePath, showMenu: true, success: () => resolve(), fail: (error) => reject(new Error(error.errMsg || '文件打开失败')) });
+      uni.openDocument({
+        filePath,
+        fileType: extension,
+        showMenu: true,
+        success: () => resolve(),
+        fail: (error) => reject(new Error(error.errMsg || '文件打开失败'))
+      });
     });
     return;
   }
   throw new Error('该格式暂不支持在线预览，请使用下载功能后通过对应软件打开');
 }
 
-export async function saveProjectDocument(document: ProjectDocument, version?: ProjectDocumentVersion) {
+export function supportsDocumentSaveMenu(fileName?: string, fileExtension?: string) {
+  return OPEN_DOCUMENT_EXTENSIONS.includes(normalizedExtension(fileName, fileExtension));
+}
+
+export async function prepareProjectDocumentFile(
+  document: ProjectDocument,
+  version?: ProjectDocumentVersion
+): Promise<PreparedProjectDocumentFile> {
   const selected = version || document.currentVersion;
   const filePath = await downloadProjectDocumentFile(document.id, selected?.id, false);
+  const extension = normalizedExtension(selected?.fileName, selected?.fileExtension);
+  const fallbackName = extension ? `${document.title}.${extension}` : document.title;
+  return {
+    filePath,
+    fileName: selected?.fileName || fallbackName,
+    extension,
+    versionId: selected?.id
+  };
+}
+
+export function openPreparedDocumentSaveMenu(file: PreparedProjectDocumentFile) {
+  if (!OPEN_DOCUMENT_EXTENSIONS.includes(file.extension)) {
+    throw new Error('当前格式不支持微信保存菜单');
+  }
+  return new Promise<void>((resolve, reject) => {
+    uni.openDocument({
+      filePath: file.filePath,
+      fileType: file.extension,
+      showMenu: true,
+      success: () => resolve(),
+      fail: (error) => reject(new Error(error.errMsg || '保存菜单打开失败'))
+    });
+  });
+}
+
+export function sharePreparedDocumentToWechat(file: PreparedProjectDocumentFile) {
+  // #ifdef MP-WEIXIN
+  if (!wx.shareFileMessage || (wx.canIUse && !wx.canIUse('shareFileMessage'))) {
+    return Promise.reject(new Error('当前微信版本不支持发送文件，请升级微信后重试'));
+  }
+  return new Promise<void>((resolve, reject) => {
+    wx.shareFileMessage?.({
+      filePath: file.filePath,
+      fileName: file.fileName,
+      success: () => resolve(),
+      fail: (error) => reject(new Error(error.errMsg || '文件发送失败'))
+    });
+  });
+  // #endif
+
+  // #ifndef MP-WEIXIN
+  return Promise.reject(new Error('当前环境不支持发送给微信好友'));
+  // #endif
+}
+
+export function isFileActionCancelled(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /cancel|取消/i.test(message);
+}
+
+export async function saveProjectDocument(document: ProjectDocument, version?: ProjectDocumentVersion) {
+  const file = await prepareProjectDocumentFile(document, version);
   return new Promise<string>((resolve, reject) => {
     uni.saveFile({
-      tempFilePath: filePath,
+      tempFilePath: file.filePath,
       success: (result) => resolve(result.savedFilePath),
       fail: (error) => reject(new Error(error.errMsg || '文件保存失败'))
     });

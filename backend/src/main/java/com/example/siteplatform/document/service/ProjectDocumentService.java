@@ -7,6 +7,7 @@ import com.example.siteplatform.auth.mapper.SysUserMapper;
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.common.PageResult;
 import com.example.siteplatform.document.dto.ProjectDocumentBatchRequest;
+import com.example.siteplatform.document.dto.ProjectDocumentClientActionRequest;
 import com.example.siteplatform.document.dto.ProjectDocumentUpdateRequest;
 import com.example.siteplatform.document.entity.DocumentFolder;
 import com.example.siteplatform.document.entity.ProjectDocument;
@@ -19,8 +20,10 @@ import com.example.siteplatform.document.vo.ProjectDocumentDetailVO;
 import com.example.siteplatform.document.vo.ProjectDocumentSummaryVO;
 import com.example.siteplatform.document.vo.ProjectDocumentVO;
 import com.example.siteplatform.document.vo.ProjectDocumentVersionVO;
+import com.example.siteplatform.file.constant.FileStatus;
 import com.example.siteplatform.file.entity.FileResource;
 import com.example.siteplatform.file.mapper.FileResourceMapper;
+import com.example.siteplatform.file.security.FileUploadPolicy;
 import com.example.siteplatform.file.storage.FileStorageManager;
 import com.example.siteplatform.file.storage.StoredFile;
 import com.example.siteplatform.log.entity.OperationLog;
@@ -28,6 +31,8 @@ import com.example.siteplatform.log.mapper.OperationLogMapper;
 import com.example.siteplatform.project.service.ProjectPermissionService;
 import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,8 +50,12 @@ import java.util.UUID;
 
 @Service
 public class ProjectDocumentService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(ProjectDocumentService.class);
     public static final String STATUS_ACTIVE = "ACTIVE";
     public static final String STATUS_ARCHIVED = "ARCHIVED";
+    private static final int DOCUMENT_NO_MAX_LENGTH = 100;
+    private static final int REMARK_MAX_LENGTH = 500;
+    private static final int CHANGE_NOTE_MAX_LENGTH = 500;
     private static final List<String> CATEGORIES = List.of(
             "PROJECT_DATA", "DRAWING", "FORM", "CONSTRUCTION_RECORD", "MEETING", "OTHER");
 
@@ -148,17 +157,21 @@ public class ProjectDocumentService {
         permissionService.checkProjectPermission(currentUser.getId(), projectId);
         permissionService.requireSystemPermission(currentUser.getId(), projectId, SystemPermissionCodes.DOCUMENT_UPLOAD);
         if (file == null || file.isEmpty()) throw new BusinessException("请选择需要上传的文件");
+        FileUploadPolicy.validateProjectDocument(file);
         long targetFolderId = folderId == null ? 0L : folderId;
         folderService.validateFolder(projectId, targetFolderId);
         String normalizedTitle = normalizeTitle(title);
-        String normalizedNo = trimToNull(documentNo);
+        String normalizedNo = normalizeOptional(documentNo, DOCUMENT_NO_MAX_LENGTH, "资料编号");
+        String normalizedRemark = normalizeOptional(remark, REMARK_MAX_LENGTH, "资料备注");
+        String normalizedChangeNote = normalizeOptional(changeNote, CHANGE_NOTE_MAX_LENGTH, "版本说明");
         assertDocumentIdentityAvailable(projectId, targetFolderId, normalizedTitle, normalizedNo, null);
 
         String storageKey = objectKey(projectId, file.getOriginalFilename());
         StoredFile stored = storageManager.store(storageKey, file);
         registerRollbackCleanup(stored);
-        FileResource resource = createFileResource(projectId, normalizedTitle, normalizeCategory(category), remark, currentUser, stored);
-        fileMapper.insert(resource);
+        FileResource resource = createFileResource(projectId, normalizedTitle, normalizeCategory(category),
+                normalizedRemark, currentUser, stored);
+        requireSingleWrite(fileMapper.insert(resource), "资料文件元数据新增");
 
         ProjectDocument document = new ProjectDocument();
         document.setProjectId(projectId);
@@ -169,16 +182,17 @@ public class ProjectDocumentService {
         document.setStatus(STATUS_ACTIVE);
         document.setCreatedBy(currentUser.getId());
         document.setCreatedByName(displayName(currentUser));
-        document.setRemark(trimToNull(remark));
+        document.setRemark(normalizedRemark);
         document.setDeleted(0);
         document.setCreateTime(LocalDateTime.now());
         document.setUpdateTime(LocalDateTime.now());
-        documentMapper.insert(document);
+        requireSingleWrite(documentMapper.insert(document), "资料新增");
 
-        ProjectDocumentVersion version = createVersion(document.getId(), 1, resource.getId(), changeNote, currentUser);
-        versionMapper.insert(version);
+        ProjectDocumentVersion version = createVersion(
+                document.getId(), 1, resource.getId(), normalizedChangeNote, currentUser);
+        requireSingleWrite(versionMapper.insert(version), "资料版本新增");
         document.setCurrentVersionId(version.getId());
-        documentMapper.updateById(document);
+        requireSingleWrite(documentMapper.updateById(document), "资料当前版本更新");
         record(currentUser, document, "DOCUMENT_UPLOAD", "上传资料《" + document.getTitle() + "》V1", request);
         return detail(document.getId(), currentUser);
     }
@@ -192,6 +206,8 @@ public class ProjectDocumentService {
         permissionService.requireSystemPermission(currentUser.getId(), document.getProjectId(),
                 SystemPermissionCodes.DOCUMENT_UPLOAD);
         if (!STATUS_ACTIVE.equals(document.getStatus())) throw new BusinessException("归档资料不能上传新版本");
+        FileUploadPolicy.validateProjectDocument(file);
+        String normalizedChangeNote = normalizeOptional(changeNote, CHANGE_NOTE_MAX_LENGTH, "版本说明");
         document = documentMapper.selectForUpdate(id);
         if (document == null) throw BusinessException.notFound("资料不存在");
         int nextVersion = versionMapper.selectMaxVersionNo(id) + 1;
@@ -200,12 +216,13 @@ public class ProjectDocumentService {
         registerRollbackCleanup(stored);
         FileResource resource = createFileResource(document.getProjectId(), document.getTitle(),
                 document.getCategory(), document.getRemark(), currentUser, stored);
-        fileMapper.insert(resource);
-        ProjectDocumentVersion version = createVersion(id, nextVersion, resource.getId(), changeNote, currentUser);
-        versionMapper.insert(version);
+        requireSingleWrite(fileMapper.insert(resource), "资料文件元数据新增");
+        ProjectDocumentVersion version = createVersion(
+                id, nextVersion, resource.getId(), normalizedChangeNote, currentUser);
+        requireSingleWrite(versionMapper.insert(version), "资料版本新增");
         document.setCurrentVersionId(version.getId());
         document.setUpdateTime(LocalDateTime.now());
-        documentMapper.updateById(document);
+        requireSingleWrite(documentMapper.updateById(document), "资料当前版本更新");
         record(currentUser, document, "DOCUMENT_VERSION", "上传《" + document.getTitle() + "》V" + nextVersion, request);
         return detail(id, currentUser);
     }
@@ -215,19 +232,23 @@ public class ProjectDocumentService {
                                            SysUser currentUser, HttpServletRequest request) {
         ProjectDocument document = requireDocument(id);
         checkWrite(currentUser, document);
+        if (update == null) throw new BusinessException("资料信息不能为空");
         if (!STATUS_ACTIVE.equals(document.getStatus())) throw new BusinessException("归档资料不能修改");
         long folderId = update.getFolderId() == null ? document.getFolderId() : update.getFolderId();
         folderService.validateFolder(document.getProjectId(), folderId);
         String title = update.getTitle() == null ? document.getTitle() : normalizeTitle(update.getTitle());
-        String documentNo = update.getDocumentNo() == null ? document.getDocumentNo() : trimToNull(update.getDocumentNo());
+        String documentNo = update.getDocumentNo() == null ? document.getDocumentNo()
+                : normalizeOptional(update.getDocumentNo(), DOCUMENT_NO_MAX_LENGTH, "资料编号");
+        String remark = update.getRemark() == null ? document.getRemark()
+                : normalizeOptional(update.getRemark(), REMARK_MAX_LENGTH, "资料备注");
         assertDocumentIdentityAvailable(document.getProjectId(), folderId, title, documentNo, id);
         document.setFolderId(folderId);
         document.setTitle(title);
         document.setDocumentNo(documentNo);
         if (update.getCategory() != null) document.setCategory(normalizeCategory(update.getCategory()));
-        if (update.getRemark() != null) document.setRemark(trimToNull(update.getRemark()));
+        document.setRemark(remark);
         document.setUpdateTime(LocalDateTime.now());
-        documentMapper.updateById(document);
+        requireSingleWrite(documentMapper.updateById(document), "资料编辑");
         record(currentUser, document, "DOCUMENT_UPDATE", "修改资料《" + document.getTitle() + "》", request);
         return detail(id, currentUser);
     }
@@ -238,7 +259,7 @@ public class ProjectDocumentService {
         checkWrite(currentUser, document);
         document.setStatus(STATUS_ARCHIVED);
         document.setUpdateTime(LocalDateTime.now());
-        documentMapper.updateById(document);
+        requireSingleWrite(documentMapper.updateById(document), "资料归档");
         record(currentUser, document, "DOCUMENT_ARCHIVE", "归档资料《" + document.getTitle() + "》", request);
     }
 
@@ -248,7 +269,7 @@ public class ProjectDocumentService {
         checkManage(currentUser, document.getProjectId());
         document.setStatus(STATUS_ACTIVE);
         document.setUpdateTime(LocalDateTime.now());
-        documentMapper.updateById(document);
+        requireSingleWrite(documentMapper.updateById(document), "资料取消归档");
         record(currentUser, document, "DOCUMENT_UNARCHIVE", "恢复归档资料《" + document.getTitle() + "》", request);
     }
 
@@ -257,8 +278,8 @@ public class ProjectDocumentService {
         ProjectDocument document = requireDocument(id);
         checkWrite(currentUser, document);
         document.setUpdateTime(LocalDateTime.now());
-        documentMapper.updateById(document);
-        documentMapper.deleteById(id);
+        requireSingleWrite(documentMapper.updateById(document), "资料删除时间更新");
+        requireSingleWrite(documentMapper.deleteById(id), "资料移入回收站");
         record(currentUser, document, "DOCUMENT_DELETE", "将资料《" + document.getTitle() + "》移入回收站", request);
     }
 
@@ -268,7 +289,7 @@ public class ProjectDocumentService {
         checkManage(currentUser, document.getProjectId());
         folderService.validateFolder(document.getProjectId(), document.getFolderId());
         assertDocumentIdentityAvailable(document.getProjectId(), document.getFolderId(), document.getTitle(), document.getDocumentNo(), id);
-        documentMapper.restoreById(id);
+        requireSingleWrite(documentMapper.restoreById(id), "资料恢复");
         record(currentUser, document, "DOCUMENT_RESTORE", "从回收站恢复《" + document.getTitle() + "》", request);
     }
 
@@ -278,16 +299,23 @@ public class ProjectDocumentService {
         checkManage(currentUser, document.getProjectId());
         List<ProjectDocumentVersion> versions = versionMapper.selectList(new LambdaQueryWrapper<ProjectDocumentVersion>()
                 .eq(ProjectDocumentVersion::getDocumentId, id));
+        List<FileResource> resources = new java.util.ArrayList<>();
         for (ProjectDocumentVersion version : versions) {
             FileResource resource = fileMapper.selectById(version.getFileResourceId());
             if (resource != null) {
-                storageManager.delete(resource);
-                fileMapper.purgeById(resource.getId());
+                if (fileMapper.deleteById(resource.getId()) != 1) {
+                    throw BusinessException.of(409, "资料文件状态已变化，请刷新后重试");
+                }
+                resources.add(resource);
             }
         }
-        versionMapper.deleteByDocumentId(id);
-        documentMapper.purgeById(id);
+        int deletedVersions = versionMapper.deleteByDocumentId(id);
+        if (deletedVersions != versions.size()) {
+            throw BusinessException.of(409, "资料版本状态已变化，请刷新后重试");
+        }
+        requireSingleWrite(documentMapper.purgeById(id), "资料永久删除");
         record(currentUser, document, "DOCUMENT_PURGE", "永久删除资料《" + document.getTitle() + "》", request);
+        registerCommittedPurge(resources);
     }
 
     @Transactional
@@ -303,7 +331,7 @@ public class ProjectDocumentService {
                 assertDocumentIdentityAvailable(document.getProjectId(), folderId, document.getTitle(), document.getDocumentNo(), id);
                 document.setFolderId(folderId);
                 document.setUpdateTime(LocalDateTime.now());
-                documentMapper.updateById(document);
+                requireSingleWrite(documentMapper.updateById(document), "资料移动");
                 record(currentUser, document, "DOCUMENT_MOVE", "移动资料《" + document.getTitle() + "》", request);
             } else if ("ARCHIVE".equals(action)) {
                 archive(id, currentUser, request);
@@ -345,9 +373,7 @@ public class ProjectDocumentService {
                                            HttpServletRequest request, boolean preview) {
         ProjectDocument document = requireDocument(id);
         checkRead(currentUser, document);
-        Long selectedVersionId = versionId == null ? document.getCurrentVersionId() : versionId;
-        ProjectDocumentVersion version = versionMapper.selectById(selectedVersionId);
-        if (version == null || !id.equals(version.getDocumentId())) throw BusinessException.notFound("资料版本不存在");
+        ProjectDocumentVersion version = requireVersion(document, versionId);
         FileResource file = fileMapper.selectById(version.getFileResourceId());
         if (file == null) throw BusinessException.notFound("版本文件不存在");
         Resource resource = storageManager.load(file);
@@ -357,6 +383,22 @@ public class ProjectDocumentService {
                 StringUtils.hasText(file.getOriginalFileName()) ? file.getOriginalFileName() : file.getFileName(),
                 StringUtils.hasText(file.getMimeType()) ? file.getMimeType() : "application/octet-stream",
                 file.getFileSize() == null ? 0L : file.getFileSize());
+    }
+
+    @Transactional
+    public ProjectDocumentActivityVO recordClientAction(Long id, ProjectDocumentClientActionRequest action,
+                                                         SysUser currentUser, HttpServletRequest request) {
+        ProjectDocument document = requireDocument(id);
+        checkRead(currentUser, document);
+        ProjectDocumentVersion version = requireVersion(document, action.getVersionId());
+        String normalizedAction = normalizeClientAction(action.getAction());
+        String versionLabel = "V" + version.getVersionNo();
+        if ("OPEN_SAVE_MENU".equals(normalizedAction)) {
+            return record(currentUser, document, "DOCUMENT_SAVE_MENU",
+                    "打开《" + document.getTitle() + "》" + versionLabel + "保存菜单", request);
+        }
+        return record(currentUser, document, "DOCUMENT_SHARE",
+                "发送《" + document.getTitle() + "》" + versionLabel + "给微信好友", request);
     }
 
     private long count(Long projectId, String category, String status) {
@@ -377,6 +419,15 @@ public class ProjectDocumentService {
         ProjectDocument document = documentMapper.selectDeletedById(id);
         if (document == null) throw BusinessException.notFound("回收站资料不存在");
         return document;
+    }
+
+    private ProjectDocumentVersion requireVersion(ProjectDocument document, Long versionId) {
+        Long selectedVersionId = versionId == null ? document.getCurrentVersionId() : versionId;
+        ProjectDocumentVersion version = selectedVersionId == null ? null : versionMapper.selectById(selectedVersionId);
+        if (version == null || !document.getId().equals(version.getDocumentId())) {
+            throw BusinessException.notFound("资料版本不存在");
+        }
+        return version;
     }
 
     private void checkRead(SysUser currentUser, ProjectDocument document) {
@@ -416,6 +467,34 @@ public class ProjectDocumentService {
         });
     }
 
+    private void registerCommittedPurge(List<FileResource> resources) {
+        if (resources.isEmpty()) return;
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            purgePhysicalFiles(resources);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                purgePhysicalFiles(resources);
+            }
+        });
+    }
+
+    private void purgePhysicalFiles(List<FileResource> resources) {
+        for (FileResource resource : resources) {
+            try {
+                storageManager.delete(resource);
+                if (fileMapper.purgeById(resource.getId()) != 1) {
+                    LOGGER.warn("资料物理文件已删除，但文件元数据清理未完成: fileId={}", resource.getId());
+                }
+            } catch (RuntimeException exception) {
+                LOGGER.error("资料永久删除后的物理文件清理失败，保留逻辑删除元数据: fileId={}",
+                        resource.getId(), exception);
+            }
+        }
+    }
+
     private void assertDocumentIdentityAvailable(Long projectId, Long folderId, String title,
                                                  String documentNo, Long excludedId) {
         LambdaQueryWrapper<ProjectDocument> titleWrapper = new LambdaQueryWrapper<ProjectDocument>()
@@ -449,7 +528,7 @@ public class ProjectDocumentService {
         resource.setMimeType(stored.mimeType());
         resource.setFileExtension(stored.extension());
         resource.setSha256(stored.sha256());
-        resource.setStatus("UPLOADED");
+        resource.setStatus(FileStatus.UPLOADED);
         resource.setRemark(trimToNull(remark));
         resource.setDeleted(0);
         resource.setCreateTime(LocalDateTime.now());
@@ -534,8 +613,8 @@ public class ProjectDocumentService {
         return vo;
     }
 
-    private void record(SysUser user, ProjectDocument document, String type, String description,
-                        HttpServletRequest request) {
+    private ProjectDocumentActivityVO record(SysUser user, ProjectDocument document, String type, String description,
+                                             HttpServletRequest request) {
         OperationLog log = new OperationLog();
         log.setUserId(user.getId());
         log.setUsername(displayName(user));
@@ -545,7 +624,8 @@ public class ProjectDocumentService {
         log.setBusinessId(document.getId());
         log.setIpAddress(resolveIp(request));
         log.setCreateTime(LocalDateTime.now());
-        operationLogMapper.insert(log);
+        requireSingleWrite(operationLogMapper.insert(log), "资料操作日志写入");
+        return toActivityVO(log);
     }
 
     private String activityLabel(String type) {
@@ -553,6 +633,8 @@ public class ProjectDocumentService {
             case "DOCUMENT_UPLOAD" -> "上传";
             case "DOCUMENT_PREVIEW" -> "预览";
             case "DOCUMENT_DOWNLOAD" -> "下载";
+            case "DOCUMENT_SAVE_MENU" -> "打开保存菜单";
+            case "DOCUMENT_SHARE" -> "发送文件";
             case "DOCUMENT_UPDATE" -> "修改";
             case "DOCUMENT_MOVE" -> "移动";
             case "DOCUMENT_VERSION" -> "新版本";
@@ -563,6 +645,14 @@ public class ProjectDocumentService {
             case "DOCUMENT_PURGE" -> "永久删除";
             default -> "操作";
         };
+    }
+
+    private String normalizeClientAction(String value) {
+        String action = StringUtils.hasText(value) ? value.trim().toUpperCase(Locale.ROOT) : "";
+        if (!"OPEN_SAVE_MENU".equals(action) && !"SHARE_WECHAT_FILE".equals(action)) {
+            throw new BusinessException("不支持的客户端资料操作");
+        }
+        return action;
     }
 
     private String normalizeTitle(String value) {
@@ -586,6 +676,20 @@ public class ProjectDocumentService {
 
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String normalizeOptional(String value, int maxLength, String fieldName) {
+        String normalized = trimToNull(value);
+        if (normalized != null && normalized.length() > maxLength) {
+            throw new BusinessException(fieldName + "不能超过" + maxLength + "个字符");
+        }
+        return normalized;
+    }
+
+    private void requireSingleWrite(int affectedRows, String operation) {
+        if (affectedRows != 1) {
+            throw BusinessException.of(409, operation + "未生效，请刷新后重试");
+        }
     }
 
     private String objectKey(Long projectId, String originalName) {
@@ -615,8 +719,6 @@ public class ProjectDocumentService {
 
     private String resolveIp(HttpServletRequest request) {
         if (request == null) return null;
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (StringUtils.hasText(forwarded)) return forwarded.split(",")[0].trim();
         return request.getRemoteAddr();
     }
 }

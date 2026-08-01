@@ -61,7 +61,6 @@ export function hasProjectPermission(user, projectId, ...codes) {
 }
 
 export function hasAssignedMenu(user, ...menuCodes) {
-  if (isPlatformAdmin(user)) return true;
   const expected = new Set(menuCodes.filter(Boolean));
   return flattenMenus(user?.menus || []).some((menu) => {
     if (menu?.enabled === false || Number(menu?.enabled) === 0
@@ -73,10 +72,24 @@ export function hasAssignedMenu(user, ...menuCodes) {
   });
 }
 
-export function canAccessPage(user, pageId) {
+export function hasAssignedProjectMenu(user, projectId, ...menuCodes) {
+  const expected = new Set(menuCodes.filter(Boolean));
+  const contexts = user?.projectContexts || user?.projectRoles || [];
+  const context = contexts.find((item) => Number(item?.projectId) === Number(projectId)
+    && String(item?.accessStatus || 'ACTIVE').toUpperCase() === 'ACTIVE');
+  if (!context) return false;
+  const projectMenus = context?.menuCodes || [];
+  if (projectMenus.length) return projectMenus.some((code) => expected.has(code));
+  // 兼容尚未返回按项目菜单的旧会话，服务端仍是最终安全边界。
+  return hasAssignedMenu(user, ...menuCodes);
+}
+
+export function canAccessPage(user, pageId, projectId = null) {
   if (!user) return false;
-  if (isPlatformAdmin(user)) return true;
   const rule = PAGE_ACCESS_RULES[pageId];
   if (!rule) return false;
+  if (projectId !== null && projectId !== undefined) {
+    return hasAssignedProjectMenu(user, projectId, pageId, ...rule.menuCodes);
+  }
   return hasAssignedMenu(user, pageId, ...rule.menuCodes);
 }

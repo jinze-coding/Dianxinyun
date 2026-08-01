@@ -11,20 +11,24 @@ import com.example.siteplatform.auth.mapper.SysUserWechatBindingMapper;
 import com.example.siteplatform.auth.entity.SysUserWechatBinding;
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.config.JwtConfig;
-import com.example.siteplatform.project.constant.InspectionPermissionCodes;
 import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
+import com.example.siteplatform.project.mapper.SysUserProjectRoleMapper;
 import com.example.siteplatform.project.service.ProjectPermissionService;
 import com.example.siteplatform.system.service.SystemPermissionService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HexFormat;
@@ -47,6 +51,9 @@ public class AuthService {
 
     @Autowired
     private SysUserProjectMapper userProjectMapper;
+
+    @Autowired
+    private SysUserProjectRoleMapper userProjectRoleMapper;
 
     @Autowired
     private ProjectInfoMapper projectInfoMapper;
@@ -72,6 +79,7 @@ public class AuthService {
      */
     private static final String DUMMY_BCRYPT =
             "$2y$12$zF276taNiyLyh5qo1lXw3.JsxS2/6jaAB1Brlh2fndoS72lE4zI2y";
+    private final SecureRandom secureRandom = new SecureRandom();
 
     public LoginResponse login(LoginRequest request) {
         SysUser user = findLoginUser(request);
@@ -140,6 +148,23 @@ public class AuthService {
         redisTemplate.delete(legacyTokenKey(userId));
     }
 
+    /**
+     * 权限、账号状态或微信绑定在数据库事务内变更时，提交前会先调用 {@link #logout(Long)}
+     * 立即失效现有会话；提交后再执行一次，清理事务窗口内并发签发的新会话。
+     * 初始密码设置会在同一事务内签发新令牌，不得调用本方法。
+     */
+    public void repeatLogoutAfterCommit(Long userId) {
+        if (userId == null || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                logout(userId);
+            }
+        });
+    }
+
     public void logoutSession(String token) {
         if (!StringUtils.hasText(token)) return;
         String normalizedToken = normalizeToken(token);
@@ -154,6 +179,25 @@ public class AuthService {
     }
 
     public SysUser getCurrentUser(String token) {
+        return resolveCurrentUser(token, false);
+    }
+
+    /**
+     * 仅用于展示本人状态、设置首次密码和登出等引导链路；不得用于业务授权。
+     */
+    public SysUser getCurrentUserAllowInitialPasswordSetup(String token) {
+        return resolveCurrentUser(token, true);
+    }
+
+    public SysUser getCurrentUserForInitialPasswordSetup(String token) {
+        SysUser user = resolveCurrentUser(token, true);
+        if (!requiresInitialPasswordSetup(user)) {
+            throw BusinessException.of(409, "初始密码已设置，请直接使用账号密码登录");
+        }
+        return user;
+    }
+
+    private SysUser resolveCurrentUser(String token, boolean allowInitialPasswordSetup) {
         if (!StringUtils.hasText(token)) {
             throw BusinessException.of(401, "未登录");
         }
@@ -180,6 +224,9 @@ public class AuthService {
             logoutSession(token);
             throw BusinessException.of(401, "登录凭证已更新，请重新登录");
         }
+        if (!allowInitialPasswordSetup && requiresInitialPasswordSetup(user)) {
+            throw BusinessException.forbidden("请先在小程序完成初始密码设置");
+        }
 
         return user;
     }
@@ -189,7 +236,8 @@ public class AuthService {
     }
 
     public CurrentUserVO getCurrentUserInfo(String token) {
-        SysUser user = getCurrentUser(token);
+        // 快捷注册账号需要先读取该标记，客户端才能进入首次密码设置页。
+        SysUser user = getCurrentUserAllowInitialPasswordSetup(token);
         List<String> roles = userMapper.selectRoleCodesByUserId(user.getId());
         List<UserProjectRoleVO> projectRoles = buildProjectRoles(user, roles == null ? List.of() : roles);
 
@@ -201,6 +249,7 @@ public class AuthService {
         vo.setEmail(user.getEmail());
         vo.setStatus(user.getStatus());
         vo.setPasswordLoginEnabled(user.getPasswordLoginEnabled());
+        vo.setInitialPasswordSetupRequired(requiresInitialPasswordSetup(user));
         SysUserWechatBinding binding = wechatBindingMapper.selectOne(
                 new LambdaQueryWrapper<SysUserWechatBinding>()
                         .eq(SysUserWechatBinding::getUserId, user.getId())
@@ -228,19 +277,25 @@ public class AuthService {
                 item.setProjectName(project.getProjectName());
                 item.setShortName(project.getShortName());
                 item.setProjectRoleCode(ProjectPermissionService.ROLE_PLATFORM_ADMIN);
-                item.setPermissionTemplateName("平台管理员");
-                item.setPermissionTemplateCode(ProjectPermissionService.ROLE_PLATFORM_ADMIN);
-                item.setPermissionCodes(InspectionPermissionCodes.ALL_CODES);
+                item.setPermissionTemplateName(null);
+                item.setPermissionTemplateCode(null);
+                item.setPermissionCodes(systemPermissionService.projectPermissionCodes(user.getId(), project.getId()));
+                item.setMenuCodes(systemPermissionService.projectMenuCodes(user.getId(), project.getId()));
                 result.add(item);
             }
             return result;
         }
         List<UserProjectRoleVO> result = userProjectMapper.selectUserProjectRoles(user.getId());
         result.forEach(item -> {
+            var projectRoles = userProjectRoleMapper.selectEnabledRoles(user.getId(), item.getProjectId());
+            item.setProjectRoles(projectRoles);
+            if (!projectRoles.isEmpty()) {
+                item.setProjectRoleCode(projectRoles.get(0).getRoleCode()); // 旧客户端只读兼容
+            }
             LinkedHashSet<String> codes = new LinkedHashSet<>(
-                    projectPermissionService.getInspectionPermissionCodes(user.getId(), item.getProjectId()));
-            codes.addAll(systemPermissionService.projectRolePermissionCodes(item.getProjectRoleCode()));
+                    systemPermissionService.projectPermissionCodes(user.getId(), item.getProjectId()));
             item.setPermissionCodes(List.copyOf(codes));
+            item.setMenuCodes(systemPermissionService.projectMenuCodes(user.getId(), item.getProjectId()));
         });
         return result;
     }
@@ -294,12 +349,39 @@ public class AuthService {
         return passwordCredentialService.encode(rawPassword);
     }
 
+    /**
+     * sys_user.password 不允许为空。微信快捷注册账号先写入随机 BCrypt 摘要，
+     * 同时保持密码登录关闭；该摘要不对应任何用户可知密码。
+     */
+    public String createUnusablePasswordHash() {
+        byte[] randomBytes = new byte[24];
+        secureRandom.nextBytes(randomBytes);
+        return hashPassword(HexFormat.of().formatHex(randomBytes) + "Aa1");
+    }
+
+    public boolean requiresInitialPasswordSetup(SysUser user) {
+        return user != null
+                && Integer.valueOf(0).equals(user.getPasswordLoginEnabled())
+                && Integer.valueOf(1).equals(user.getPasswordResetRequired());
+    }
+
+    @Transactional
+    public LoginResponse setupInitialPassword(String token, String newPassword) {
+        SysUser user = getCurrentUserForInitialPasswordSetup(token);
+        passwordCredentialService.validateStrength(newPassword);
+        changePassword(user, newPassword);
+        String freshToken = issueToken(user);
+        return new LoginResponse(freshToken, user.getId(), user.getUsername(), user.getRealName());
+    }
+
     public void changePassword(SysUser user, String newPassword) {
         user.setPassword(hashPassword(newPassword));
         user.setCredentialVersion(normalizedCredentialVersion(user) + 1);
         user.setPasswordResetRequired(0);
         user.setPasswordLoginEnabled(1);
-        userMapper.updateById(user);
+        if (userMapper.updateById(user) != 1) {
+            throw BusinessException.of(409, "账号状态已变化，密码未更新，请刷新后重试");
+        }
         logout(user.getId());
     }
 

@@ -97,7 +97,7 @@ public class InspectionPermissionTemplateService {
         template.setDeleted(0);
         template.setCreateTime(LocalDateTime.now());
         template.setUpdateTime(LocalDateTime.now());
-        templateMapper.insert(template);
+        requireSingleWrite(templateMapper.insert(template));
         recordOperation(currentUser, template, "CREATE_PERMISSION_TEMPLATE",
                 "创建巡检权限模板：" + template.getTemplateName());
         return toVO(template);
@@ -130,7 +130,7 @@ public class InspectionPermissionTemplateService {
             template.setTemplateCode(nextCode);
         }
         template.setUpdateTime(LocalDateTime.now());
-        templateMapper.updateById(template);
+        requireSingleWrite(templateMapper.updateById(template));
         recordOperation(currentUser, template, "UPDATE_PERMISSION_TEMPLATE",
                 "修改巡检权限模板：" + template.getTemplateName()
                         + "，受影响用户数：" + affectedUserIds.size());
@@ -153,7 +153,7 @@ public class InspectionPermissionTemplateService {
         Set<Long> affectedUserIds = affectedUserIds(id);
         template.setEnabled(nextEnabled);
         template.setUpdateTime(LocalDateTime.now());
-        templateMapper.updateById(template);
+        requireSingleWrite(templateMapper.updateById(template));
         recordOperation(currentUser, template, "CHANGE_PERMISSION_TEMPLATE_STATUS",
                 (Integer.valueOf(1).equals(template.getEnabled()) ? "启用" : "停用")
                         + "巡检权限模板：" + template.getTemplateName()
@@ -210,6 +210,7 @@ public class InspectionPermissionTemplateService {
         userIds.stream().filter(Objects::nonNull).forEach(userId -> {
             projectPermissionService.clearUserProjectsCache(userId);
             authService.logout(userId);
+            authService.repeatLogoutAfterCommit(userId);
         });
     }
 
@@ -270,6 +271,12 @@ public class InspectionPermissionTemplateService {
 
     private Integer normalizeEnabled(Integer enabled) {
         return enabled != null && enabled == 1 ? 1 : 0;
+    }
+
+    private void requireSingleWrite(int affectedRows) {
+        if (affectedRows != 1) {
+            throw BusinessException.of(409, "巡检权限模板状态已变化，请刷新后重试");
+        }
     }
 
     private String trimToNull(String value) {

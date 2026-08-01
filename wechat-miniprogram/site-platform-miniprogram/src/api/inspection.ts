@@ -12,14 +12,22 @@ import {
   submitMockSafetySpotCheck
 } from '@/mock/runtime';
 
-export async function getInspectionRecords(projectId: number, electricBoxId?: number, month?: string): Promise<InspectionRecord[]> {
+export async function getInspectionRecords(
+  projectId: number,
+  electricBoxId?: number,
+  month?: string,
+  checkDate?: string
+): Promise<InspectionRecord[]> {
+  if (month && checkDate) throw new Error('月份和日期不能同时筛选');
   if (USE_MOCK) {
-    return getMockInspectionRecords(projectId, electricBoxId, month);
+    return getMockInspectionRecords(projectId, electricBoxId, month, checkDate);
   }
   const query = [
     `projectId=${encodeURIComponent(projectId)}`,
     electricBoxId ? `electricBoxId=${encodeURIComponent(electricBoxId)}` : '',
-    month ? `month=${encodeURIComponent(month)}` : ''
+    checkDate
+      ? `checkDate=${encodeURIComponent(checkDate)}`
+      : month ? `month=${encodeURIComponent(month)}` : ''
   ].filter(Boolean).join('&');
   return request<InspectionRecord[]>(`/inspection/records?${query}`);
 }
@@ -161,6 +169,8 @@ export interface InspectionMonthSummary {
   projectId: number;
   electricBoxId?: number;
   month: string;
+  periodType: 'MONTH' | 'DAY';
+  periodValue: string;
   shouldCheck: number;
   checked: number;
   missed: number;
@@ -169,15 +179,29 @@ export interface InspectionMonthSummary {
   records: InspectionRecord[];
 }
 
-export async function getInspectionSummary(params: {
+export type InspectionSummaryParams = {
   projectId: number;
   boxId?: number;
   month: string;
-}): Promise<InspectionMonthSummary> {
+  checkDate?: never;
+} | {
+  projectId: number;
+  boxId?: number;
+  month?: never;
+  checkDate: string;
+};
+
+export async function getInspectionSummary(params: InspectionSummaryParams): Promise<InspectionMonthSummary> {
+  if (Boolean(params.month) === Boolean(params.checkDate)) {
+    throw new Error('月份和日期必须且只能选择一个');
+  }
   if (USE_MOCK) return getMockInspectionSummary(params);
+  const periodQuery = params.checkDate
+    ? `checkDate=${encodeURIComponent(params.checkDate)}`
+    : `month=${encodeURIComponent(params.month || '')}`;
   const query = [
     `projectId=${encodeURIComponent(params.projectId)}`,
-    `month=${encodeURIComponent(params.month)}`,
+    periodQuery,
     params.boxId ? `boxId=${encodeURIComponent(params.boxId)}` : ''
   ].filter(Boolean).join('&');
   return request<InspectionMonthSummary>(`/inspection/records/summary?${query}`);

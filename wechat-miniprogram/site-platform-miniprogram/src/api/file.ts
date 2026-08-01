@@ -18,13 +18,28 @@ export interface UploadResult {
 }
 
 export interface UploadPhotoOptions {
-  projectId?: number;
+  projectId: number;
   businessType?: 'inspection_record' | 'inspection_rectification' | string;
   businessId?: number;
   fileName?: string;
 }
 
-export async function uploadPhoto(filePath: string, fileType: string, options: UploadPhotoOptions = {}): Promise<UploadResult> {
+function buildUploadFormData(fileType: string, options: UploadPhotoOptions): Record<string, string> {
+  const formData: Record<string, string> = {
+    fileType,
+    projectId: String(options.projectId),
+    fileName: options.fileName || `${fileType}_${Date.now()}_${Math.random().toString(36).slice(2)}`
+  };
+  if (options.businessType) formData.businessType = options.businessType;
+  // 新业务记录首次上传照片时还没有 businessId。微信小程序会把 undefined
+  // 序列化成 "[objectUndefined]"，因此未赋值字段必须完全省略。
+  if (options.businessId !== undefined && options.businessId !== null) {
+    formData.businessId = String(options.businessId);
+  }
+  return formData;
+}
+
+export async function uploadPhoto(filePath: string, fileType: string, options: UploadPhotoOptions): Promise<UploadResult> {
   if (USE_MOCK) {
     return {
       id: Date.now(),
@@ -39,13 +54,7 @@ export async function uploadPhoto(filePath: string, fileType: string, options: U
       filePath,
       name: 'file',
       header: token ? { Authorization: `Bearer ${token}` } : {},
-      formData: {
-        fileType,
-        projectId: options.projectId,
-        businessType: options.businessType,
-        businessId: options.businessId,
-        fileName: options.fileName || `${fileType}_${Date.now()}_${Math.random().toString(36).slice(2)}`
-      },
+      formData: buildUploadFormData(fileType, options),
       success: (response) => {
         try {
           const parsed = JSON.parse(response.data);
@@ -66,7 +75,7 @@ export async function uploadPhoto(filePath: string, fileType: string, options: U
   });
 }
 
-export async function uploadPhotoIds(filePaths: string[], fileType: string, options: UploadPhotoOptions = {}): Promise<number[]> {
+export async function uploadPhotoIds(filePaths: string[], fileType: string, options: UploadPhotoOptions): Promise<number[]> {
   const ids: number[] = [];
   try {
     for (const filePath of filePaths) {
@@ -137,7 +146,31 @@ export async function downloadFilePaths(ids: number[] = []): Promise<string[]> {
   return paths.filter(Boolean);
 }
 
-export async function getFileResources(projectId: number, businessType?: string) {
+export interface FileDownloadResult {
+  id: number;
+  path?: string;
+  error?: string;
+}
+
+export async function downloadFileResults(ids: number[] = []): Promise<FileDownloadResult[]> {
+  return Promise.all(ids.map(async (id) => {
+    try {
+      return { id, path: await downloadFileToTempPath(id) };
+    } catch (error) {
+      return {
+        id,
+        error: error instanceof Error ? error.message : '附件加载失败'
+      };
+    }
+  }));
+}
+
+export async function getFileResources(projectId: number, businessType?: string, status?: string) {
   if (USE_MOCK) return [] as FileResourceItem[];
-  return request<FileResourceItem[]>(`/files?projectId=${projectId}${businessType ? `&businessType=${encodeURIComponent(businessType)}` : ''}`);
+  const query = [
+    `projectId=${projectId}`,
+    businessType ? `businessType=${encodeURIComponent(businessType)}` : '',
+    status ? `status=${encodeURIComponent(status)}` : ''
+  ].filter(Boolean).join('&');
+  return request<FileResourceItem[]>(`/files?${query}`);
 }

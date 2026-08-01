@@ -2,6 +2,8 @@ package com.example.siteplatform.file.storage;
 
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.file.entity.FileResource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
@@ -15,6 +17,7 @@ import java.util.stream.Collectors;
 
 @Service
 public class FileStorageManager {
+    private static final Logger LOGGER = LoggerFactory.getLogger(FileStorageManager.class);
     private final Map<String, FileStorageService> providers;
     private final String currentProvider;
 
@@ -29,7 +32,8 @@ public class FileStorageManager {
         try {
             return provider(currentProvider).store(storageKey, file);
         } catch (Exception e) {
-            throw new BusinessException("文件保存失败: " + e.getMessage());
+            LOGGER.error("File storage write failed for provider {}", currentProvider, e);
+            throw new BusinessException("文件保存失败");
         }
     }
 
@@ -42,7 +46,8 @@ public class FileStorageManager {
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
-            throw new BusinessException("文件读取失败: " + e.getMessage());
+            LOGGER.error("File storage read failed", e);
+            throw new BusinessException("文件读取失败");
         }
     }
 
@@ -50,14 +55,16 @@ public class FileStorageManager {
         try {
             provider(providerName(file)).delete(key(file));
         } catch (Exception e) {
-            throw new BusinessException("物理文件删除失败: " + e.getMessage());
+            LOGGER.error("File storage delete failed", e);
+            throw new BusinessException("物理文件删除失败");
         }
     }
 
     public void deleteQuietly(String providerName, String storageKey) {
         try {
             provider(providerName).delete(storageKey);
-        } catch (Exception ignored) {
+        } catch (Exception exception) {
+            LOGGER.warn("Rollback cleanup of newly stored file failed", exception);
             // 数据库写入失败后的补偿清理不覆盖原始异常。
         }
     }

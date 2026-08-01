@@ -17,6 +17,10 @@
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "注册申请进度" }
     },
     {
+      "path": "pages/initial-password/index",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "设置登录密码" }
+    },
+    {
       "path": "pages/web-login-confirm/index",
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "确认网页登录" }
     },
@@ -67,6 +71,10 @@
     {
       "path": "pages/inspection/records",
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "巡检记录" }
+    },
+    {
+      "path": "pages/summary/index",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "巡检汇总" }
     },
     {
       "path": "pages/inspection/detail",

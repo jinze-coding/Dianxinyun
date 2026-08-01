@@ -6,20 +6,24 @@ import { getInspectionRecordDetail } from '@/api/inspection';
 import { useAuthStore } from '@/stores/auth';
 import type { InspectionRecord } from '@/types';
 import { usePageScrollHeight } from '@/utils/navLayout';
-import { getQueryNumber, showToast, switchTab } from '@/utils/navigation';
+import { getQueryNumber, switchTab } from '@/utils/navigation';
 
 const authStore = useAuthStore();
 const record = ref<InspectionRecord>();
 const loading = ref(true);
+const loadError = ref('');
 const { scrollStyle } = usePageScrollHeight({ minHeight: 260 });
 const photos = computed(() => [...(record.value?.outerPhotos || []), ...(record.value?.innerPhotos || [])]);
 
-onShow(async () => {
-  if (!await authStore.ensureRootAccess('/pages/inspection/index')) return;
-  const pages = getCurrentPages();
-  const current = pages[pages.length - 1] as unknown as { options?: Record<string, string> };
+onShow(() => { void loadDetail(); });
+
+async function loadDetail() {
   loading.value = true;
+  loadError.value = '';
   try {
+    if (!await authStore.ensureRootAccess('/pages/inspection/index')) return;
+    const pages = getCurrentPages();
+    const current = pages[pages.length - 1] as unknown as { options?: Record<string, string> };
     const loadedRecord = await getInspectionRecordDetail(getQueryNumber(current.options?.id, 0));
     if (!loadedRecord) throw new Error('巡检记录不存在');
     if (!await authStore.ensureProjectPermission(
@@ -36,13 +40,14 @@ onShow(async () => {
     record.value = loadedRecord;
   } catch (error) {
     record.value = undefined;
-    showToast(error instanceof Error ? error.message : '巡检详情加载失败');
+    loadError.value = error instanceof Error ? error.message : '巡检详情加载失败';
   } finally {
     loading.value = false;
   }
-});
+}
 
 function goBack() { getCurrentPages().length > 1 ? uni.navigateBack() : switchTab('/pages/inspection/index'); }
+function returnToInspectionHome() { switchTab('/pages/inspection/index'); }
 function resultLabel(value: string) { return value === 'NORMAL' ? '正常' : value === 'ABNORMAL' ? '异常' : value === 'NA' ? '不适用' : '未填写'; }
 function preview(index: number) { if (photos.value.length) uni.previewImage({ current: index, urls: photos.value }); }
 </script>
@@ -52,6 +57,17 @@ function preview(index: number) { if (photos.value.length) uni.previewImage({ cu
     <AppNavBar title="巡检详情" @back="goBack" />
     <scroll-view class="flow-scroll" scroll-y enable-flex :style="scrollStyle">
       <view v-if="loading" class="flow-content"><view class="flow-card loading-card"><view class="flow-skeleton line"></view><view class="flow-skeleton block"></view></view></view>
+      <view v-else-if="loadError" class="flow-content error-content">
+        <view class="flow-card error-card">
+          <text class="error-mark">!</text>
+          <text class="error-title">巡检详情加载失败</text>
+          <text class="error-description">{{ loadError }}</text>
+          <view class="error-actions">
+            <button @tap="returnToInspectionHome">返回巡检首页</button>
+            <button class="primary" @tap="loadDetail">重新加载</button>
+          </view>
+        </view>
+      </view>
       <view v-else-if="record" class="flow-content detail-content">
         <view class="record-hero flow-card">
           <view><text class="box-code">{{ record.boxCode }}</text><text class="status-pill">已完成</text></view>
@@ -104,4 +120,13 @@ function preview(index: number) { if (photos.value.length) uni.previewImage({ cu
 .photo-grid image { width: 100%; height: 150rpx; border-radius: 12rpx; background: #f0f5f9; }
 .empty-text,.remark-text { display: block; padding: 18rpx; border: 1rpx solid var(--inspection-divider); border-radius: 12rpx; background: #f7fafc; color: #748398; font-size: 20rpx; line-height: 1.6; }
 .loading-card { padding: 24rpx; }.flow-skeleton.line { width: 42%; height: 30rpx; }.flow-skeleton.block { width: 100%; height: 260rpx; margin-top: 20rpx; }
+.error-content { display: flex; min-height: 62vh; align-items: center; justify-content: center; }
+.error-card { display: flex; width: 100%; align-items: center; flex-direction: column; padding: 48rpx 28rpx; text-align: center; }
+.error-mark { display: flex; width: 58rpx; height: 58rpx; align-items: center; justify-content: center; border-radius: 18rpx; background: var(--inspection-danger-soft); color: var(--inspection-danger); font-size: 32rpx; font-weight: 900; }
+.error-title { margin-top: 20rpx; color: var(--inspection-text); font-size: 26rpx; font-weight: 850; }
+.error-description { margin-top: 10rpx; color: #6f7f90; font-size: 20rpx; line-height: 1.6; word-break: break-all; }
+.error-actions { display: grid; width: 100%; grid-template-columns: 1fr 1fr; gap: 13rpx; margin-top: 28rpx; }
+.error-actions button { display: flex; height: 68rpx; align-items: center; justify-content: center; margin: 0; border: 1rpx solid var(--inspection-border); border-radius: 14rpx; background: #fff; color: var(--inspection-primary-deep); font-size: 20rpx; font-weight: 750; line-height: 1; }
+.error-actions button::after { border: 0; }
+.error-actions button.primary { border-color: var(--inspection-primary-deep); background: var(--inspection-primary-deep); color: #fff; }
 </style>

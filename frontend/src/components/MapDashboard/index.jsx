@@ -449,7 +449,7 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
 
   const handleDeleteProject = async (project, event) => {
     event.stopPropagation();
-    if (!window.confirm(`确认删除项目“${project.projectName}”？`)) return;
+    if (!window.confirm(`仅空项目可以删除。确认删除项目“${project.projectName}”？`)) return;
 
     try {
       const res = await deleteProject(project.id);
@@ -462,7 +462,7 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
       await syncAfterProjectChanged();
     } catch (e) {
       console.error('删除项目失败', e);
-      window.alert('删除失败，请确认后端服务正常');
+      window.alert(e?.response?.data?.message || '删除失败，请确认后端服务正常');
     }
   };
 

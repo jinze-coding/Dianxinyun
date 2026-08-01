@@ -1,12 +1,16 @@
 package com.example.siteplatform.file.storage;
 
+import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.file.entity.FileResource;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.util.List;
+import java.io.IOException;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -45,5 +49,23 @@ class FileStorageManagerTest {
 
         assertSame(resource, manager.load(file));
         verify(local).load("/legacy/file.pdf");
+    }
+
+    @Test
+    void storageFailureDoesNotExposeProviderExceptionMessage() throws Exception {
+        FileStorageService local = mock(FileStorageService.class);
+        FileStorageService minio = mock(FileStorageService.class);
+        when(local.provider()).thenReturn("local");
+        when(minio.provider()).thenReturn("minio");
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "test.pdf", "application/pdf", "%PDF-1.7".getBytes());
+        when(minio.store("documents/test.pdf", file))
+                .thenThrow(new IOException("/srv/private/storage-path"));
+
+        FileStorageManager manager = new FileStorageManager(List.of(local, minio), "minio");
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> manager.store("documents/test.pdf", file));
+
+        assertEquals("文件保存失败", exception.getMessage());
     }
 }

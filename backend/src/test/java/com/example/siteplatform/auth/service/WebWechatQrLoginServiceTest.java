@@ -123,6 +123,31 @@ class WebWechatQrLoginServiceTest {
 
     @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
+    void accountPendingInitialPasswordSetupCannotUseWebQrLogin() {
+        WebWechatQrLoginService service = service();
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(any())).thenReturn(Map.of(
+                "state", "CONFIRMED",
+                "userId", "7",
+                "browserSecretHash", digest("browser-secret")
+        ));
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class))).thenReturn("7");
+        SysUser user = new SysUser();
+        user.setId(7L);
+        user.setStatus(1);
+        when(authService.getUserInfo(7L)).thenReturn(user);
+        when(authService.requiresInitialPasswordSetup(user)).thenReturn(true);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.exchange("challenge", "browser-secret", "one-time-code"));
+
+        assertEquals(403, exception.getCode());
+        assertTrue(exception.getMessage().contains("初始密码设置"));
+        verify(authService, never()).issueToken(any());
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
     void consumedExchangeCodeCannotBeUsedTwice() {
         WebWechatQrLoginService service = service();
         when(redisTemplate.opsForHash()).thenReturn(hashOperations);

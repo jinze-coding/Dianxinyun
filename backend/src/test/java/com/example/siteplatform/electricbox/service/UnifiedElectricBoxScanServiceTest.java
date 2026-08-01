@@ -1,6 +1,7 @@
 package com.example.siteplatform.electricbox.service;
 
 import com.example.siteplatform.auth.entity.SysUser;
+import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.electricbox.entity.ElectricBox;
 import com.example.siteplatform.electricbox.mapper.ElectricBoxMapper;
 import com.example.siteplatform.electricbox.vo.UnifiedElectricBoxScanVO;
@@ -19,8 +20,11 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -94,14 +98,39 @@ class UnifiedElectricBoxScanServiceTest {
 
     @Test
     void publicScanNeverExposesInternalRecordId() {
-        InspectionRecord todayRecord = new InspectionRecord();
-        todayRecord.setId(99L);
-        when(inspectionRecordMapper.selectOne(any())).thenReturn(todayRecord);
         when(scopeService.isRequired(eq(box), any(LocalDate.class))).thenReturn(true);
 
         UnifiedElectricBoxScanVO result = service.resolve("B:PUB-TEST-001", null);
 
         assertEquals("VIEW_PUBLIC_MONTHLY", result.getDirectAction());
         assertNull(result.getTodayRecordId());
+        verify(inspectionRecordMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void disabledPublicAccessRejectsUnauthorizedScanBeforeScopeOrRecordQueries() {
+        box.setPublicAccessEnabled(0);
+
+        BusinessException exception = assertThrows(
+                BusinessException.class, () -> service.resolve("B:PUB-TEST-001", null));
+
+        assertEquals(403, exception.getCode());
+        verify(scopeService, never()).isRequired(any(), any());
+        verify(inspectionRecordMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void disabledPublicAccessAlsoRejectsSignedInUserWithoutProjectPermission() {
+        box.setPublicAccessEnabled(0);
+        SysUser unrelatedUser = new SysUser();
+        unrelatedUser.setId(8L);
+        when(permissionService.getInspectionPermissionCodes(8L, 1L)).thenReturn(List.of());
+
+        BusinessException exception = assertThrows(
+                BusinessException.class, () -> service.resolve("B:PUB-TEST-001", unrelatedUser));
+
+        assertEquals(403, exception.getCode());
+        verify(scopeService, never()).isRequired(any(), any());
+        verify(inspectionRecordMapper, never()).selectOne(any());
     }
 }

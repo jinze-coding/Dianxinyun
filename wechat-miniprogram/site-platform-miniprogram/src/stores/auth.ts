@@ -99,6 +99,15 @@ function collectProjectPermissionCodes(user: User, projectId: number): string[] 
   return Array.from(codes);
 }
 
+function collectProjectMenuCodes(user: User, projectId: number): string[] {
+  if (!hasProjectScope(user, projectId)) return [];
+  const codes = new Set<string>();
+  projectContexts(user, projectId).forEach((context) => {
+    (context.menuCodes || []).forEach((code) => codes.add(String(code).trim().toUpperCase()));
+  });
+  return Array.from(codes);
+}
+
 function hasProjectPermission(user: User | null, projectId: number, ...permissionCodes: string[]): boolean {
   if (!user || !projectId) return false;
   if (user.roles?.includes('PLATFORM_ADMIN')) return true;
@@ -111,17 +120,30 @@ function storedProjectId(): number {
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
+function activeProjectIds(user: User): number[] {
+  return Array.from(new Set(
+    [...(user.projectContexts || []), ...(user.projectRoles || [])]
+      .filter(isActiveProjectContext)
+      .map((context) => Number(context.projectId))
+      .filter((projectId) => Number.isFinite(projectId) && projectId > 0)
+  ));
+}
+
 function canAccessRoot(path: string, user: User | null = state.user): boolean {
   const rule = ROOT_PAGE_RULES.find((item) => item.path === path);
   if (!rule || rule.path === '/pages/profile/index') return true;
   if (!user) return false;
-  if (user.roles?.includes('PLATFORM_ADMIN')) return true;
+  const projectIds = activeProjectIds(user);
+  const projectMenus = projectIds.flatMap((projectId) => collectProjectMenuCodes(user, projectId));
   const menus = flattenMenus(user);
-  const hasMiniMenuCatalog = menus.some(isMiniProgramMenu);
+  const hasMiniMenuCatalog = projectMenus.some((code) => code.startsWith('MINI_'))
+    || menus.some(isMiniProgramMenu);
   const allowedCodes = new Set(
     (hasMiniMenuCatalog ? rule.miniMenuCodes : rule.legacyMenuCodes)
       .map((code) => code.toUpperCase())
   );
+  if (projectMenus.length) return projectMenus.some((code) => allowedCodes.has(code));
+  // 兼容旧会话；服务端对项目范围和操作权限仍会强制校验。
   return menus.some((menu) => {
     if (hasMiniMenuCatalog && !isMiniProgramMenu(menu)) return false;
     return allowedCodes.has(menuCode(menu))
@@ -131,6 +153,10 @@ function canAccessRoot(path: string, user: User | null = state.user): boolean {
 
 function firstAuthorizedPage(user: User | null = state.user): string {
   return ROOT_PAGE_RULES.find((item) => canAccessRoot(item.path, user))?.path || '/pages/profile/index';
+}
+
+function requiresInitialPasswordSetup(user: User | null = state.user): boolean {
+  return user?.initialPasswordSetupRequired === true;
 }
 
 function persistUser(user: User | null) {
@@ -190,6 +216,10 @@ export function useAuthStore() {
   }
 
   function navigateAfterLogin() {
+    if (requiresInitialPasswordSetup()) {
+      uni.reLaunch({ url: '/pages/initial-password/index' });
+      return;
+    }
     const resumeUrl = takeResumeUrl();
     if (resumeUrl) {
       uni.reLaunch({ url: resumeUrl });
@@ -205,6 +235,10 @@ export function useAuthStore() {
     }
     try {
       if (!state.user) await loadUser();
+      if (requiresInitialPasswordSetup()) {
+        uni.reLaunch({ url: '/pages/initial-password/index' });
+        return false;
+      }
       if (canAccessRoot(path)) return true;
       uni.showToast({ title: '当前账号无此功能权限', icon: 'none' });
       const target = firstAuthorizedPage();
@@ -248,6 +282,7 @@ export function useAuthStore() {
     clearLocalSession,
     canAccessRoot,
     firstAuthorizedPage,
+    requiresInitialPasswordSetup,
     navigateAfterLogin,
     rememberResumeUrl,
     ensureRootAccess,
@@ -262,5 +297,6 @@ export {
   ROOT_PAGE_RULES,
   canAccessRoot,
   firstAuthorizedPage,
+  requiresInitialPasswordSetup,
   hasProjectPermission
 };

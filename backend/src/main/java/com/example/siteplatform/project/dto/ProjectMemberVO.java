@@ -4,6 +4,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import com.example.siteplatform.system.entity.SystemRole;
 
 @Data
 public class ProjectMemberVO {
@@ -15,6 +16,7 @@ public class ProjectMemberVO {
     private String phone;
     private String email;
     private Integer status;
+    private List<SystemRole> projectRoles;
     private String projectRoleCode;
     private Long permissionTemplateId;
     private String accessStatus;

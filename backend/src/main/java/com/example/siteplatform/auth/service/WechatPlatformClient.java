@@ -17,6 +17,7 @@ import java.net.URI;
 import java.security.MessageDigest;
 import java.util.Map;
 import java.util.Base64;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.Arrays;
 
@@ -87,8 +88,12 @@ public class WechatPlatformClient {
 
     public String getPhoneNumber(String phoneCode, String mockPhone) {
         if (developmentMock()) {
-            if (!StringUtils.hasText(mockPhone)) throw new BusinessException("开发模式请填写手机号");
-            return mockPhone.trim();
+            if (StringUtils.hasText(mockPhone)) return mockPhone.trim();
+            if (!StringUtils.hasText(phoneCode)) throw new BusinessException("手机号授权 code 不能为空");
+            // 本地/测试环境没有真实微信手机号接口。用授权 code 生成稳定的 11 位
+            // 测试手机号，使快捷注册仍遵循“服务端由授权结果决定账号”的流程。
+            long suffix = Long.parseUnsignedLong(digest(phoneCode).substring(0, 15), 16) % 10_000_000_000L;
+            return "1" + String.format(Locale.ROOT, "%010d", suffix);
         }
         if (!StringUtils.hasText(phoneCode)) throw new BusinessException("手机号授权 code 不能为空");
         String body = restClient.post()

@@ -210,6 +210,9 @@ public class WebWechatQrLoginService {
         Long userId = Long.valueOf(exchangedUser);
         SysUser user = authService.getUserInfo(userId);
         if (!Integer.valueOf(1).equals(user.getStatus())) throw BusinessException.forbidden("账号已被禁用");
+        if (authService.requiresInitialPasswordSetup(user)) {
+            throw BusinessException.forbidden("请先在小程序使用微信登录并完成初始密码设置");
+        }
         String token = authService.issueToken(user);
         return new LoginResponse(token, user.getId(), user.getUsername(), user.getRealName());
     }

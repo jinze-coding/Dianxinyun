@@ -1,6 +1,7 @@
 package com.example.siteplatform.file.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 import java.time.LocalDateTime;
 
@@ -13,6 +14,7 @@ public class FileResource {
     private Long projectId;
     private String fileName;
     private String fileType;
+    @JsonIgnore
     private String filePath;
     private Long fileSize;
     private String businessType;
@@ -20,6 +22,7 @@ public class FileResource {
     private Long uploaderId;
 
     private String storageProvider;
+    @JsonIgnore
     private String storageKey;
     private String originalFileName;
     private String mimeType;

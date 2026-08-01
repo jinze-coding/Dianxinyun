@@ -78,11 +78,13 @@ public class InspectionController {
             @RequestParam(required = false) Long electricBoxId,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String month,
+            @RequestParam(required = false) String checkDate,
             @RequestParam(required = false) String reviewScope,
             @RequestParam(required = false) Boolean reviewOverdue,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
-        return Result.success(inspectionService.listRecords(projectId, electricBoxId, status, month, reviewScope, reviewOverdue, currentUser));
+        return Result.success(inspectionService.listRecords(
+                projectId, electricBoxId, status, month, checkDate, reviewScope, reviewOverdue, currentUser));
     }
 
     @Operation(summary = "获取今日待巡检任务")
@@ -121,15 +123,16 @@ public class InspectionController {
         return Result.success(inspectionService.submitRecord(id, currentUser));
     }
 
-    @Operation(summary = "获取月度巡检汇总")
+    @Operation(summary = "获取月度或单日巡检汇总")
     @GetMapping("/records/summary")
     public Result<InspectionMonthSummaryVO> getMonthSummary(
             @RequestParam Long projectId,
             @RequestParam(required = false) Long boxId,
             @RequestParam(required = false) String month,
+            @RequestParam(required = false) String checkDate,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
-        return Result.success(inspectionService.getMonthSummary(projectId, boxId, month, currentUser));
+        return Result.success(inspectionService.getMonthSummary(projectId, boxId, month, checkDate, currentUser));
     }
 
     @Operation(summary = "导出月度巡检记录")

@@ -16,6 +16,7 @@ public class RegistrationApplicationVO {
     private List<Long> desiredProjectIds;
     private String desiredProjectText;
     private String sourceType;
+    private String registrationMode;
     private String phoneVerificationType;
     private String status;
     private Long createdUserId;

@@ -1,5 +1,7 @@
 package com.example.siteplatform.file.storage;
 
+import com.example.siteplatform.file.security.FileUploadPolicy;
+
 import java.io.InputStream;
 import java.security.MessageDigest;
 import java.util.HexFormat;
@@ -9,9 +11,7 @@ final class StorageSupport {
     }
 
     static String extension(String fileName) {
-        if (fileName == null) return "";
-        int index = fileName.lastIndexOf('.');
-        return index < 0 ? "" : fileName.substring(index + 1).toLowerCase();
+        return FileUploadPolicy.extensionOf(fileName);
     }
 
     static String sha256(InputStream inputStream) throws Exception {

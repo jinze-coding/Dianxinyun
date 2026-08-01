@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { onShow } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
 import AppTabBar from '@/components/AppTabBar.vue';
+import WorkspaceAreaSheet from '@/components/workspace/WorkspaceAreaSheet.vue';
 import WorkspaceAreaSwitcher from '@/components/workspace/WorkspaceAreaSwitcher.vue';
 import WorkspaceMetricStrip, { type WorkspaceMetric } from '@/components/workspace/WorkspaceMetricStrip.vue';
 import WorkspaceStatusPill from '@/components/workspace/WorkspaceStatusPill.vue';
@@ -36,6 +37,7 @@ const loadingMore = ref(false);
 const refreshing = ref(false);
 const errorMessage = ref('');
 const sheetMode = ref<SheetMode>(null);
+const areaSheetOpen = ref(false);
 const { scrollStyle } = usePageScrollHeight({ bottomRpx: 124, minHeight: 320, includeSafeBottom: false });
 
 const projects = computed(() => projectStore.state.projects);
@@ -161,7 +163,14 @@ function openDetail(document: ProjectDocument) { navigateTo(`/pages/documents/de
     <scroll-view class="workspace-scroll" scroll-y enable-flex :style="scrollStyle" lower-threshold="120"
       refresher-enabled :refresher-triggered="refreshing" @refresherrefresh="refreshByPull" @scrolltolower="loadMore">
       <view class="workspace-content">
-        <WorkspaceAreaSwitcher :project="currentProject" :projects="projects" :accent="ACCENT" :tint="TINT" @select="selectProject" />
+        <WorkspaceAreaSwitcher
+          :project="currentProject"
+          :projects="projects"
+          :accent="ACCENT"
+          :tint="TINT"
+          :open="areaSheetOpen"
+          @open="areaSheetOpen = true"
+        />
 
         <view v-if="loading && !summary" class="state-panel"><text class="state-title">正在加载工程资料</text></view>
         <view v-else-if="errorMessage" class="state-panel"><text class="state-title">资料加载失败</text><text class="state-desc">{{ errorMessage }}</text><button class="retry-button" @tap="refreshAll">重新加载</button></view>
@@ -205,7 +214,16 @@ function openDetail(document: ProjectDocument) { navigateTo(`/pages/documents/de
         </template>
       </view>
     </scroll-view>
-    <AppTabBar active="documents" />
+    <WorkspaceAreaSheet
+      :open="areaSheetOpen"
+      :project="currentProject"
+      :projects="projects"
+      :accent="ACCENT"
+      :tint="TINT"
+      @close="areaSheetOpen = false"
+      @select="selectProject"
+    />
+    <AppTabBar v-if="!areaSheetOpen" active="documents" />
 
     <view v-if="sheetMode" class="form-overlay" @tap="sheetMode = null">
       <view class="form-sheet compact-sheet" @tap.stop>

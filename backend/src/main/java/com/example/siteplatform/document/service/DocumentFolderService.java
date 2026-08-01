@@ -58,7 +58,7 @@ public class DocumentFolderService {
         folder.setDeleted(0);
         folder.setCreateTime(LocalDateTime.now());
         folder.setUpdateTime(LocalDateTime.now());
-        folderMapper.insert(folder);
+        requireSingleWrite(folderMapper.insert(folder), "资料目录新增");
         return toVO(folder);
     }
 
@@ -70,7 +70,7 @@ public class DocumentFolderService {
         assertNameAvailable(folder.getProjectId(), folder.getParentId(), name, id);
         folder.setFolderName(name);
         folder.setUpdateTime(LocalDateTime.now());
-        folderMapper.updateById(folder);
+        requireSingleWrite(folderMapper.updateById(folder), "资料目录编辑");
         return toVO(folder);
     }
 
@@ -81,7 +81,7 @@ public class DocumentFolderService {
         if (folderMapper.countAllChildren(id) > 0 || documentMapper.countAllByFolder(id) > 0) {
             throw new BusinessException("目录非空，不能删除");
         }
-        folderMapper.deleteById(id);
+        requireSingleWrite(folderMapper.deleteById(id), "资料目录删除");
     }
 
     public void validateFolder(Long projectId, Long folderId) {
@@ -121,6 +121,12 @@ public class DocumentFolderService {
         if (!permissionService.isPlatformAdmin(currentUser.getId())
                 && !permissionService.canManageProject(currentUser.getId(), projectId)) {
             throw BusinessException.forbidden("仅项目管理员可管理资料目录");
+        }
+    }
+
+    private void requireSingleWrite(int affectedRows, String operation) {
+        if (affectedRows != 1) {
+            throw BusinessException.of(409, operation + "未生效，请刷新后重试");
         }
     }
 

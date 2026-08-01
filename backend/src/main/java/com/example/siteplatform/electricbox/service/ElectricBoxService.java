@@ -17,6 +17,7 @@ import com.example.siteplatform.electricbox.vo.ElectricBoxImportResultVO;
 import com.example.siteplatform.electricbox.vo.ElectricBoxImportRowVO;
 import com.example.siteplatform.electricbox.vo.ElectricBoxQrLogVO;
 import com.example.siteplatform.electricbox.vo.ElectricBoxVO;
+import com.example.siteplatform.file.security.FileUploadPolicy;
 import com.example.siteplatform.electricbox.vo.ElectricBoxUnifiedCodeVO;
 import com.example.siteplatform.inspection.entity.InspectionRecord;
 import com.example.siteplatform.inspection.entity.InspectionRectification;
@@ -39,6 +40,8 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -69,8 +72,13 @@ import java.util.UUID;
 
 @Service
 public class ElectricBoxService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(ElectricBoxService.class);
 
     private static final int BOX_CODE_MAX_LENGTH = 64;
+    private static final int BOX_NAME_MAX_LENGTH = 100;
+    private static final int INSTALL_LOCATION_MAX_LENGTH = 200;
+    private static final int ASSIGNEE_NAME_MAX_LENGTH = 50;
+    private static final int REMARK_MAX_LENGTH = 500;
     private static final String STATUS_ACTIVE = "ACTIVE";
     private static final String STATUS_INACTIVE = "INACTIVE";
     private static final String STATUS_REMOVED = "REMOVED";
@@ -123,6 +131,10 @@ public class ElectricBoxService {
     private String publicFallbackUrl;
 
     public List<ElectricBoxVO> list(Long projectId, String status, SysUser currentUser) {
+        return list(projectId, status, null, currentUser);
+    }
+
+    public List<ElectricBoxVO> list(Long projectId, String status, String keyword, SysUser currentUser) {
         if (projectId != null) {
             projectPermissionService.checkProjectPermission(currentUser.getId(), projectId);
             projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
@@ -140,6 +152,17 @@ public class ElectricBoxService {
         }
         if (StringUtils.hasText(status)) {
             wrapper.eq(ElectricBox::getStatus, trimToNull(status));
+        }
+        String normalizedKeyword = trimToNull(keyword);
+        if (normalizedKeyword != null) {
+            wrapper.and(condition -> condition
+                    .like(ElectricBox::getBoxCode, normalizedKeyword)
+                    .or()
+                    .like(ElectricBox::getBoxName, normalizedKeyword)
+                    .or()
+                    .like(ElectricBox::getInstallLocation, normalizedKeyword)
+                    .or()
+                    .like(ElectricBox::getResponsibleElectricianName, normalizedKeyword));
         }
         if (projectId != null && !projectPermissionService.hasInspectionPermission(currentUser.getId(), projectId, InspectionPermissionCodes.BOX_VIEW)) {
             wrapper.eq(ElectricBox::getResponsibleElectricianId, currentUser.getId());
@@ -181,12 +204,14 @@ public class ElectricBoxService {
         normalizeRequest(request);
         validateRequest(request);
         requireManagePermission(currentUser, request.getProjectId());
+        resolveAssigneeNames(request);
         ensureUnique(request.getProjectId(), request.getBoxCode(), request.getQrCode(), null);
 
         ElectricBox box = new ElectricBox();
-        BeanUtils.copyProperties(request, box);
-        box.setQrStatus(StringUtils.hasText(request.getQrStatus()) ? request.getQrStatus() : QR_BOUND);
-        box.setStatus(StringUtils.hasText(request.getStatus()) ? request.getStatus() : STATUS_ACTIVE);
+        applyEditableFields(request, box);
+        box.setProjectId(request.getProjectId());
+        box.setQrStatus(QR_BOUND);
+        box.setStatus(STATUS_ACTIVE);
         box.setPublicAccessEnabled(request.getPublicAccessEnabled() == null ? 1 : request.getPublicAccessEnabled());
         if (!StringUtils.hasText(box.getQrCode())) {
             box.setQrCode(generateInternalQrCode());
@@ -195,7 +220,7 @@ public class ElectricBoxService {
         box.setDeleted(0);
         box.setCreateTime(LocalDateTime.now());
         box.setUpdateTime(LocalDateTime.now());
-        electricBoxMapper.insert(box);
+        requireSingleWrite(electricBoxMapper.insert(box), "电箱新增");
         ensureBoxAssignees(box);
         recordQrLog(box, ACTION_GENERATE, QR_TYPE_INTERNAL, null, box.getQrCode(), currentUser, "新增电箱生成或绑定内部二维码");
         recordQrLog(box, ACTION_GENERATE, QR_TYPE_PUBLIC, null, box.getPublicCode(), currentUser, "新增电箱生成公开只读码");
@@ -206,33 +231,44 @@ public class ElectricBoxService {
     public ElectricBoxVO update(Long id, ElectricBoxRequest request, SysUser currentUser) {
         ElectricBox existing = requireBox(id);
         requireManagePermission(currentUser, existing.getProjectId());
+        if (request == null) {
+            throw new BusinessException("电箱信息不能为空");
+        }
         normalizeRequest(request);
-        Long projectId = request.getProjectId() != null ? request.getProjectId() : existing.getProjectId();
-        if (!Objects.equals(projectId, existing.getProjectId())) {
-            requireManagePermission(currentUser, projectId);
+        if (request.getProjectId() != null && !Objects.equals(request.getProjectId(), existing.getProjectId())) {
+            throw new BusinessException("电箱所属项目创建后不可变更");
         }
-        String boxCode = StringUtils.hasText(request.getBoxCode()) ? request.getBoxCode() : existing.getBoxCode();
-        String qrCode = StringUtils.hasText(request.getQrCode()) ? request.getQrCode() : existing.getQrCode();
-        Integer publicAccessEnabled = request.getPublicAccessEnabled() != null
-                ? request.getPublicAccessEnabled()
-                : existing.getPublicAccessEnabled();
-        validateBoxCode(boxCode);
-        if (!StringUtils.hasText(request.getInstallLocation()) && !StringUtils.hasText(existing.getInstallLocation())) {
-            throw new BusinessException("安装位置不能为空");
+        request.setProjectId(existing.getProjectId());
+        request.setBoxCode(StringUtils.hasText(request.getBoxCode()) ? request.getBoxCode() : existing.getBoxCode());
+        request.setInstallLocation(StringUtils.hasText(request.getInstallLocation())
+                ? request.getInstallLocation() : existing.getInstallLocation());
+        request.setQrCode(StringUtils.hasText(request.getQrCode()) ? request.getQrCode() : existing.getQrCode());
+        request.setPublicAccessEnabled(request.getPublicAccessEnabled() == null
+                ? existing.getPublicAccessEnabled() : request.getPublicAccessEnabled());
+        validateRequest(request);
+        resolveAssigneeNames(request);
+        if (!Objects.equals(request.getQrCode(), existing.getQrCode())) {
+            requireQrManagePermission(currentUser, existing.getProjectId());
         }
-        ensureUnique(projectId, boxCode, qrCode, id);
+        if (!Objects.equals(request.getPublicAccessEnabled(), existing.getPublicAccessEnabled())) {
+            requirePublicAccessPermission(currentUser, existing.getProjectId());
+            if (STATUS_REMOVED.equals(existing.getStatus())
+                    && Integer.valueOf(1).equals(request.getPublicAccessEnabled())) {
+                throw new BusinessException("已拆除电箱不可启用公开扫码");
+            }
+        }
+        ensureUnique(existing.getProjectId(), request.getBoxCode(), request.getQrCode(), id);
 
         String oldQrCode = existing.getQrCode();
-        BeanUtils.copyProperties(request, existing, "id", "publicCode", "deleted", "createTime");
-        existing.setProjectId(projectId);
-        existing.setBoxCode(boxCode);
-        existing.setQrCode(qrCode);
-        existing.setPublicAccessEnabled(publicAccessEnabled == null ? 1 : publicAccessEnabled);
+        applyEditableFields(request, existing);
+        existing.setPublicAccessEnabled(request.getPublicAccessEnabled());
         existing.setUpdateTime(LocalDateTime.now());
-        electricBoxMapper.updateById(existing);
+        requireSingleWrite(electricBoxMapper.updateById(existing), "电箱编辑");
         ensureBoxAssignees(existing);
-        if (StringUtils.hasText(qrCode) && StringUtils.hasText(oldQrCode) && !Objects.equals(qrCode, oldQrCode)) {
-            recordQrLog(existing, ACTION_REBIND, QR_TYPE_INTERNAL, oldQrCode, qrCode, currentUser, "编辑电箱二维码编码");
+        if (StringUtils.hasText(request.getQrCode()) && StringUtils.hasText(oldQrCode)
+                && !Objects.equals(request.getQrCode(), oldQrCode)) {
+            recordQrLog(existing, ACTION_REBIND, QR_TYPE_INTERNAL, oldQrCode,
+                    request.getQrCode(), currentUser, "编辑电箱二维码编码");
         }
         return toVO(existing);
     }
@@ -240,12 +276,12 @@ public class ElectricBoxService {
     @Transactional
     public ElectricBoxVO disable(Long id, ElectricBoxLifecycleRequest request, SysUser currentUser) {
         ElectricBox box = requireBox(id);
-        requireQrManagePermission(currentUser, box.getProjectId());
+        requireManagePermission(currentUser, box.getProjectId());
         String oldQrCode = box.getQrCode();
         box.setStatus(STATUS_INACTIVE);
         box.setQrStatus(QR_DISABLED);
         box.setUpdateTime(LocalDateTime.now());
-        electricBoxMapper.updateById(box);
+        requireSingleWrite(electricBoxMapper.updateById(box), "电箱停用");
         recordQrLog(box, ACTION_DISABLE, QR_TYPE_INTERNAL, oldQrCode, oldQrCode, currentUser, resolveReason(request, "停用电箱和内部二维码"));
         return toVO(box);
     }
@@ -253,7 +289,7 @@ public class ElectricBoxService {
     @Transactional
     public ElectricBoxVO remove(Long id, ElectricBoxLifecycleRequest request, SysUser currentUser) {
         ElectricBox box = requireBox(id);
-        requireQrManagePermission(currentUser, box.getProjectId());
+        requireManagePermission(currentUser, box.getProjectId());
         int pendingRectificationCount = countOpenRectifications(box.getId());
         if (pendingRectificationCount > 0) {
             throw new BusinessException("该电箱存在未闭环整改，需先完成整改后再拆除");
@@ -264,7 +300,7 @@ public class ElectricBoxService {
         box.setQrStatus(QR_DISABLED);
         box.setPublicAccessEnabled(0);
         box.setUpdateTime(LocalDateTime.now());
-        electricBoxMapper.updateById(box);
+        requireSingleWrite(electricBoxMapper.updateById(box), "电箱拆除");
         String reason = resolveReason(request, "拆除电箱，禁用内部巡检码并关闭公开扫码");
         recordQrLog(box, ACTION_REMOVE, QR_TYPE_INTERNAL, oldQrCode, oldQrCode, currentUser, reason);
         recordQrLog(box, ACTION_REMOVE, QR_TYPE_PUBLIC, oldPublicCode, oldPublicCode, currentUser, reason);
@@ -274,7 +310,7 @@ public class ElectricBoxService {
     @Transactional
     public ElectricBoxVO rebindQrCode(Long id, ElectricBoxQrRebindRequest request, SysUser currentUser) {
         ElectricBox box = requireBox(id);
-        requirePublicAccessPermission(currentUser, box.getProjectId());
+        requireQrManagePermission(currentUser, box.getProjectId());
         if (STATUS_REMOVED.equals(box.getStatus())) {
             throw new BusinessException("已拆除电箱不可换绑二维码");
         }
@@ -291,7 +327,7 @@ public class ElectricBoxService {
         box.setQrCode(newQrCode);
         box.setQrStatus(QR_BOUND);
         box.setUpdateTime(LocalDateTime.now());
-        electricBoxMapper.updateById(box);
+        requireSingleWrite(electricBoxMapper.updateById(box), "二维码换绑");
         recordQrLog(box, ACTION_REBIND, QR_TYPE_INTERNAL, oldQrCode, newQrCode, currentUser, request == null ? null : request.getReason());
         return toVO(box);
     }
@@ -365,7 +401,7 @@ public class ElectricBoxService {
         String oldPublicCode = box.getPublicCode();
         box.setPublicCode(generatePublicCode());
         box.setUpdateTime(LocalDateTime.now());
-        electricBoxMapper.updateById(box);
+        requireSingleWrite(electricBoxMapper.updateById(box), "统一码更换");
         recordQrLog(box, ACTION_REBIND, QR_TYPE_UNIFIED, oldPublicCode, box.getPublicCode(), currentUser,
                 request == null ? null : request.getReason());
         return getUnifiedCode(id, currentUser);
@@ -374,7 +410,7 @@ public class ElectricBoxService {
     @Transactional
     public List<ElectricBoxQrLogVO> recordPrintLog(Long id, ElectricBoxQrPrintLogRequest request, SysUser currentUser) {
         ElectricBox box = requireBox(id);
-        requireManagePermission(currentUser, box.getProjectId());
+        requireQrManagePermission(currentUser, box.getProjectId());
         List<String> qrTypes = normalizeQrTypes(request == null ? null : request.getQrTypes());
         List<ElectricBoxQrLogVO> result = new ArrayList<>();
         for (String qrType : qrTypes) {
@@ -388,8 +424,7 @@ public class ElectricBoxService {
 
     public List<ElectricBoxQrLogVO> listQrLogs(Long id, SysUser currentUser) {
         ElectricBox box = requireBox(id);
-        projectPermissionService.checkProjectPermission(currentUser.getId(), box.getProjectId());
-        requireBoxViewPermission(box, currentUser);
+        requireQrManagePermission(currentUser, box.getProjectId());
         return qrLogMapper.selectList(new LambdaQueryWrapper<ElectricBoxQrLog>()
                         .eq(ElectricBoxQrLog::getElectricBoxId, id)
                         .orderByDesc(ElectricBoxQrLog::getCreateTime)
@@ -402,13 +437,13 @@ public class ElectricBoxService {
     @Transactional
     public ElectricBoxVO setPublicAccess(Long id, boolean enabled, SysUser currentUser) {
         ElectricBox box = requireBox(id);
-        requireManagePermission(currentUser, box.getProjectId());
+        requirePublicAccessPermission(currentUser, box.getProjectId());
         if (STATUS_REMOVED.equals(box.getStatus()) && enabled) {
             throw new BusinessException("已拆除电箱不可启用公开扫码");
         }
         box.setPublicAccessEnabled(enabled ? 1 : 0);
         box.setUpdateTime(LocalDateTime.now());
-        electricBoxMapper.updateById(box);
+        requireSingleWrite(electricBoxMapper.updateById(box), "公开扫码状态更新");
         return toVO(box);
     }
 
@@ -438,7 +473,8 @@ public class ElectricBoxService {
             workbook.write(out);
             return out.toByteArray();
         } catch (IOException e) {
-            throw new BusinessException("导入模板生成失败：" + e.getMessage());
+            LOGGER.error("Failed to generate electric-box import template", e);
+            throw new BusinessException("导入模板生成失败");
         }
     }
 
@@ -451,6 +487,7 @@ public class ElectricBoxService {
         if (file == null || file.isEmpty()) {
             throw new BusinessException("导入文件不能为空");
         }
+        FileUploadPolicy.validateElectricBoxImport(file);
         List<ImportRow> rows = parseImportRows(file);
         ElectricBoxImportResultVO result = validateImportRows(projectId, rows);
         if (dryRun || result.getErrorRows() > 0) {
@@ -520,7 +557,8 @@ public class ElectricBoxService {
             svg.append("</svg>");
             return svg.toString();
         } catch (WriterException e) {
-            throw new BusinessException("二维码生成失败：" + e.getMessage());
+            LOGGER.error("Failed to generate electric-box QR SVG", e);
+            throw new BusinessException("二维码生成失败");
         }
     }
 
@@ -543,7 +581,20 @@ public class ElectricBoxService {
         if (!StringUtils.hasText(request.getInstallLocation())) {
             throw new BusinessException("安装位置不能为空");
         }
+        validateLength(request.getBoxName(), BOX_NAME_MAX_LENGTH, "电箱名称");
+        validateLength(request.getInstallLocation(), INSTALL_LOCATION_MAX_LENGTH, "安装位置");
+        if (request.getResponsibleElectricianId() == null) {
+            validateLength(request.getResponsibleElectricianName(), ASSIGNEE_NAME_MAX_LENGTH, "负责电工姓名");
+        }
+        if (request.getSafetyManagerId() == null) {
+            validateLength(request.getSafetyManagerName(), ASSIGNEE_NAME_MAX_LENGTH, "安全负责人姓名");
+        }
+        validateLength(request.getRemark(), REMARK_MAX_LENGTH, "备注");
         validateQrCode(request.getQrCode());
+        if (request.getPublicAccessEnabled() != null
+                && !Set.of(0, 1).contains(request.getPublicAccessEnabled())) {
+            throw new BusinessException("公开扫码状态只能为0或1");
+        }
     }
 
     private void normalizeRequest(ElectricBoxRequest request) {
@@ -573,6 +624,52 @@ public class ElectricBoxService {
     private void validateQrCode(String qrCode) {
         if (StringUtils.hasText(qrCode) && qrCode.length() > 100) {
             throw new BusinessException("二维码编码不能超过100个字符");
+        }
+    }
+
+    private void validateLength(String value, int maxLength, String fieldName) {
+        if (value != null && value.length() > maxLength) {
+            throw new BusinessException(fieldName + "不能超过" + maxLength + "个字符");
+        }
+    }
+
+    private void applyEditableFields(ElectricBoxRequest request, ElectricBox box) {
+        box.setBoxCode(request.getBoxCode());
+        box.setBoxName(request.getBoxName());
+        box.setInstallLocation(request.getInstallLocation());
+        box.setResponsibleElectricianId(request.getResponsibleElectricianId());
+        box.setResponsibleElectricianName(request.getResponsibleElectricianName());
+        box.setSafetyManagerId(request.getSafetyManagerId());
+        box.setSafetyManagerName(request.getSafetyManagerName());
+        box.setQrCode(request.getQrCode());
+        box.setRemark(request.getRemark());
+    }
+
+    private void resolveAssigneeNames(ElectricBoxRequest request) {
+        request.setResponsibleElectricianName(resolveAssigneeName(
+                request.getResponsibleElectricianId(), request.getResponsibleElectricianName(), "负责电工"));
+        request.setSafetyManagerName(resolveAssigneeName(
+                request.getSafetyManagerId(), request.getSafetyManagerName(), "安全负责人"));
+    }
+
+    private String resolveAssigneeName(Long userId, String fallbackName, String fieldName) {
+        if (userId == null) {
+            validateLength(fallbackName, ASSIGNEE_NAME_MAX_LENGTH, fieldName + "姓名");
+            return fallbackName;
+        }
+        SysUser user = sysUserMapper.selectById(userId);
+        if (user == null || !Integer.valueOf(1).equals(user.getStatus())) {
+            throw new BusinessException(fieldName + "必须选择有效系统账号");
+        }
+        String resolvedName = trimToNull(StringUtils.hasText(user.getRealName())
+                ? user.getRealName() : user.getUsername());
+        validateLength(resolvedName, ASSIGNEE_NAME_MAX_LENGTH, fieldName + "姓名");
+        return resolvedName;
+    }
+
+    private void requireSingleWrite(int affectedRows, String operation) {
+        if (affectedRows != 1) {
+            throw BusinessException.of(409, operation + "未生效，请刷新后重试");
         }
     }
 
@@ -746,7 +843,7 @@ public class ElectricBoxService {
         log.setOperatorUsername(currentUser == null ? null : currentUser.getUsername());
         log.setReason(trimToNull(reason));
         log.setCreateTime(LocalDateTime.now());
-        qrLogMapper.insert(log);
+        requireSingleWrite(qrLogMapper.insert(log), "二维码操作日志写入");
         return log;
     }
 
@@ -797,6 +894,11 @@ public class ElectricBoxService {
             if (!StringUtils.hasText(row.installLocation)) {
                 errors.add("安装位置不能为空");
             }
+            addLengthError(errors, row.boxName, BOX_NAME_MAX_LENGTH, "电箱名称");
+            addLengthError(errors, row.installLocation, INSTALL_LOCATION_MAX_LENGTH, "安装位置");
+            addLengthError(errors, row.responsibleElectricianName, ASSIGNEE_NAME_MAX_LENGTH, "负责电工姓名");
+            addLengthError(errors, row.safetyManagerName, ASSIGNEE_NAME_MAX_LENGTH, "安全负责人姓名");
+            addLengthError(errors, row.remark, REMARK_MAX_LENGTH, "备注");
             if (StringUtils.hasText(row.qrCode)) {
                 if (row.qrCode.length() > 100) {
                     errors.add("二维码编码不能超过100个字符");
@@ -853,6 +955,7 @@ public class ElectricBoxService {
         if (StringUtils.hasText(username)) {
             SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
                     .eq(SysUser::getUsername, username)
+                    .eq(SysUser::getStatus, 1)
                     .last("LIMIT 1"));
             if (user != null) {
                 return user;
@@ -861,9 +964,16 @@ public class ElectricBoxService {
         if (StringUtils.hasText(realName)) {
             return sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
                     .eq(SysUser::getRealName, realName)
+                    .eq(SysUser::getStatus, 1)
                     .last("LIMIT 1"));
         }
         return null;
+    }
+
+    private void addLengthError(List<String> errors, String value, int maxLength, String fieldName) {
+        if (value != null && value.length() > maxLength) {
+            errors.add(fieldName + "不能超过" + maxLength + "个字符");
+        }
     }
 
     private List<ImportRow> parseImportRows(MultipartFile file) {
@@ -897,7 +1007,8 @@ public class ElectricBoxService {
             }
             return rows;
         } catch (IOException e) {
-            throw new BusinessException("导入文件读取失败：" + e.getMessage());
+            LOGGER.warn("Failed to parse electric-box import workbook", e);
+            throw new BusinessException("导入文件读取失败，请使用系统下载的模板");
         }
     }
 

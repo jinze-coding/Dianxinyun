@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -48,6 +49,7 @@ class InspectionPermissionTemplateSessionInvalidationTest {
         ReflectionTestUtils.setField(service, "userProjectMapper", userProjectMapper);
         ReflectionTestUtils.setField(service, "operationLogMapper", operationLogMapper);
         ReflectionTestUtils.setField(service, "authService", authService);
+        lenient().when(templateMapper.updateById(any(InspectionPermissionTemplate.class))).thenReturn(1);
         operator = new SysUser();
         operator.setId(1L);
         operator.setUsername("operator");
@@ -68,6 +70,8 @@ class InspectionPermissionTemplateSessionInvalidationTest {
         verify(projectPermissionService).clearUserProjectsCache(3L);
         verify(authService).logout(2L);
         verify(authService).logout(3L);
+        verify(authService).repeatLogoutAfterCommit(2L);
+        verify(authService).repeatLogoutAfterCommit(3L);
         verify(authService, never()).logout(4L);
         verify(operationLogMapper).insert(argThat(log ->
                 "UPDATE_PERMISSION_TEMPLATE".equals(log.getOperationType())
@@ -89,6 +93,7 @@ class InspectionPermissionTemplateSessionInvalidationTest {
 
         verify(projectPermissionService).clearUserProjectsCache(2L);
         verify(authService).logout(2L);
+        verify(authService).repeatLogoutAfterCommit(2L);
         verify(operationLogMapper).insert(argThat(log ->
                 "CHANGE_PERMISSION_TEMPLATE_STATUS".equals(log.getOperationType())
                         && Long.valueOf(88L).equals(log.getBusinessId())));
@@ -155,6 +160,35 @@ class InspectionPermissionTemplateSessionInvalidationTest {
         verify(operationLogMapper).insert(argThat(log ->
                 "UPDATE_PERMISSION_TEMPLATE".equals(log.getOperationType())
                         && Long.valueOf(88L).equals(log.getBusinessId())));
+    }
+
+    @Test
+    void templateUpdateFailureReturnsConflictBeforeAuditAndSessionInvalidation() {
+        InspectionPermissionTemplate template = template(88L);
+        when(templateMapper.selectById(88L)).thenReturn(template);
+        when(templateMapper.selectByTemplateCode("CUSTOM_TEMPLATE")).thenReturn(template);
+        when(userProjectMapper.selectActiveUserIdsByInspectionPermissionTemplateId(88L))
+                .thenReturn(List.of(2L));
+        when(templateMapper.updateById(template)).thenReturn(0);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.updateTemplate(88L, request(), operator));
+
+        org.junit.jupiter.api.Assertions.assertEquals(409, exception.getCode());
+        verify(operationLogMapper, never()).insert(any());
+        verifyNoMoreInteractions(authService);
+    }
+
+    @Test
+    void templateInsertFailureReturnsConflictBeforeSuccessAudit() {
+        when(templateMapper.insert(any(InspectionPermissionTemplate.class))).thenReturn(0);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.createTemplate(request(), operator));
+
+        org.junit.jupiter.api.Assertions.assertEquals(409, exception.getCode());
+        verify(operationLogMapper, never()).insert(any());
+        verifyNoMoreInteractions(authService);
     }
 
     private InspectionPermissionTemplate template(Long id) {

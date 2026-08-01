@@ -5,14 +5,19 @@ import AppNavBar from '@/components/AppNavBar.vue';
 import WorkspaceStatusPill from '@/components/workspace/WorkspaceStatusPill.vue';
 import {
   archiveProjectDocument, deleteProjectDocument, getDocumentFolders, getProjectDocumentDetail,
-  unarchiveProjectDocument, updateProjectDocument, uploadProjectDocumentVersion
+  recordProjectDocumentClientAction, unarchiveProjectDocument, updateProjectDocument, uploadProjectDocumentVersion
 } from '@/api/document';
 import { useAuthStore } from '@/stores/auth';
 import type { DocumentFolder, ProjectDocumentDetail, ProjectDocumentVersion } from '@/types';
-import { chooseMessageDocument, formatFileSize, openProjectDocument, saveProjectDocument, type LocalDocumentFile } from '@/utils/documentFile';
+import {
+  chooseMessageDocument, formatFileSize, isFileActionCancelled, openPreparedDocumentSaveMenu,
+  openProjectDocument, prepareProjectDocumentFile, saveProjectDocument, sharePreparedDocumentToWechat,
+  supportsDocumentSaveMenu, type LocalDocumentFile
+} from '@/utils/documentFile';
 import { getQueryNumber, showToast, switchTab } from '@/utils/navigation';
 
 type SheetMode = 'edit' | 'version' | null;
+interface FileActionTarget { version?: ProjectDocumentVersion }
 
 const authStore = useAuthStore();
 const documentId = ref(0);
@@ -20,8 +25,10 @@ const detail = ref<ProjectDocumentDetail | null>(null);
 const folders = ref<DocumentFolder[]>([]);
 const loading = ref(true);
 const submitting = ref(false);
+const fileActionPending = ref(false);
 const errorMessage = ref('');
 const sheetMode = ref<SheetMode>(null);
+const fileActionTarget = ref<FileActionTarget | null>(null);
 const versionFile = ref<LocalDocumentFile | null>(null);
 const versionNote = ref('');
 const editForm = reactive({ folderId: 0, title: '', documentNo: '', remark: '' });
@@ -32,6 +39,18 @@ const canManageDocument = computed(() => Boolean(document.value)
   && authStore.hasProjectPermission(document.value!.projectId, 'document.manage'));
 const canUploadVersion = computed(() => Boolean(document.value)
   && authStore.hasProjectPermission(document.value!.projectId, 'document.upload'));
+const fileActionVersion = computed(() => fileActionTarget.value?.version || document.value?.currentVersion);
+const fileActionFileName = computed(() => fileActionVersion.value?.fileName || document.value?.title || '项目资料');
+const fileActionVersionLabel = computed(() => fileActionVersion.value?.versionLabel || '当前版本');
+const fileActionMark = computed(() => (
+  fileActionVersion.value?.fileExtension
+  || fileActionFileName.value.split('.').pop()
+  || 'FILE'
+).replace(/^\./, '').slice(0, 5).toUpperCase());
+const fileActionSupportsSaveMenu = computed(() => supportsDocumentSaveMenu(
+  fileActionVersion.value?.fileName,
+  fileActionVersion.value?.fileExtension
+));
 
 onLoad(async (query) => {
   if (!await authStore.ensureRootAccess('/pages/documents/index')) return;
@@ -68,14 +87,115 @@ async function preview(version?: ProjectDocumentVersion) {
   catch (error) { showToast(error instanceof Error ? error.message : '资料预览失败'); }
 }
 
-async function download(version?: ProjectDocumentVersion) {
+function download(version?: ProjectDocumentVersion) {
+  if (!document.value || fileActionPending.value) return;
+  // #ifdef MP-WEIXIN
+  fileActionTarget.value = { version };
+  // #endif
+
+  // #ifdef H5
+  void downloadInBrowser(version);
+  // #endif
+}
+
+async function downloadInBrowser(version?: ProjectDocumentVersion) {
   if (!document.value) return;
   try {
     await saveProjectDocument(document.value, version);
-    showToast('文件已保存，可从微信文件中打开');
+    showToast('浏览器已处理文件下载');
   } catch {
     try { await openProjectDocument(document.value, version, false); }
     catch (error) { showToast(error instanceof Error ? error.message : '资料下载失败'); }
+  }
+}
+
+function closeFileActions() {
+  if (!fileActionPending.value) fileActionTarget.value = null;
+}
+
+function appendActivity(activity: ProjectDocumentDetail['activities'][number]) {
+  if (!detail.value) return;
+  detail.value.activities = [
+    activity,
+    ...detail.value.activities.filter((item) => item.id !== activity.id)
+  ];
+}
+
+async function syncFileAction(
+  action: 'OPEN_SAVE_MENU' | 'SHARE_WECHAT_FILE',
+  version?: ProjectDocumentVersion
+) {
+  if (!document.value) return;
+  try {
+    appendActivity(await recordProjectDocumentClientAction(document.value.id, action, version?.id));
+  } catch {
+    showToast('文件操作已完成，但操作记录同步失败');
+  }
+}
+
+async function prepareFileAction(version?: ProjectDocumentVersion) {
+  if (!document.value) throw new Error('资料不存在');
+  uni.showLoading({ title: '正在准备文件', mask: true });
+  try {
+    return await prepareProjectDocumentFile(document.value, version);
+  } finally {
+    uni.hideLoading();
+  }
+}
+
+async function shareFileToFriend(version = fileActionVersion.value) {
+  if (!document.value || fileActionPending.value) return;
+  fileActionPending.value = true;
+  try {
+    const prepared = await prepareFileAction(version);
+    fileActionTarget.value = null;
+    await sharePreparedDocumentToWechat(prepared);
+    await syncFileAction('SHARE_WECHAT_FILE', version);
+    showToast('文件已发送');
+  } catch (error) {
+    if (!isFileActionCancelled(error)) {
+      showToast(error instanceof Error ? error.message : '文件发送失败');
+    }
+  } finally {
+    fileActionPending.value = false;
+  }
+}
+
+function explainUnsupportedSave(version = fileActionVersion.value) {
+  const extension = version?.fileName?.split('.').pop()?.toUpperCase()
+    || version?.fileExtension?.replace(/^\./, '').toUpperCase()
+    || '当前';
+  fileActionTarget.value = null;
+  uni.showModal({
+    title: '该格式不支持保存菜单',
+    content: `${extension} 文件无法通过微信文档菜单保存到手机文件夹。可以保留原格式发送给微信好友，或在电脑端下载。`,
+    cancelText: '取消',
+    confirmText: '发送好友',
+    confirmColor: '#567B96',
+    success: (result) => {
+      if (result.confirm) void shareFileToFriend(version);
+    }
+  });
+}
+
+async function openSaveMenu(version = fileActionVersion.value) {
+  if (!document.value || fileActionPending.value) return;
+  if (!supportsDocumentSaveMenu(version?.fileName, version?.fileExtension)) {
+    explainUnsupportedSave(version);
+    return;
+  }
+  fileActionPending.value = true;
+  try {
+    const prepared = await prepareFileAction(version);
+    fileActionTarget.value = null;
+    await openPreparedDocumentSaveMenu(prepared);
+    await syncFileAction('OPEN_SAVE_MENU', version);
+  } catch (error) {
+    if (!isFileActionCancelled(error)) {
+      showToast(error instanceof Error ? error.message : '保存菜单打开失败');
+    }
+  } finally {
+    fileActionPending.value = false;
   }
 }
 
@@ -222,6 +342,44 @@ function remove() {
         </template>
       </view>
     </view>
+
+    <!-- #ifdef MP-WEIXIN -->
+    <view v-if="fileActionTarget" class="form-overlay" @tap="closeFileActions">
+      <view class="form-sheet file-action-sheet" @tap.stop>
+        <view class="sheet-handle"></view>
+        <view class="form-head">
+          <text class="form-title">文件操作</text>
+          <button class="form-close" :disabled="fileActionPending" @tap="closeFileActions">×</button>
+        </view>
+        <view class="file-action-target">
+          <view class="file-action-mark">{{ fileActionMark }}</view>
+          <view>
+            <text>{{ fileActionFileName }}</text>
+            <text>{{ fileActionVersionLabel }} · {{ formatFileSize(fileActionVersion?.fileSize) }}</text>
+          </view>
+        </view>
+        <view class="file-action-list">
+          <button :disabled="fileActionPending" @tap="openSaveMenu()">
+            <text class="file-action-icon save-icon">↓</text>
+            <view>
+              <text>打开保存菜单</text>
+              <text>{{ fileActionSupportsSaveMenu ? '在微信文档右上角选择保存或其他应用' : '该格式不支持，点击查看可用方式' }}</text>
+            </view>
+            <text class="row-arrow"></text>
+          </button>
+          <button :disabled="fileActionPending" @tap="shareFileToFriend()">
+            <text class="file-action-icon wechat-icon">微</text>
+            <view>
+              <text>发送给微信好友</text>
+              <text>保留原始文件名和文件格式</text>
+            </view>
+            <text class="row-arrow"></text>
+          </button>
+        </view>
+        <button class="file-action-cancel" :disabled="fileActionPending" @tap="closeFileActions">取消</button>
+      </view>
+    </view>
+    <!-- #endif -->
   </view>
 </template>
 
@@ -292,5 +450,26 @@ function remove() {
 .version-picker view text:first-child { color: #34495b; font-size: 23rpx; font-weight: 700; }
 .version-picker view text:last-child { margin-top: 6rpx; color: #8a96a3; font-size: 19rpx; }
 .version-picker.selected { border-style: solid; background: #edf4f7; }
+.file-action-sheet { padding-bottom: calc(22rpx + env(safe-area-inset-bottom)); }
+.file-action-target { display: flex; align-items: center; gap: 15rpx; margin-bottom: 18rpx; padding: 17rpx; border-radius: 14rpx; background: #eef3f6; }
+.file-action-mark { display: flex; width: 58rpx; height: 62rpx; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 11rpx; background: #fff; color: #4e738b; font-size: 17rpx; font-weight: 850; }
+.file-action-target > view { min-width: 0; }
+.file-action-target text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-action-target text:first-child { color: #304355; font-size: 23rpx; font-weight: 760; }
+.file-action-target text:last-child { margin-top: 6rpx; color: #83909d; font-size: 19rpx; }
+.file-action-list { overflow: hidden; border: 1rpx solid #e5eaee; border-radius: 14rpx; background: #fff; }
+.file-action-list button { display: flex; width: 100%; min-height: 94rpx; align-items: center; justify-content: flex-start; gap: 15rpx; padding: 15rpx 17rpx; border-bottom: 1rpx solid #edf0f3; background: #fff; text-align: left; }
+.file-action-list button:last-child { border-bottom: 0; }
+.file-action-list button::after,.file-action-cancel::after { border: 0; }
+.file-action-list button:active { background: #f3f7f9; }
+.file-action-list button[disabled] { opacity: .62; }
+.file-action-icon { display: flex; width: 50rpx; height: 50rpx; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 12rpx; background: #e7eff4; color: #4e738b; font-size: 26rpx; font-weight: 800; }
+.file-action-icon.wechat-icon { background: #e7f6ed; color: #2ba866; font-size: 19rpx; }
+.file-action-list button > view { min-width: 0; flex: 1; }
+.file-action-list button > view text { display: block; }
+.file-action-list button > view text:first-child { color: #304355; font-size: 23rpx; font-weight: 730; }
+.file-action-list button > view text:last-child { margin-top: 5rpx; color: #8a96a3; font-size: 18rpx; line-height: 1.35; }
+.file-action-list .row-arrow { flex-shrink: 0; }
+.file-action-cancel { width: 100%; min-height: 68rpx; margin-top: 15rpx; border-radius: 13rpx; background: #edf2f5; color: #63798a; font-size: 22rpx; font-weight: 700; }
 @media (max-width: 360px) { .property-list,.form-grid { grid-template-columns: 1fr; } .property-list view,.property-list view:nth-child(odd),.property-list view:nth-child(even) { padding-right: 0; padding-left: 0; } }
 </style>

@@ -2,12 +2,14 @@ package com.example.siteplatform.registration.service;
 
 import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.auth.mapper.SysUserMapper;
+import com.example.siteplatform.auth.mapper.SysUserWechatBindingMapper;
 import com.example.siteplatform.auth.service.AuthService;
 import com.example.siteplatform.auth.service.CaptchaService;
 import com.example.siteplatform.auth.service.WechatAuthService;
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.log.mapper.OperationLogMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
+import com.example.siteplatform.project.mapper.SysUserProjectRoleMapper;
 import com.example.siteplatform.project.service.InspectionPermissionTemplateService;
 import com.example.siteplatform.registration.dto.RegistrationApplicationVO;
 import com.example.siteplatform.registration.dto.RegistrationReviewRequest;
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.dao.DuplicateKeyException;
 
 import java.util.List;
@@ -48,6 +51,8 @@ class RegistrationApplicationServiceTest {
     @Mock private SysUserMapper userMapper;
     @Mock private SystemRoleMapper roleMapper;
     @Mock private SysUserProjectMapper userProjectMapper;
+    @Mock private SysUserProjectRoleMapper userProjectRoleMapper;
+    @Mock private SysUserWechatBindingMapper wechatBindingMapper;
     @Mock private InspectionPermissionTemplateService inspectionTemplateService;
     @Mock private AuthService authService;
     @Mock private CaptchaService captchaService;
@@ -62,6 +67,8 @@ class RegistrationApplicationServiceTest {
                 applicationMapper, userMapper, roleMapper, userProjectMapper,
                 inspectionTemplateService, authService, captchaService,
                 wechatAuthService, operationLogMapper, new ObjectMapper());
+        ReflectionTestUtils.setField(service, "userProjectRoleMapper", userProjectRoleMapper);
+        ReflectionTestUtils.setField(service, "wechatBindingMapper", wechatBindingMapper);
     }
 
     @Test
@@ -85,6 +92,7 @@ class RegistrationApplicationServiceTest {
         ArgumentCaptor<RegistrationApplication> captor = ArgumentCaptor.forClass(RegistrationApplication.class);
         verify(applicationMapper).insert(captor.capture());
         RegistrationApplication stored = captor.getValue();
+        assertEquals("13800138000", stored.getUsername());
         assertEquals("$2a$10$encoded", stored.getPasswordHash());
         assertEquals("[1,2]", stored.getDesiredProjectIds());
         assertEquals("智慧工地综合演示项目", stored.getDesiredProjectText());
@@ -92,6 +100,37 @@ class RegistrationApplicationServiceTest {
         assertNull(stored.getOpenid());
         verify(captchaService).verifyAndConsume("captcha-id", "ABCD");
         verify(userMapper, never()).insert(any(SysUser.class));
+    }
+
+    @Test
+    void registrationUsesPhoneAsUsernameWhenLegacyUsernameIsOmitted() {
+        RegistrationSubmitRequest request = validWebRequest();
+        request.setUsername(null);
+        when(userMapper.selectCount(any())).thenReturn(0L);
+        when(authService.hashPassword("StrongPass1")).thenReturn("$2a$10$encoded");
+        doAnswer(invocation -> {
+            invocation.<RegistrationApplication>getArgument(0).setId(17L);
+            return 1;
+        }).when(applicationMapper).insert(any(RegistrationApplication.class));
+
+        service.submit(request);
+
+        ArgumentCaptor<RegistrationApplication> captor = ArgumentCaptor.forClass(RegistrationApplication.class);
+        verify(applicationMapper).insert(captor.capture());
+        assertEquals("13800138000", captor.getValue().getUsername());
+    }
+
+    @Test
+    void registrationRejectsUsernameThatDoesNotMatchPhone() {
+        RegistrationSubmitRequest request = validWebRequest();
+        request.setUsername("another-account");
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> service.submit(request));
+
+        assertEquals(400, exception.getCode());
+        assertTrue(exception.getMessage().contains("手机号"));
+        verify(userMapper, never()).selectCount(any());
+        verify(applicationMapper, never()).insert(any(RegistrationApplication.class));
     }
 
     @Test
@@ -119,6 +158,73 @@ class RegistrationApplicationServiceTest {
         assertEquals("openid-1", captor.getValue().getOpenid());
         assertEquals("unionid-1", captor.getValue().getUnionid());
         verify(captchaService, never()).verifyAndConsume(any(), any());
+    }
+
+    @Test
+    void wechatQuickRegistrationUsesWechatPhoneAsUsernameAndStoresNoPassword() {
+        RegistrationSubmitRequest request = new RegistrationSubmitRequest();
+        request.setSourceType("MINI");
+        request.setRegistrationMode("WECHAT_QUICK");
+        request.setRealName("微信新用户");
+        request.setWechatCode("login-code");
+        request.setPhoneCode("phone-code");
+        when(wechatAuthService.identityForCode("login-code"))
+                .thenReturn(new WechatAuthService.PendingWechatIdentity("wx-app", "openid-quick", "unionid-quick"));
+        when(wechatAuthService.resolvePhone("phone-code", null)).thenReturn("13900139000");
+        when(userMapper.selectCount(any())).thenReturn(0L);
+        when(wechatBindingMapper.selectCount(any())).thenReturn(0L, 0L);
+        doAnswer(invocation -> {
+            invocation.<RegistrationApplication>getArgument(0).setId(18L);
+            return 1;
+        }).when(applicationMapper).insert(any(RegistrationApplication.class));
+
+        RegistrationSubmitResponse response = service.submit(request);
+
+        assertEquals(18L, response.getApplicationId());
+        ArgumentCaptor<RegistrationApplication> captor = ArgumentCaptor.forClass(RegistrationApplication.class);
+        verify(applicationMapper).insert(captor.capture());
+        RegistrationApplication stored = captor.getValue();
+        assertEquals("WECHAT_QUICK", stored.getRegistrationMode());
+        assertEquals("13900139000", stored.getUsername());
+        assertEquals("13900139000", stored.getPhone());
+        assertEquals("openid-quick", stored.getOpenid());
+        assertNull(stored.getPasswordHash());
+        verify(authService, never()).hashPassword(any());
+    }
+
+    @Test
+    void wechatQuickRegistrationRejectsAlreadyBoundWechatIdentity() {
+        RegistrationSubmitRequest request = new RegistrationSubmitRequest();
+        request.setSourceType("MINI");
+        request.setRegistrationMode("WECHAT_QUICK");
+        request.setRealName("微信新用户");
+        request.setWechatCode("login-code");
+        request.setPhoneCode("phone-code");
+        when(wechatAuthService.identityForCode("login-code"))
+                .thenReturn(new WechatAuthService.PendingWechatIdentity("wx-app", "openid-bound", null));
+        when(wechatAuthService.resolvePhone("phone-code", null)).thenReturn("13900139000");
+        when(userMapper.selectCount(any())).thenReturn(0L);
+        when(wechatBindingMapper.selectCount(any())).thenReturn(1L);
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> service.submit(request));
+
+        assertEquals(409, exception.getCode());
+        assertTrue(exception.getMessage().contains("已绑定"));
+        verify(applicationMapper, never()).insert(any(RegistrationApplication.class));
+    }
+
+    @Test
+    void wechatQuickRegistrationRequiresIdentityAndPhoneAuthorization() {
+        RegistrationSubmitRequest request = new RegistrationSubmitRequest();
+        request.setSourceType("MINI");
+        request.setRegistrationMode("WECHAT_QUICK");
+        request.setRealName("微信新用户");
+        request.setWechatCode("login-code");
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> service.submit(request));
+
+        assertTrue(exception.getMessage().contains("微信快捷注册"));
+        verify(applicationMapper, never()).insert(any(RegistrationApplication.class));
     }
 
     @Test
@@ -164,7 +270,7 @@ class RegistrationApplicationServiceTest {
     }
 
     @Test
-    void approvalClearsPasswordOnlyAfterUserRoleAndWechatBindingSucceed() {
+    void approvalClearsPasswordOnlyAfterAccountAndWechatBindingSucceed() {
         RegistrationApplication application = pendingApplication();
         when(applicationMapper.selectOne(any())).thenReturn(application);
         when(userMapper.selectCount(any())).thenReturn(0L);
@@ -173,12 +279,6 @@ class RegistrationApplicationServiceTest {
             user.setId(88L);
             return 1;
         }).when(userMapper).insert(any(SysUser.class));
-        SystemRole defaultRole = new SystemRole();
-        defaultRole.setId(3L);
-        defaultRole.setRoleCode("USER");
-        defaultRole.setScopeType("PLATFORM");
-        when(roleMapper.selectOne(any())).thenReturn(defaultRole);
-        when(roleMapper.selectById(3L)).thenReturn(defaultRole);
         when(applicationMapper.update(any(), any())).thenReturn(1);
 
         RegistrationApplicationVO result = service.approve(9L, reviewRequest(), reviewer());
@@ -186,11 +286,37 @@ class RegistrationApplicationServiceTest {
         assertEquals("APPROVED", result.getStatus());
         assertEquals(88L, result.getCreatedUserId());
         assertNull(application.getPasswordHash());
-        verify(userMapper).insertUserRole(88L, 3L);
+        verify(userMapper, never()).insertUserRole(any(), any());
         verify(wechatAuthService).bind(
                 any(SysUser.class), eq("wx-app"), eq("openid-1"), eq("unionid-1"), eq("13800138000"));
         verify(applicationMapper).update(any(), any());
         verify(operationLogMapper).insert(any());
+    }
+
+    @Test
+    void approvalOfWechatQuickRegistrationCreatesPasswordSetupPendingAccount() {
+        RegistrationApplication application = pendingApplication();
+        application.setRegistrationMode("WECHAT_QUICK");
+        application.setPasswordHash(null);
+        when(applicationMapper.selectOne(any())).thenReturn(application);
+        when(userMapper.selectCount(any())).thenReturn(0L);
+        when(authService.createUnusablePasswordHash()).thenReturn("$2a$10$random-unusable");
+        doAnswer(invocation -> {
+            invocation.<SysUser>getArgument(0).setId(89L);
+            return 1;
+        }).when(userMapper).insert(any(SysUser.class));
+        when(applicationMapper.update(any(), any())).thenReturn(1);
+
+        service.approve(9L, reviewRequest(), reviewer());
+
+        ArgumentCaptor<SysUser> userCaptor = ArgumentCaptor.forClass(SysUser.class);
+        verify(userMapper).insert(userCaptor.capture());
+        SysUser created = userCaptor.getValue();
+        assertEquals("13800138000", created.getUsername());
+        assertEquals("$2a$10$random-unusable", created.getPassword());
+        assertEquals(0, created.getPasswordLoginEnabled());
+        assertEquals(1, created.getPasswordResetRequired());
+        verify(wechatAuthService).bind(any(SysUser.class), eq("wx-app"), eq("openid-1"), eq("unionid-1"), eq("13800138000"));
     }
 
     @Test
@@ -203,12 +329,6 @@ class RegistrationApplicationServiceTest {
             user.setId(88L);
             return 1;
         }).when(userMapper).insert(any(SysUser.class));
-        SystemRole defaultRole = new SystemRole();
-        defaultRole.setId(3L);
-        defaultRole.setRoleCode("USER");
-        defaultRole.setScopeType("PLATFORM");
-        when(roleMapper.selectOne(any())).thenReturn(defaultRole);
-        when(roleMapper.selectById(3L)).thenReturn(defaultRole);
         doThrow(BusinessException.of(409, "该微信已绑定其他系统账号"))
                 .when(wechatAuthService).bind(any(), any(), any(), any(), any());
 
@@ -223,28 +343,17 @@ class RegistrationApplicationServiceTest {
     }
 
     @Test
-    void disabledPlatformRoleCannotBeGrantedDuringApproval() {
+    void registrationApprovalNeverGrantsPlatformRoles() {
         RegistrationApplication application = pendingApplication();
         when(applicationMapper.selectOne(any())).thenReturn(application);
-        when(userMapper.selectCount(any())).thenReturn(0L);
-        doAnswer(invocation -> {
-            SysUser user = invocation.getArgument(0);
-            user.setId(88L);
-            return 1;
-        }).when(userMapper).insert(any(SysUser.class));
-        SystemRole disabledRole = new SystemRole();
-        disabledRole.setId(3L);
-        disabledRole.setRoleCode("USER");
-        disabledRole.setScopeType("PLATFORM");
-        disabledRole.setEnabled(0);
-        disabledRole.setDeleted(0);
-        when(roleMapper.selectOne(any())).thenReturn(disabledRole);
-        when(roleMapper.selectById(3L)).thenReturn(disabledRole);
+        RegistrationReviewRequest request = reviewRequest();
+        request.setRoleIds(List.of(3L));
 
         BusinessException exception = assertThrows(
-                BusinessException.class, () -> service.approve(9L, reviewRequest(), reviewer()));
+                BusinessException.class, () -> service.approve(9L, request, reviewer()));
 
-        assertTrue(exception.getMessage().contains("平台角色不存在"));
+        assertTrue(exception.getMessage().contains("注册审核不授予平台全局身份"));
+        verify(userMapper, never()).insert(any(SysUser.class));
         verify(userMapper, never()).insertUserRole(any(), any());
     }
 
@@ -279,7 +388,7 @@ class RegistrationApplicationServiceTest {
 
     private RegistrationSubmitRequest validWebRequest() {
         RegistrationSubmitRequest request = new RegistrationSubmitRequest();
-        request.setUsername("new_user");
+        request.setUsername("13800138000");
         request.setPassword("StrongPass1");
         request.setRealName("新用户");
         request.setPhone("13800138000");
@@ -293,7 +402,7 @@ class RegistrationApplicationServiceTest {
     private RegistrationApplication pendingApplication() {
         RegistrationApplication application = new RegistrationApplication();
         application.setId(9L);
-        application.setUsername("new_user");
+        application.setUsername("13800138000");
         application.setPasswordHash("$2a$10$encoded");
         application.setRealName("新用户");
         application.setPhone("13800138000");

@@ -1,6 +1,8 @@
 package com.example.siteplatform.device.adapter;
 
 import com.example.siteplatform.common.BusinessException;
+import com.example.siteplatform.device.constant.DeviceStatus;
+import com.example.siteplatform.device.constant.DeviceType;
 import com.example.siteplatform.device.entity.DeviceInfo;
 import com.example.siteplatform.device.mapper.DeviceInfoMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,7 +31,7 @@ public class MockTowerCraneAdapter implements TowerCraneAdapter {
             throw BusinessException.notFound("设备不存在");
         }
 
-        if (!"tower_crane".equals(device.getDeviceType())) {
+        if (!DeviceType.TOWER_CRANE.equals(DeviceType.normalize(device.getDeviceType()))) {
             throw new BusinessException(400, "该设备不是塔吊设备");
         }
 
@@ -42,7 +44,7 @@ public class MockTowerCraneAdapter implements TowerCraneAdapter {
         return new TowerCraneData(
                 device.getId(),
                 device.getDeviceName(),
-                device.getStatus(),
+                DeviceStatus.normalize(device.getStatus()),
                 Math.round(height * 100) / 100.0,
                 Math.round(load * 100) / 100.0,
                 Math.round(windSpeed * 100) / 100.0,

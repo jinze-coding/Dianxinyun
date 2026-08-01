@@ -92,7 +92,11 @@ async function internalAccess() {
     <AppNavBar title="电箱检查记录表" @back="goBack" />
     <view class="content">
       <view v-if="loading" class="panel">正在加载月度检查表...</view>
-      <view v-else-if="errorMessage" class="panel error-panel"><text>无法查看电箱检查记录表</text><text>{{ errorMessage }}</text></view>
+      <view v-else-if="errorMessage" class="panel error-panel">
+        <text>无法查看电箱检查记录表</text>
+        <text>{{ errorMessage }}</text>
+        <button class="retry-button" @tap="load">重新加载</button>
+      </view>
       <template v-else-if="data">
         <view class="panel header">
           <view class="public-head"><text class="project">{{ data.projectShortName }}</text><text class="readonly">微信扫码公开只读</text></view>
@@ -104,9 +108,13 @@ async function internalAccess() {
           <button class="internal-access" :disabled="wechatBusy" @tap="internalAccess">{{ wechatBusy ? '正在识别微信身份' : '内部人员登录 / 申请巡检权限' }}</button>
           <text v-if="accessMessage" class="access-message">{{ accessMessage }}</text>
         </view>
+        <view class="stats-scope">
+          <text>当前电箱 · {{ month }} 日检统计</text>
+          <text>单位：天（不是电箱数量）</text>
+        </view>
         <view class="stats">
-          <view><text>应检</text><text class="stat-number">{{ data.shouldCheckDays }}</text></view><view><text>已检</text><text class="stat-number ok">{{ data.checkedDays }}</text></view>
-          <view><text>未检</text><text class="stat-number warn">{{ data.missedDays }}</text></view><view><text>异常</text><text class="stat-number bad">{{ data.abnormalDays }}</text></view>
+          <view><text>应检天数</text><text class="stat-number">{{ data.shouldCheckDays }}</text></view><view><text>已检天数</text><text class="stat-number ok">{{ data.checkedDays }}</text></view>
+          <view><text>未检天数</text><text class="stat-number warn">{{ data.missedDays }}</text></view><view><text>异常天数</text><text class="stat-number bad">{{ data.abnormalDays }}</text></view>
         </view>
         <view class="legend"><text><i class="dot ok-dot"></i>正常</text><text><i class="dot bad-dot"></i>异常</text><text><i class="dot warn-dot"></i>未检</text><text><i class="dot muted-dot"></i>非巡检范围</text></view>
         <view class="panel table-panel">
@@ -133,6 +141,8 @@ async function internalAccess() {
 .shell { min-height: 100vh; background: var(--inspection-page); color: var(--inspection-text); }
 .content { display: flex; flex-direction: column; gap: 18rpx; padding: 22rpx 24rpx 42rpx; }
 .panel { border: 1rpx solid var(--inspection-divider); border-radius: 22rpx; background: #fff; box-shadow: var(--inspection-shadow); }
+.retry-button { display: flex; width: 260rpx; height: 68rpx; align-items: center; justify-content: center; margin-top: 24rpx; border: 0; border-radius: 14rpx; background: var(--inspection-primary-deep); color: #fff; font-size: 21rpx; font-weight: 750; line-height: 1; }
+.retry-button::after { border: 0; }
 .header { padding: 24rpx 26rpx; background: linear-gradient(145deg, #edf5fc, #fff); }
 .public-head { display: flex; align-items: center; justify-content: space-between; }
 .project { color: var(--inspection-primary-deep); font-size: 25rpx; font-weight: 800; }
@@ -145,6 +155,9 @@ async function internalAccess() {
 .internal-access::after { border: 0; }
 .internal-access[disabled] { opacity: .65; }
 .access-message { display: block; margin-top: 10rpx; color: var(--inspection-muted); font-size: 20rpx; line-height: 1.55; text-align: center; }
+.stats-scope { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; padding: 0 8rpx; color: var(--inspection-muted); font-size: 19rpx; line-height: 1.4; }
+.stats-scope text:first-child { color: var(--inspection-text); font-size: 21rpx; font-weight: 750; }
+.stats-scope text:last-child { flex-shrink: 0; }
 .stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 10rpx; }
 .stats view { padding: 17rpx 6rpx; border: 1rpx solid var(--inspection-divider); border-radius: 16rpx; background: #fff; text-align: center; }
 .stats text { display: block; color: var(--inspection-muted); font-size: 21rpx; }
@@ -174,7 +187,7 @@ async function internalAccess() {
 .warn { color: var(--inspection-warning) !important; }
 .muted { color: #95a2b0; }
 .notice { padding: 4rpx 8rpx 28rpx; color: var(--inspection-muted); font-size: 21rpx; line-height: 1.65; }
-.error-panel { display: flex; min-height: 300rpx; align-items: center; justify-content: center; flex-direction: column; padding: 40rpx; text-align: center; }
+.error-panel { display: flex; min-height: 300rpx; align-items: center; justify-content: center; flex-direction: column; padding: 40rpx; color: var(--inspection-muted); text-align: center; }
 .error-panel text:first-child { color: var(--inspection-text); font-size: 28rpx; font-weight: 800; }
-.error-panel text:last-child { margin-top: 12rpx; color: var(--inspection-muted); font-size: 21rpx; line-height: 1.6; }
+.error-panel text:nth-child(2) { margin-top: 12rpx; color: var(--inspection-muted); font-size: 21rpx; line-height: 1.6; word-break: break-all; }
 </style>

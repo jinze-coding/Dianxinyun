@@ -33,6 +33,7 @@ backend/.env.*
 !.env.example
 !frontend/.env.example
 !backend/.env.example
+!wechat-miniprogram/site-platform-miniprogram/.env.mp-real.example
 
 # IDE and OS files
 .idea/

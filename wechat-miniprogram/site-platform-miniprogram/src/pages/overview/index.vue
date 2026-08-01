@@ -89,6 +89,41 @@ function deviceTone(status?: string) {
   return 'amber' as const;
 }
 
+function deviceStatusLabel(status?: string) {
+  const value = (status || '').trim().toLowerCase().replace('-', '_');
+  const labels: Record<string, string> = {
+    running: '运行中',
+    normal: '运行中',
+    运行中: '运行中',
+    正常: '运行中',
+    stopped: '停机',
+    停机: '停机',
+    已停机: '停机',
+    abnormal: '异常',
+    alarm: '异常',
+    danger: '异常',
+    异常: '异常',
+    告警: '异常',
+    maintenance: '维修中',
+    维修中: '维修中',
+    维护中: '维修中'
+  };
+  return labels[value] || status || '未知';
+}
+
+function fileStatusLabel(status?: string) {
+  const value = (status || '').trim().toUpperCase().replace('-', '_');
+  const labels: Record<string, string> = {
+    UPLOADED: '已上传',
+    已上传: '已上传',
+    PENDING_CONFIRM: '待确认',
+    待确认: '待确认',
+    ARCHIVED: '已归档',
+    已归档: '已归档'
+  };
+  return labels[value] || status || '已上传';
+}
+
 function display(value?: string, fallback = '未设置') {
   return value && value.trim() ? value : fallback;
 }
@@ -136,11 +171,11 @@ function display(value?: string, fallback = '未设置') {
               <view class="info-row"><text>区域负责人</text><text>{{ display(currentProject.manager, '未指定') }}</text></view>
             </view>
             <view v-else-if="panel === 'documents'" class="plain-list">
-              <view v-for="file in overview.recentFiles" :key="file.id" class="plain-row"><view class="list-icon file-icon"></view><view class="plain-copy"><text class="plain-title">{{ file.name }}</text><text class="plain-meta">{{ file.type || '资料' }} · {{ file.status || '已上传' }}</text></view></view>
+              <view v-for="file in overview.recentFiles" :key="file.id" class="plain-row"><view class="list-icon file-icon"></view><view class="plain-copy"><text class="plain-title">{{ file.name }}</text><text class="plain-meta">{{ file.type || '资料' }} · {{ fileStatusLabel(file.status) }}</text></view></view>
               <view v-if="!overview.recentFiles.length" class="empty-line">暂无资料</view>
             </view>
             <view v-else class="plain-list">
-              <view v-for="device in overview.devices" :key="device.id" class="plain-row"><view class="list-icon device-icon"></view><view class="plain-copy"><text class="plain-title">{{ device.name }}</text><text class="plain-meta">{{ device.type || '设备' }} · {{ device.remark || '暂无备注' }}</text></view><WorkspaceStatusPill :label="device.status || '未知'" :tone="deviceTone(device.status)" /></view>
+              <view v-for="device in overview.devices" :key="device.id" class="plain-row"><view class="list-icon device-icon"></view><view class="plain-copy"><text class="plain-title">{{ device.name }}</text><text class="plain-meta">{{ device.type || '设备' }} · {{ device.remark || '暂无备注' }}</text></view><WorkspaceStatusPill :label="deviceStatusLabel(device.status)" :tone="deviceTone(device.status)" /></view>
               <view v-if="!overview.devices.length" class="empty-line">暂无设备</view>
             </view>
           </view>

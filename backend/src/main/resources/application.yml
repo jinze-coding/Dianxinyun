@@ -1,5 +1,14 @@
 server:
   port: 8080
+  forward-headers-strategy: ${FORWARD_HEADERS_STRATEGY:NONE}
+  tomcat:
+    remoteip:
+      remote-ip-header: X-Forwarded-For
+      protocol-header: X-Forwarded-Proto
+  error:
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
 
 spring:
   application:
@@ -7,16 +16,16 @@ spring:
 
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/dianxinyun?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    url: ${DB_URL:jdbc:mysql://localhost:3306/dianxinyun?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:}
 
   data:
     redis:
-      host: localhost
-      port: 6379
-      password:
-      database: 0
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
 
   servlet:
     multipart:
@@ -39,9 +48,15 @@ jwt:
   expiration: ${JWT_EXPIRATION_MILLIS:604800000}
 
 knife4j:
-  enable: true
+  enable: ${KNIFE4J_ENABLE:false}
   setting:
     language: zh_cn
+
+springdoc:
+  api-docs:
+    enabled: ${API_DOCS_ENABLED:false}
+  swagger-ui:
+    enabled: ${SWAGGER_UI_ENABLED:false}
 
 file:
   upload:
@@ -53,6 +68,13 @@ file:
       bucket: ${MINIO_BUCKET:site-platform}
       access-key: ${MINIO_ACCESS_KEY:}
       secret-key: ${MINIO_SECRET_KEY:}
+  cleanup:
+    quality-staging:
+      enabled: ${QUALITY_STAGING_CLEANUP_ENABLED:true}
+      ttl-hours: ${QUALITY_STAGING_CLEANUP_TTL_HOURS:24}
+      batch-size: ${QUALITY_STAGING_CLEANUP_BATCH_SIZE:200}
+      initial-delay-ms: ${QUALITY_STAGING_CLEANUP_INITIAL_DELAY_MS:60000}
+      fixed-delay-ms: ${QUALITY_STAGING_CLEANUP_FIXED_DELAY_MS:3600000}
 
 wechat:
   mini-program:

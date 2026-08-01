@@ -7,9 +7,11 @@
     "dev:h5:real": "uni -p h5 --mode real",
     "dev:h5": "uni -p h5 --host 0.0.0.0",
     "dev:mp-weixin": "uni -p mp-weixin",
+    "dev:mp-weixin:local": "uni -p mp-weixin --mode mp-local",
     "dev:mp-weixin:real": "uni -p mp-weixin --mode mp-real",
     "build:h5": "uni build -p h5",
     "build:mp-weixin": "uni build -p mp-weixin",
+    "build:mp-weixin:real": "uni build -p mp-weixin --mode mp-real",
     "type-check": "vue-tsc --noEmit"
   },
   "dependencies": {
@@ -32,8 +34,11 @@
     "@intlify/core-base": "9.14.5",
     "@intlify/message-resolver": "9.1.11",
     "@intlify/vue-devtools": "9.14.5",
+    "adm-zip": "0.6.0",
+    "express": "4.22.2",
     "jpeg-js": "0.4.4",
     "phin": "3.7.1",
+    "postcss": "8.5.25",
     "ws": "8.21.0"
   }
 }

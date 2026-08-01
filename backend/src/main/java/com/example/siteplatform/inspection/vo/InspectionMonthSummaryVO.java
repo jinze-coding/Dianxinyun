@@ -9,6 +9,8 @@ public class InspectionMonthSummaryVO {
     private Long projectId;
     private Long electricBoxId;
     private String month;
+    private String periodType;
+    private String periodValue;
     private Integer shouldCheck;
     private Integer checked;
     private Integer missed;

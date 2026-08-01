@@ -130,8 +130,15 @@ export function getMockProjectDetail(projectId: number) {
   return clone(mockRuntime.projects.find((item) => item.id === projectId));
 }
 
-export function getMockElectricBoxes(projectId: number) {
-  return clone(mockRuntime.electricBoxes.filter((item) => item.projectId === projectId));
+export function getMockElectricBoxes(projectId: number, keyword?: string) {
+  const normalizedKeyword = keyword?.trim().toLowerCase() || '';
+  return clone(mockRuntime.electricBoxes.filter((item) => item.projectId === projectId
+    && (!normalizedKeyword || [
+      item.boxCode,
+      item.boxName,
+      item.installLocation,
+      item.responsibleElectricianName
+    ].some((value) => String(value || '').toLowerCase().includes(normalizedKeyword)))));
 }
 
 export function getMockElectricBoxDetail(id: number) {
@@ -194,12 +201,13 @@ export function resolveMockUnifiedCode(sceneCode: string, role: 'ELECTRICIAN' | 
   };
 }
 
-export function getMockInspectionRecords(projectId: number, electricBoxId?: number, month?: string) {
+export function getMockInspectionRecords(projectId: number, electricBoxId?: number, month?: string, checkDate?: string) {
+  if (month && checkDate) throw new Error('月份和日期不能同时筛选');
   return clone(mockRuntime.inspectionRecords.filter((item) => {
     return item.source === 'ELECTRICIAN_DAILY'
       && item.status !== 'DRAFT'
       && item.projectId === projectId
-      && (!month || item.checkDate.startsWith(month))
+      && (checkDate ? item.checkDate === checkDate : !month || item.checkDate.startsWith(month))
       && (!electricBoxId || item.electricBoxId === electricBoxId);
   }).map((item) => ({
     ...item,
@@ -212,37 +220,59 @@ export function getMockInspectionRecords(projectId: number, electricBoxId?: numb
   })));
 }
 
-export function getMockInspectionSummary(params: { projectId: number; boxId?: number; month: string }) {
+export function getMockInspectionSummary(params: {
+  projectId: number;
+  boxId?: number;
+  month?: string;
+  checkDate?: string;
+}) {
+  if (Boolean(params.month) === Boolean(params.checkDate)) {
+    throw new Error('月份和日期必须且只能选择一个');
+  }
+  const periodType = params.checkDate ? 'DAY' as const : 'MONTH' as const;
+  const periodValue = params.checkDate || String(params.month);
+  const month = params.checkDate?.slice(0, 7) || String(params.month);
   const boxes = mockRuntime.electricBoxes.filter((item) => item.projectId === params.projectId
     && (!params.boxId || item.id === params.boxId)
     && item.status === 'ACTIVE'
-    && item.inspectionRequired !== false);
+    && item.inspectionRequired !== false
+    && (!params.checkDate || (!item.scopeEffectiveDate || params.checkDate >= item.scopeEffectiveDate))
+    && (!params.checkDate || (!item.scopeEndDate || params.checkDate <= item.scopeEndDate)));
   const records = mockRuntime.inspectionRecords.filter((item) => item.projectId === params.projectId
     && (!params.boxId || item.electricBoxId === params.boxId)
-    && item.checkDate.startsWith(params.month));
-  const dailyRecords = records.filter((item) => item.source === 'ELECTRICIAN_DAILY');
-  const targetYear = Number(params.month.slice(0, 4));
-  const targetMonth = Number(params.month.slice(5, 7));
+    && item.source === 'ELECTRICIAN_DAILY'
+    && item.status !== 'DRAFT'
+    && (params.checkDate ? item.checkDate === params.checkDate : item.checkDate.startsWith(month)));
+  const dailyRecords = records;
+  const targetYear = Number(month.slice(0, 4));
+  const targetMonth = Number(month.slice(5, 7));
   const mockYear = Number(MOCK_DATE.slice(0, 4));
   const mockMonth = Number(MOCK_DATE.slice(5, 7));
   const monthDays = new Date(targetYear, targetMonth, 0).getDate();
   const elapsedDays = targetYear === mockYear && targetMonth === mockMonth
     ? Number(MOCK_DATE.slice(8, 10))
     : new Date(targetYear, targetMonth - 1, 1).getTime() > new Date(mockYear, mockMonth - 1, 1).getTime() ? 0 : monthDays;
-  const shouldCheck = boxes.length * elapsedDays;
-  const checkedKeys = new Set(dailyRecords.map((item) => `${item.electricBoxId}-${item.checkDate}`));
-  const openRectification = mockRuntime.rectifications.filter((item) => item.projectId === params.projectId
-    && (!params.boxId || item.electricBoxId === params.boxId)
-    && item.status !== 'CLOSED').length;
+  const shouldCheck = params.checkDate ? boxes.length : boxes.length * elapsedDays;
+  const requiredBoxIds = new Set(boxes.map((item) => item.id));
+  const checkedKeys = new Set(dailyRecords
+    .filter((item) => requiredBoxIds.has(Number(item.electricBoxId)))
+    .map((item) => `${item.electricBoxId}-${item.checkDate}`));
+  const abnormalKeys = new Set(dailyRecords
+    .filter((item) => requiredBoxIds.has(Number(item.electricBoxId)) && item.abnormalCount > 0)
+    .map((item) => `${item.electricBoxId}-${item.checkDate}`));
   return clone({
     projectId: params.projectId,
     electricBoxId: params.boxId,
-    month: params.month,
+    month,
+    periodType,
+    periodValue,
     shouldCheck,
     checked: checkedKeys.size,
     missed: Math.max(shouldCheck - checkedKeys.size, 0),
-    abnormal: records.filter((item) => item.abnormalCount > 0).length,
-    openRectification,
+    abnormal: params.checkDate
+      ? abnormalKeys.size
+      : dailyRecords.filter((item) => requiredBoxIds.has(Number(item.electricBoxId)) && item.abnormalCount > 0).length,
+    openRectification: 0,
     records
   });
 }

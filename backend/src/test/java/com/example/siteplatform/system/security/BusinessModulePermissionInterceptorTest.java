@@ -30,6 +30,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -124,14 +125,46 @@ class BusinessModulePermissionInterceptorTest {
     void sharedQualityFileDownloadRequiresQualityView() throws Exception {
         FileResource qualityFile = new FileResource();
         qualityFile.setId(18L);
+        qualityFile.setProjectId(2L);
         qualityFile.setBusinessType("QUALITY_REVIEW");
         when(fileMapper.selectById(18L)).thenReturn(qualityFile);
-        when(permissionService.hasPermission(9L, SystemPermissionCodes.QUALITY_VIEW)).thenReturn(false);
+        when(permissionService.hasPermission(9L, SystemPermissionCodes.QUALITY_VIEW)).thenReturn(true);
+        when(permissionService.hasProjectPermission(9L, 2L, SystemPermissionCodes.QUALITY_VIEW)).thenReturn(false);
 
         mockMvc.perform(get("/api/v1/files/18/download")
                         .header("Authorization", "Bearer denied"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.message").value("无操作权限：quality.view"));
+    }
+
+    @Test
+    void sharedQualityFileListUsesTargetProjectPermissionInsteadOfAggregatePermission() throws Exception {
+        when(permissionService.hasPermission(9L, SystemPermissionCodes.QUALITY_VIEW)).thenReturn(true);
+        when(permissionService.hasProjectPermission(9L, 22L, SystemPermissionCodes.QUALITY_VIEW)).thenReturn(false);
+
+        mockMvc.perform(get("/api/v1/files")
+                        .param("projectId", "22")
+                        .param("businessType", "QUALITY_DOCUMENT")
+                        .header("Authorization", "Bearer denied"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("无操作权限：quality.view"));
+
+        verify(permissionService).hasProjectPermission(9L, 22L, SystemPermissionCodes.QUALITY_VIEW);
+    }
+
+    @Test
+    void sharedQualityStagingUploadUsesStagePermissionInTargetProject() throws Exception {
+        when(permissionService.hasPermission(9L, SystemPermissionCodes.QUALITY_RECTIFY)).thenReturn(true);
+        when(permissionService.hasProjectPermission(9L, 22L, SystemPermissionCodes.QUALITY_RECTIFY)).thenReturn(false);
+
+        mockMvc.perform(post("/api/v1/files")
+                        .param("projectId", "22")
+                        .param("businessType", "QUALITY_RECTIFICATION_PENDING")
+                        .header("Authorization", "Bearer denied"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("无操作权限：quality.rectify"));
+
+        verify(permissionService).hasProjectPermission(9L, 22L, SystemPermissionCodes.QUALITY_RECTIFY);
     }
 
     @Test
@@ -150,9 +183,10 @@ class BusinessModulePermissionInterceptorTest {
                         "/api/v1/project-documents",
                         "/api/v1/inspection/records",
                         "/api/v1/quality/issues",
+                        "/api/v1/files",
                         "/api/v1/files/{id}/download"
                 },
-                method = {RequestMethod.GET, RequestMethod.HEAD}
+                method = {RequestMethod.GET, RequestMethod.HEAD, RequestMethod.POST}
         )
         Result<String> guarded(@PathVariable(required = false) Long id) {
             return Result.success("ok");

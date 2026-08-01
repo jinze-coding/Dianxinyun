@@ -1,9 +1,11 @@
 import type { Result } from '@/types';
 
 function resolveApiBaseUrl() {
-  const configured = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080/api/v1';
-  // 微信请求必须使用绝对地址；H5 才能依赖 Vite 的相对路径代理。
+  // H5 默认使用同源代理，避免手机扫码后把 127.0.0.1 误认为手机自身。
+  // 微信小程序请求必须使用绝对地址，未配置时仅保留本机开发兜底。
+  const configured = import.meta.env.VITE_API_BASE_URL || '/api/v1';
   // #ifdef MP-WEIXIN
+  if (import.meta.env.MODE === 'mp-real') return configured.replace(/\/$/, '');
   if (!/^https?:\/\//i.test(configured)) return 'http://127.0.0.1:8080/api/v1';
   // #endif
   return configured.replace(/\/$/, '');

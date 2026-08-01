@@ -50,7 +50,7 @@ onShow(async () => {
 });
 
 const canSubmit = computed(() => box.value?.status === 'ACTIVE');
-const assigneeOptions = computed(() => members.value.filter((member) => member.status !== 0).map((member) => ({ label: `${member.realName || member.username} · ${roleLabel(member.projectRoleCode)}`, member })));
+const assigneeOptions = computed(() => members.value.filter((member) => member.status !== 0 && member.accessStatus !== 'DISABLED').map((member) => ({ label: `${member.realName || member.username} · ${roleLabel(member)}`, member })));
 const assigneeIndex = computed(() => Math.max(assigneeOptions.value.findIndex((option) => option.member.userId === selectedAssigneeId.value), 0));
 const selectedAssigneeLabel = computed(() => selectedAssigneeName.value || (membersLoading.value ? '正在加载...' : box.value?.responsibleElectricianName || '请选择整改人'));
 const selectedCategoryLabel = computed(() => spotCheckCategories.find((item) => item.value === problemCategory.value)?.label || '其他');
@@ -64,7 +64,9 @@ function defaultDeadline() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function roleLabel(role?: string) { return role === 'PROJECT_ADMIN' ? '项目管理员' : role === 'SAFETY_ADMIN' ? '安全员' : '电工'; }
+function roleLabel(member: { projectRoles?: Array<{ roleName?: string }> }) {
+  return (member.projectRoles || []).map((role) => role.roleName).filter(Boolean).join('、') || '项目成员';
+}
 
 async function loadProjectMembers() {
   if (!box.value?.projectId) return;
@@ -72,7 +74,7 @@ async function loadProjectMembers() {
   try {
     members.value = await getProjectMembers(box.value.projectId);
     const responsible = members.value.find((member) => (member.realName || member.username) === box.value?.responsibleElectricianName);
-    const target = responsible || members.value.find((member) => member.projectRoleCode === 'USER') || members.value[0];
+    const target = responsible || members.value.find((member) => member.permissionCodes?.includes('INSPECTION_DAILY_SUBMIT')) || members.value[0];
     if (target && !selectedAssigneeId.value) { selectedAssigneeId.value = target.userId; selectedAssigneeName.value = target.realName || target.username; }
   } catch (error) { members.value = []; selectedAssigneeName.value = box.value?.responsibleElectricianName || ''; }
   finally { membersLoading.value = false; }

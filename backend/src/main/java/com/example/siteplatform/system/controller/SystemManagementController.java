@@ -14,6 +14,7 @@ import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import com.example.siteplatform.system.dto.PasswordResetRequest;
 import com.example.siteplatform.system.dto.ReviewCommentRequest;
 import com.example.siteplatform.system.dto.RoleSaveRequest;
+import com.example.siteplatform.system.dto.RolePermissionUpdateRequest;
 import com.example.siteplatform.system.dto.SystemUserStatusRequest;
 import com.example.siteplatform.system.entity.SystemMenu;
 import com.example.siteplatform.system.entity.SystemPermission;
@@ -173,11 +174,12 @@ public class SystemManagementController {
 
     @PutMapping("/roles/{id}/permissions")
     public Result<Void> updateRolePermissions(@PathVariable Long id,
-                                              @RequestBody Map<String, List<Long>> body,
+                                              @RequestBody RolePermissionUpdateRequest body,
                                               HttpServletRequest request) {
         SysUser operator = current(request);
         permissionService.requirePlatformPermission(operator, SystemPermissionCodes.ROLE_MANAGE);
-        administrationService.updateRolePermissions(id, body.get("permissionIds"), body.get("menuIds"), operator);
+        administrationService.updateRolePermissions(id, body.getPermissionIds(), body.getMenuIds(),
+                body.getBusinessModuleCodes(), operator);
         return Result.success();
     }
 

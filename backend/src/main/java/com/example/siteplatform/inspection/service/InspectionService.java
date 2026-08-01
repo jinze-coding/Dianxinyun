@@ -78,6 +78,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -118,6 +119,9 @@ public class InspectionService {
     );
 
     private static final Set<String> ALLOWED_ITEM_RESULTS = Set.of("NORMAL", "ABNORMAL", "NA");
+    private static final int MAX_PHOTO_COUNT_PER_GROUP = 20;
+    private static final int REMARK_MAX_LENGTH = 1000;
+    private static final int ITEM_DESCRIPTION_MAX_LENGTH = 500;
 
     private static final Map<String, String> EXPORT_ITEM_NAMES = new LinkedHashMap<>();
 
@@ -186,6 +190,14 @@ public class InspectionService {
 
     public List<InspectionRecordVO> listRecords(Long projectId, Long electricBoxId, String status, String month,
                                                 String reviewScope, Boolean reviewOverdue, SysUser currentUser) {
+        return listRecords(projectId, electricBoxId, status, month, null, reviewScope, reviewOverdue, currentUser);
+    }
+
+    public List<InspectionRecordVO> listRecords(Long projectId, Long electricBoxId, String status, String month,
+                                                String checkDate, String reviewScope, Boolean reviewOverdue,
+                                                SysUser currentUser) {
+        ensureSinglePeriodFilter(month, checkDate);
+        LocalDate targetDate = StringUtils.hasText(checkDate) ? parseCheckDate(checkDate) : null;
         LambdaQueryWrapper<InspectionRecord> wrapper = new LambdaQueryWrapper<InspectionRecord>()
                 .eq(InspectionRecord::getSource, SOURCE_ELECTRICIAN_DAILY)
                 .ne(InspectionRecord::getStatus, "DRAFT");
@@ -196,7 +208,9 @@ public class InspectionService {
         if (StringUtils.hasText(status) && !STATUS_COMPLETED.equalsIgnoreCase(status.trim())) {
             wrapper.eq(InspectionRecord::getStatus, status);
         }
-        if (StringUtils.hasText(month)) {
+        if (targetDate != null) {
+            wrapper.eq(InspectionRecord::getCheckDate, targetDate);
+        } else if (StringUtils.hasText(month)) {
             YearMonth yearMonth = parseMonth(month);
             wrapper.between(InspectionRecord::getCheckDate, yearMonth.atDay(1), yearMonth.atEndOfMonth());
         }
@@ -216,17 +230,18 @@ public class InspectionService {
     @Transactional
     public InspectionRecordVO createRecord(InspectionRecordRequest request, SysUser currentUser) {
         validateRecordRequest(request);
-        ElectricBox box = requireBox(request.getElectricBoxId());
+        ElectricBox box = electricBoxMapper.selectByIdForUpdate(request.getElectricBoxId());
+        if (box == null) {
+            throw BusinessException.notFound("电箱不存在");
+        }
         if (!Objects.equals(box.getProjectId(), request.getProjectId())) {
             throw new BusinessException("电箱不属于当前项目");
         }
         if (!"ACTIVE".equals(box.getStatus())) {
             throw BusinessException.forbidden("停用或已拆除电箱不可巡检");
         }
-        String templateCode = StringUtils.hasText(request.getTemplateCode())
-                ? request.getTemplateCode()
-                : TEMPLATE_ELECTRIC_BOX_DAILY;
-        String source = StringUtils.hasText(request.getSource()) ? request.getSource() : SOURCE_ELECTRICIAN_DAILY;
+        String templateCode = TEMPLATE_ELECTRIC_BOX_DAILY;
+        String source = SOURCE_ELECTRICIAN_DAILY;
         if (!SOURCE_ELECTRICIAN_DAILY.equals(source)) {
             throw new BusinessException("极简巡检模式只支持电箱日检");
         }
@@ -256,7 +271,7 @@ public class InspectionService {
         record.setRemark(request.getRemark());
         record.setDeleted(0);
         markCompleted(record);
-        inspectionRecordMapper.insert(record);
+        requireSingleWrite(inspectionRecordMapper.insert(record), "巡检记录新增");
         fileResourceService.validateAndBind(currentUser, record.getProjectId(), request.getOuterPhotoFileIds(),
                 "inspection_record", "inspection_record", record.getId());
         fileResourceService.validateAndBind(currentUser, record.getProjectId(), request.getInnerPhotoFileIds(),
@@ -267,16 +282,17 @@ public class InspectionService {
             InspectionRecordItem item = new InspectionRecordItem();
             item.setRecordId(record.getId());
             item.setItemCode(itemRequest.getItemCode());
-            item.setItemName(itemRequest.getItemName());
+            item.setItemName(EXPORT_ITEM_NAMES.get(itemRequest.getItemCode()));
             item.setResult(itemRequest.getResult());
             item.setDescription(itemRequest.getDescription());
             item.setDeleted(0);
-            inspectionRecordItemMapper.insert(item);
+            requireSingleWrite(inspectionRecordItemMapper.insert(item), "巡检检查项新增");
             items.add(item);
         }
         return toRecordVO(record, box, items, false);
     }
 
+    @Transactional
     public InspectionRecordVO submitRecord(Long id, SysUser currentUser) {
         InspectionRecord record = requireRecord(id);
         projectPermissionService.checkProjectPermission(currentUser.getId(), record.getProjectId());
@@ -286,7 +302,7 @@ public class InspectionService {
             throw BusinessException.forbidden("只能提交自己的检查记录");
         }
         markCompleted(record);
-        inspectionRecordMapper.updateById(record);
+        requireSingleWrite(inspectionRecordMapper.updateById(record), "巡检记录提交");
         return toRecordVO(record, null, false);
     }
 
@@ -695,42 +711,95 @@ public class InspectionService {
     }
 
     public InspectionMonthSummaryVO getMonthSummary(Long projectId, Long boxId, String month, SysUser currentUser) {
+        return getMonthSummary(projectId, boxId, month, null, currentUser);
+    }
+
+    public InspectionMonthSummaryVO getMonthSummary(Long projectId, Long boxId, String month, String checkDate,
+                                                     SysUser currentUser) {
         if (projectId == null) {
             throw new BusinessException("项目ID不能为空");
         }
+        ensureSinglePeriodFilter(month, checkDate);
+        LocalDate targetDate = StringUtils.hasText(checkDate) ? parseCheckDate(checkDate) : null;
+        YearMonth yearMonth = targetDate == null ? parseMonth(month) : YearMonth.from(targetDate);
+        String normalizedMonth = yearMonth.toString();
         requireSummaryPermission(currentUser, projectId);
-        YearMonth yearMonth = parseMonth(month);
         List<ElectricBox> boxes = queryBoxes(projectId, boxId);
-        List<InspectionRecordVO> records = listRecords(projectId, boxId, null, month, null, null, currentUser);
+        List<InspectionRecordVO> visibleRecords = listRecords(
+                projectId,
+                boxId,
+                null,
+                targetDate == null ? normalizedMonth : null,
+                targetDate == null ? null : targetDate.toString(),
+                null,
+                null,
+                currentUser);
+        List<InspectionRecord> aggregateRecords = querySummaryRecords(
+                projectId, boxId, yearMonth, targetDate);
         LocalDate cutoffDate = LocalDate.now();
-        int shouldCheck = boxes.stream()
-                .mapToInt(box -> inspectionScopeService.countRequiredDaysThrough(box, yearMonth, cutoffDate))
-                .sum();
         Map<Long, ElectricBox> boxById = boxes.stream()
                 .collect(Collectors.toMap(ElectricBox::getId, box -> box, (left, right) -> left));
-        long checked = records.stream()
-                .filter(record -> record.getCheckDate() != null && !record.getCheckDate().isAfter(cutoffDate))
-                .filter(record -> yearMonth.equals(YearMonth.from(record.getCheckDate())))
-                .filter(record -> {
-                    ElectricBox recordBox = boxById.get(record.getElectricBoxId());
-                    return recordBox != null && inspectionScopeService.isRequired(recordBox, record.getCheckDate());
-                })
-                .map(record -> record.getElectricBoxId() + ":" + record.getCheckDate())
-                .distinct()
-                .count();
-        int abnormal = (int) records.stream().filter(record -> record.getAbnormalCount() != null
-                && record.getAbnormalCount() > 0).count();
+        int shouldCheck;
+        long checked;
+        int abnormal;
+        if (targetDate != null) {
+            Set<Long> requiredBoxIds = boxes.stream()
+                    .filter(box -> inspectionScopeService.isRequired(box, targetDate))
+                    .map(ElectricBox::getId)
+                    .collect(Collectors.toSet());
+            shouldCheck = requiredBoxIds.size();
+            checked = aggregateRecords.stream()
+                    .filter(record -> targetDate.equals(record.getCheckDate()))
+                    .filter(record -> requiredBoxIds.contains(record.getElectricBoxId()))
+                    .map(record -> record.getElectricBoxId() + ":" + record.getCheckDate())
+                    .distinct()
+                    .count();
+            abnormal = (int) aggregateRecords.stream()
+                    .filter(record -> targetDate.equals(record.getCheckDate()))
+                    .filter(record -> requiredBoxIds.contains(record.getElectricBoxId()))
+                    .filter(record -> record.getAbnormalCount() != null && record.getAbnormalCount() > 0)
+                    .map(record -> record.getElectricBoxId() + ":" + record.getCheckDate())
+                    .distinct()
+                    .count();
+        } else {
+            shouldCheck = boxes.stream()
+                    .mapToInt(box -> inspectionScopeService.countRequiredDaysThrough(box, yearMonth, cutoffDate))
+                    .sum();
+            checked = aggregateRecords.stream()
+                    .filter(record -> record.getCheckDate() != null && !record.getCheckDate().isAfter(cutoffDate))
+                    .filter(record -> yearMonth.equals(YearMonth.from(record.getCheckDate())))
+                    .filter(record -> {
+                        ElectricBox recordBox = boxById.get(record.getElectricBoxId());
+                        return recordBox != null && inspectionScopeService.isRequired(recordBox, record.getCheckDate());
+                    })
+                    .map(record -> record.getElectricBoxId() + ":" + record.getCheckDate())
+                    .distinct()
+                    .count();
+            abnormal = (int) aggregateRecords.stream()
+                    .filter(record -> record.getCheckDate() != null && !record.getCheckDate().isAfter(cutoffDate))
+                    .filter(record -> yearMonth.equals(YearMonth.from(record.getCheckDate())))
+                    .filter(record -> {
+                        ElectricBox recordBox = boxById.get(record.getElectricBoxId());
+                        return recordBox != null && inspectionScopeService.isRequired(recordBox, record.getCheckDate());
+                    })
+                    .filter(record -> record.getAbnormalCount() != null && record.getAbnormalCount() > 0)
+                    .map(record -> record.getElectricBoxId() + ":" + record.getCheckDate())
+                    .distinct()
+                    .count();
+        }
 
         InspectionMonthSummaryVO summary = new InspectionMonthSummaryVO();
         summary.setProjectId(projectId);
         summary.setElectricBoxId(boxId);
-        summary.setMonth(yearMonth.toString());
+        summary.setMonth(normalizedMonth);
+        summary.setPeriodType(targetDate == null ? "MONTH" : "DAY");
+        summary.setPeriodValue(targetDate == null ? normalizedMonth : targetDate.toString());
         summary.setShouldCheck(shouldCheck);
         summary.setChecked((int) checked);
         summary.setMissed(Math.max(shouldCheck - (int) checked, 0));
         summary.setAbnormal(abnormal);
         summary.setOpenRectification(0);
-        summary.setRecords(records);
+        summary.setRecords(visibleRecords);
         return summary;
     }
 
@@ -756,7 +825,17 @@ public class InspectionService {
                 .le(InspectionRecord::getCheckDate, endDate)
                 .orderByDesc(InspectionRecord::getCheckDate)
                 .orderByDesc(InspectionRecord::getId));
-        Set<LocalDate> checkedDays = records.stream().map(InspectionRecord::getCheckDate).collect(Collectors.toSet());
+        Set<LocalDate> requiredDays = inspectionScopeService.requiredDates(box, startDate, endDate);
+        Map<LocalDate, InspectionRecord> latestRecordByDate = new LinkedHashMap<>();
+        records.stream()
+                .filter(record -> record.getCheckDate() != null)
+                .forEach(record -> latestRecordByDate.putIfAbsent(record.getCheckDate(), record));
+        long checkedDays = requiredDays.stream().filter(latestRecordByDate::containsKey).count();
+        long abnormalDays = requiredDays.stream()
+                .map(latestRecordByDate::get)
+                .filter(Objects::nonNull)
+                .filter(record -> record.getAbnormalCount() != null && record.getAbnormalCount() > 0)
+                .count();
         ProjectInfo project = projectInfoMapper.selectById(box.getProjectId());
 
         PublicElectricBoxSummaryVO summary = new PublicElectricBoxSummaryVO();
@@ -770,11 +849,10 @@ public class InspectionService {
         summary.setRangeStartDate(startDate);
         summary.setRangeEndDate(endDate);
         summary.setLatestCheckDate(records.isEmpty() ? null : records.get(0).getCheckDate());
-        summary.setShouldCheckDays(30);
-        summary.setCheckedDays(checkedDays.size());
-        summary.setMissedDays(Math.max(30 - checkedDays.size(), 0));
-        summary.setAbnormalCount((int) records.stream().filter(record -> record.getAbnormalCount() != null
-                && record.getAbnormalCount() > 0).count());
+        summary.setShouldCheckDays(requiredDays.size());
+        summary.setCheckedDays((int) checkedDays);
+        summary.setMissedDays(Math.max(requiredDays.size() - (int) checkedDays, 0));
+        summary.setAbnormalCount((int) abnormalDays);
         summary.setOpenRectificationCount(0);
         summary.setRecentRecords(records.stream()
                 .limit(8)
@@ -811,23 +889,29 @@ public class InspectionService {
                 : inspectionRectificationMapper.selectList(new LambdaQueryWrapper<InspectionRectification>()
                         .in(InspectionRectification::getInspectionRecordId, records.stream().map(InspectionRecord::getId).toList()))
                 .stream().collect(Collectors.groupingBy(InspectionRectification::getInspectionRecordId));
+        Set<LocalDate> requiredDates = inspectionScopeService.requiredDates(
+                box, targetMonth.atDay(1), targetMonth.atEndOfMonth());
 
         List<PublicInspectionMonthRowVO> rows = new ArrayList<>();
         int shouldCheck = 0;
         int checked = 0;
         int abnormal = 0;
+        LocalDate today = LocalDate.now();
         for (int day = 1; day <= targetMonth.lengthOfMonth(); day++) {
             LocalDate date = targetMonth.atDay(day);
-            boolean required = inspectionScopeService.isRequired(box, date);
+            boolean required = requiredDates.contains(date);
             InspectionRecord record = recordByDate.get(date);
             PublicInspectionMonthRowVO row = buildPublicMonthRow(date, required, record,
                     record == null ? List.of() : itemByRecord.getOrDefault(record.getId(), List.of()),
                     record == null ? List.of() : rectificationByRecord.getOrDefault(record.getId(), List.of()));
             rows.add(row);
-            boolean dueDate = !date.isAfter(LocalDate.now());
+            boolean dueDate = !date.isAfter(today);
             if (required && dueDate) shouldCheck++;
             if (required && dueDate && record != null) checked++;
-            if (record != null && record.getAbnormalCount() != null && record.getAbnormalCount() > 0) abnormal++;
+            if (required && dueDate && record != null
+                    && record.getAbnormalCount() != null && record.getAbnormalCount() > 0) {
+                abnormal++;
+            }
         }
 
         ProjectInfo project = projectInfoMapper.selectById(box.getProjectId());
@@ -1727,17 +1811,26 @@ public class InspectionService {
     }
 
     private void validateRecordRequest(InspectionRecordRequest request) {
+        if (request == null) {
+            throw new BusinessException("巡检记录不能为空");
+        }
         if (request.getProjectId() == null) {
             throw new BusinessException("项目ID不能为空");
         }
         if (request.getElectricBoxId() == null) {
             throw new BusinessException("电箱ID不能为空");
         }
+        request.setTemplateCode(TEMPLATE_ELECTRIC_BOX_DAILY);
         request.setSource(SOURCE_ELECTRICIAN_DAILY);
         request.setProblemCategory(null);
-        if (request.getItems() == null || request.getItems().size() < REQUIRED_ITEM_CODES.size()) {
+        if (request.getItems() == null || request.getItems().size() != REQUIRED_ITEM_CODES.size()) {
             throw new BusinessException("六项检查结果必须完整填写");
         }
+        validatePhotoFileIds(request.getOuterPhotoFileIds(), "外观照片");
+        validatePhotoFileIds(request.getInnerPhotoFileIds(), "内部照片");
+        String remark = trimToNull(request.getRemark());
+        validateLength(remark, REMARK_MAX_LENGTH, "巡检备注");
+        request.setRemark(remark);
         Set<String> itemCodes = new HashSet<>();
         for (InspectionItemRequest item : request.getItems()) {
             if (item == null) {
@@ -1748,7 +1841,9 @@ public class InspectionService {
                 throw new BusinessException("检查项编码不支持：" + item.getItemCode());
             }
             item.setItemCode(itemCode);
-            itemCodes.add(itemCode);
+            if (!itemCodes.add(itemCode)) {
+                throw new BusinessException("检查项编码不能重复：" + itemCode);
+            }
         }
         if (!itemCodes.containsAll(REQUIRED_ITEM_CODES)) {
             throw new BusinessException("六项检查项编码不完整");
@@ -1762,9 +1857,40 @@ public class InspectionService {
                 throw new BusinessException(item.getItemName() + "结果值不支持");
             }
             item.setResult(result);
-            if (StringUtils.hasText(item.getDescription())) {
-                item.setDescription(item.getDescription().trim());
+            item.setItemName(EXPORT_ITEM_NAMES.get(item.getItemCode()));
+            String description = trimToNull(item.getDescription());
+            validateLength(description, ITEM_DESCRIPTION_MAX_LENGTH, item.getItemName() + "异常说明");
+            if ("ABNORMAL".equals(result) && description == null) {
+                throw new BusinessException(item.getItemName() + "异常时必须填写说明");
             }
+            item.setDescription(description);
+        }
+    }
+
+    private void validatePhotoFileIds(List<Long> fileIds, String fieldName) {
+        if (fileIds == null || fileIds.isEmpty()) {
+            return;
+        }
+        if (fileIds.size() > MAX_PHOTO_COUNT_PER_GROUP) {
+            throw new BusinessException(fieldName + "不能超过" + MAX_PHOTO_COUNT_PER_GROUP + "张");
+        }
+        Set<Long> distinct = new HashSet<>();
+        for (Long fileId : fileIds) {
+            if (fileId == null || fileId <= 0 || !distinct.add(fileId)) {
+                throw new BusinessException(fieldName + "包含重复或无效文件ID");
+            }
+        }
+    }
+
+    private void validateLength(String value, int maxLength, String fieldName) {
+        if (value != null && value.length() > maxLength) {
+            throw new BusinessException(fieldName + "不能超过" + maxLength + "个字符");
+        }
+    }
+
+    private void requireSingleWrite(int affectedRows, String operation) {
+        if (affectedRows != 1) {
+            throw BusinessException.of(409, operation + "未生效，请刷新后重试");
         }
     }
 
@@ -1785,9 +1911,10 @@ public class InspectionService {
                 .eq(InspectionRecord::getElectricBoxId, electricBoxId)
                 .eq(InspectionRecord::getTemplateCode, templateCode)
                 .eq(InspectionRecord::getSource, source)
-                .eq(InspectionRecord::getCheckDate, checkDate));
+                .eq(InspectionRecord::getCheckDate, checkDate)
+                .ne(InspectionRecord::getStatus, STATUS_REVIEW_REJECTED));
         if (count > 0) {
-            throw new BusinessException("同一电箱同一天只能提交一条有效日检");
+            throw BusinessException.of(409, "同一电箱同一天只能提交一条有效日检");
         }
     }
 
@@ -1929,6 +2056,23 @@ public class InspectionService {
         return electricBoxMapper.selectList(wrapper);
     }
 
+    private List<InspectionRecord> querySummaryRecords(Long projectId, Long boxId, YearMonth month,
+                                                       LocalDate checkDate) {
+        LambdaQueryWrapper<InspectionRecord> wrapper = new LambdaQueryWrapper<InspectionRecord>()
+                .eq(InspectionRecord::getProjectId, projectId)
+                .eq(InspectionRecord::getSource, SOURCE_ELECTRICIAN_DAILY)
+                .ne(InspectionRecord::getStatus, "DRAFT");
+        if (boxId != null) {
+            wrapper.eq(InspectionRecord::getElectricBoxId, boxId);
+        }
+        if (checkDate != null) {
+            wrapper.eq(InspectionRecord::getCheckDate, checkDate);
+        } else {
+            wrapper.between(InspectionRecord::getCheckDate, month.atDay(1), month.atEndOfMonth());
+        }
+        return inspectionRecordMapper.selectList(wrapper);
+    }
+
     private ElectricBox requireBox(Long id) {
         ElectricBox box = electricBoxMapper.selectById(id);
         if (box == null) {
@@ -2002,6 +2146,26 @@ public class InspectionService {
             return YearMonth.parse(month);
         } catch (Exception e) {
             throw new BusinessException("月份格式应为 yyyy-MM");
+        }
+    }
+
+    private void ensureSinglePeriodFilter(String month, String checkDate) {
+        if (StringUtils.hasText(month) && StringUtils.hasText(checkDate)) {
+            throw new BusinessException("月份和检查日期不能同时传入");
+        }
+    }
+
+    private LocalDate parseCheckDate(String checkDate) {
+        try {
+            LocalDate parsed = LocalDate.parse(checkDate.trim());
+            if (parsed.isAfter(LocalDate.now())) {
+                throw new BusinessException("检查日期不能晚于今天");
+            }
+            return parsed;
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BusinessException("检查日期格式应为 yyyy-MM-dd");
         }
     }
 

@@ -5,14 +5,18 @@ import jakarta.validation.constraints.NotBlank;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -52,6 +56,30 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.message").value("系统异常，请稍后重试"));
     }
 
+    @Test
+    void invalidNumericRequestParameterReturnsHttp400() throws Exception {
+        mockMvc.perform(get("/test/numeric-parameter").param("businessId", "[objectUndefined]"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("请求参数格式错误：businessId"));
+    }
+
+    @Test
+    void oversizedMultipartReturnsHttp413() throws Exception {
+        mockMvc.perform(get("/test/upload-too-large"))
+                .andExpect(status().isPayloadTooLarge())
+                .andExpect(jsonPath("$.code").value(413))
+                .andExpect(jsonPath("$.message").value("上传文件过大，单次请求不能超过50MB"));
+    }
+
+    @Test
+    void missingResourceReturnsHttp404InsteadOfInternalError() throws Exception {
+        mockMvc.perform(get("/test/missing-resource"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.message").value("请求的资源不存在"));
+    }
+
     @RestController
     static class ErrorController {
         @GetMapping("/test/business-error/{code}")
@@ -67,6 +95,21 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/test/internal-error")
         Result<Void> internalError() {
             throw new IllegalStateException("数据库密码等内部信息");
+        }
+
+        @GetMapping("/test/numeric-parameter")
+        Result<Long> numericParameter(@RequestParam Long businessId) {
+            return Result.success(businessId);
+        }
+
+        @GetMapping("/test/upload-too-large")
+        Result<Void> uploadTooLarge() {
+            throw new MaxUploadSizeExceededException(50L * 1024 * 1024);
+        }
+
+        @GetMapping("/test/missing-resource")
+        Result<Void> missingResource() throws NoResourceFoundException {
+            throw new NoResourceFoundException(HttpMethod.GET, "/missing");
         }
     }
 

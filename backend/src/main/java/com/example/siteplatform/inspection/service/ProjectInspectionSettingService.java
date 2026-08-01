@@ -69,7 +69,10 @@ public class ProjectInspectionSettingService {
         if (request.getReviewDueHours() != null) setting.setReviewDueHours(between(request.getReviewDueHours(), 1, 168, "复核时限"));
         if (request.getRectificationDays() != null) setting.setRectificationDays(between(request.getRectificationDays(), 1, 30, "整改天数"));
         if (request.getEnabled() != null) setting.setEnabled(Boolean.TRUE.equals(request.getEnabled()) ? 1 : 0);
-        if (create) mapper.insert(setting); else mapper.updateById(setting);
+        int affectedRows = create ? mapper.insert(setting) : mapper.updateById(setting);
+        if (affectedRows != 1) {
+            throw BusinessException.of(409, "巡检设置未生效，请刷新后重试");
+        }
         return toVO(setting);
     }
 

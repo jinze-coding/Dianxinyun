@@ -29,8 +29,14 @@ export const TRAINING_STATUS = {
 
 // 文件状态
 export const FILE_STATUS = {
+  UPLOADED: 'UPLOADED',
+  PENDING: 'PENDING_CONFIRM',
+  ARCHIVED: 'ARCHIVED',
+};
+
+export const FILE_STATUS_TEXT = {
   UPLOADED: '已上传',
-  PENDING: '待确认',
+  PENDING_CONFIRM: '待确认',
   ARCHIVED: '已归档',
 };
 
@@ -45,9 +51,17 @@ export const FILE_TYPES = {
 
 // 设备状态
 export const DEVICE_STATUS = {
-  RUNNING: '运行中',
-  STOPPED: '停机',
-  ABNORMAL: '异常',
+  RUNNING: 'running',
+  STOPPED: 'stopped',
+  ABNORMAL: 'abnormal',
+  MAINTENANCE: 'maintenance',
+};
+
+export const DEVICE_STATUS_TEXT = {
+  running: '运行中',
+  stopped: '停机',
+  abnormal: '异常',
+  maintenance: '维修中',
 };
 
 // 教育类型

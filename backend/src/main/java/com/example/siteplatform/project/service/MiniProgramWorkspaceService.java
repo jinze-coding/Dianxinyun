@@ -5,8 +5,10 @@ import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.camera.entity.CameraResource;
 import com.example.siteplatform.camera.mapper.CameraResourceMapper;
 import com.example.siteplatform.common.BusinessException;
+import com.example.siteplatform.device.constant.DeviceStatus;
 import com.example.siteplatform.device.entity.DeviceInfo;
 import com.example.siteplatform.device.mapper.DeviceInfoMapper;
+import com.example.siteplatform.file.constant.FileStatus;
 import com.example.siteplatform.file.entity.FileResource;
 import com.example.siteplatform.file.mapper.FileResourceMapper;
 import com.example.siteplatform.person.entity.TemporaryPerson;
@@ -70,7 +72,8 @@ public class MiniProgramWorkspaceService {
                 .count();
         int alarmDeviceCount = toInt(deviceMapper.selectCount(new LambdaQueryWrapper<DeviceInfo>()
                 .eq(DeviceInfo::getProjectId, projectId)
-                .in(DeviceInfo::getStatus, "abnormal", "ABNORMAL", "alarm", "ALARM", "danger", "DANGER", "异常", "告警")));
+                .in(DeviceInfo::getStatus,
+                        DeviceStatus.compatibleQueryValues(DeviceStatus.ABNORMAL))));
 
         MiniProgramWorkspaceOverviewVO overview = new MiniProgramWorkspaceOverviewVO();
         overview.setOnsitePersonCount(countOnsitePeople(projectId));
@@ -152,7 +155,7 @@ public class MiniProgramWorkspaceService {
         item.setId(file.getId());
         item.setName(file.getFileName());
         item.setType(file.getFileType());
-        item.setStatus(file.getStatus());
+        item.setStatus(FileStatus.normalize(file.getStatus()));
         item.setCreateTime(file.getCreateTime());
         return item;
     }
@@ -163,7 +166,7 @@ public class MiniProgramWorkspaceService {
         item.setName(device.getDeviceName());
         item.setCode(device.getDeviceCode());
         item.setType(device.getDeviceType());
-        item.setStatus(device.getStatus());
+        item.setStatus(DeviceStatus.normalize(device.getStatus()));
         item.setLastReport(device.getLastReport());
         item.setRemark(device.getRemark());
         return item;

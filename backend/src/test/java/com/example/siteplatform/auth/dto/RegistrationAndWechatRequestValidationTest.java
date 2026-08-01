@@ -33,9 +33,8 @@ class RegistrationAndWechatRequestValidationTest {
     }
 
     @Test
-    void registrationAliasesAndProjectIdsAreValidated() {
+    void registrationAliasesAndProjectIdsAreValidatedWithoutRequiringSeparateUsername() {
         RegistrationSubmitRequest request = new RegistrationSubmitRequest();
-        request.setUsername("bad name");
         request.setPassword("short");
         request.setRealName("申请人");
         request.setPhone("123");
@@ -44,7 +43,7 @@ class RegistrationAndWechatRequestValidationTest {
 
         Set<String> paths = paths(validator.validate(request));
 
-        assertTrue(paths.contains("username"));
+        assertTrue(!paths.contains("username"));
         assertTrue(paths.contains("password"));
         assertTrue(paths.contains("phone"));
         assertTrue(paths.contains("reason"));

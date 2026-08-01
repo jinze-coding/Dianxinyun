@@ -1,4 +1,4 @@
-import type { QualityIssue, QualityIssueStatus, QualitySummary } from '@/types';
+import type { PageResult, QualityAssignee, QualityIssue, QualityIssueStatus, QualitySummary, TodoItem } from '@/types';
 import { previewAreas } from '@/pages/design-preview/previewData';
 import { request, USE_MOCK } from './request';
 
@@ -20,6 +20,7 @@ const mockQualityIssues: QualityIssue[] = previewAreas.flatMap((area) => area.qu
 
 export interface QualityIssuePayload {
   projectId: number;
+  requestKey?: string;
   title: string;
   location?: string;
   description?: string;
@@ -43,6 +44,33 @@ export async function getQualityIssues(projectId: number, status: 'ALL' | 'OVERD
   return request<QualityIssue[]>(`/quality/issues?${query}`);
 }
 
+export async function getQualityIssuePage(
+  projectId: number,
+  status: 'ALL' | 'OVERDUE' | QualityIssueStatus = 'ALL',
+  keyword = '',
+  pageNo = 1,
+  pageSize = 20
+) {
+  if (USE_MOCK) {
+    const items = await getQualityIssues(projectId, status, keyword);
+    const start = (pageNo - 1) * pageSize;
+    return {
+      pageNo,
+      pageSize,
+      total: items.length,
+      records: items.slice(start, start + pageSize)
+    } as PageResult<QualityIssue>;
+  }
+  const query = [
+    `projectId=${projectId}`,
+    `pageNo=${pageNo}`,
+    `pageSize=${pageSize}`,
+    status !== 'ALL' ? `status=${status}` : '',
+    keyword.trim() ? `keyword=${encodeURIComponent(keyword.trim())}` : ''
+  ].filter(Boolean).join('&');
+  return request<PageResult<QualityIssue>>(`/quality/issues/page?${query}`);
+}
+
 export async function getQualitySummary(projectId: number) {
   if (USE_MOCK) {
     const items = mockQualityIssues.filter((item) => item.projectId === projectId);
@@ -53,11 +81,23 @@ export async function getQualitySummary(projectId: number) {
       overdueCount: items.filter((item) => item.overdue).length,
       recheckCount: items.filter((item) => item.status === 'RECHECK').length,
       closedCount: closed,
-      closureRate: items.length ? Math.round(closed * 100 / items.length) : 100,
+      closureRate: items.length ? Math.round(closed * 100 / items.length) : 0,
       canManage: true
     };
   }
   return request<QualitySummary>(`/quality/issues/summary?projectId=${projectId}`);
+}
+
+export async function getQualityAssignees(projectId: number) {
+  if (USE_MOCK) {
+    return [{ userId: 1, username: 'mock-user', realName: '演示整改人', displayName: '演示整改人' }] as QualityAssignee[];
+  }
+  return request<QualityAssignee[]>(`/quality/issues/assignees?projectId=${projectId}`);
+}
+
+export async function getQualityTodos(projectId?: number) {
+  if (USE_MOCK) return [] as TodoItem[];
+  return request<TodoItem[]>(`/quality/issues/todos${projectId ? `?projectId=${projectId}` : ''}`);
 }
 
 export async function getQualityIssue(id: number) {
@@ -95,5 +135,36 @@ export async function reviewQualityIssue(id: number, passed: boolean, comment = 
   return request<QualityIssue>(`/quality/issues/${id}/review`, {
     method: 'POST',
     data: { passed, comment, photoFileIds }
+  });
+}
+
+export async function assignQualityIssue(
+  id: number,
+  payload: { assigneeId?: number; deadline?: string; comment?: string }
+) {
+  if (USE_MOCK) {
+    const issue = mockQualityIssues.find((item) => item.id === id) as QualityIssue;
+    if (payload.assigneeId) issue.assigneeId = payload.assigneeId;
+    if (payload.deadline) issue.deadline = payload.deadline;
+    return issue;
+  }
+  return request<QualityIssue>(`/quality/issues/${id}/assign`, {
+    method: 'POST',
+    data: payload
+  });
+}
+
+export async function voidQualityIssue(id: number, comment: string) {
+  if (USE_MOCK) {
+    const issue = mockQualityIssues.find((item) => item.id === id) as QualityIssue;
+    issue.status = 'VOIDED';
+    issue.canRectify = false;
+    issue.canReview = false;
+    issue.dueText = '已作废';
+    return issue;
+  }
+  return request<QualityIssue>(`/quality/issues/${id}/void`, {
+    method: 'POST',
+    data: { comment }
   });
 }

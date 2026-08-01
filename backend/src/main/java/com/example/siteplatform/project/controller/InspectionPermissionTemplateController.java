@@ -2,6 +2,7 @@ package com.example.siteplatform.project.controller;
 
 import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.auth.service.AuthService;
+import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.common.Result;
 import com.example.siteplatform.project.dto.InspectionPermissionCatalogGroupVO;
 import com.example.siteplatform.project.dto.InspectionPermissionTemplateRequest;
@@ -22,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-@Tag(name = "电箱巡检权限模板", description = "电箱巡检功能权限模板和权限目录")
+@Tag(name = "历史巡检权限模板", description = "已迁移到统一项目角色库，仅保留历史数据兼容")
 @RestController
 @RequestMapping("/api/v1/inspection-permission-templates")
 public class InspectionPermissionTemplateController {
@@ -33,48 +34,48 @@ public class InspectionPermissionTemplateController {
     @Autowired
     private AuthService authService;
 
-    @Operation(summary = "查询权限模板")
+    @Operation(summary = "已停用：请使用系统管理的角色与权限")
     @GetMapping
     public Result<List<InspectionPermissionTemplateVO>> listTemplates(
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
-        return Result.success(templateService.listTemplates(currentUser));
+        throw BusinessException.of(410, "巡检权限角色模板已迁移到系统管理的角色与权限");
     }
 
-    @Operation(summary = "查询权限码目录")
+    @Operation(summary = "已停用：请使用系统管理的角色与权限")
     @GetMapping("/catalog")
     public Result<List<InspectionPermissionCatalogGroupVO>> catalog(
             @RequestHeader(value = "Authorization", required = false) String token) {
         authService.getCurrentUser(token);
-        return Result.success(templateService.permissionCatalog());
+        throw BusinessException.of(410, "巡检权限角色模板已迁移到系统管理的角色与权限");
     }
 
-    @Operation(summary = "创建权限模板")
+    @Operation(summary = "已停用：请使用系统管理的角色与权限")
     @PostMapping
     public Result<InspectionPermissionTemplateVO> createTemplate(
             @RequestBody InspectionPermissionTemplateRequest request,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
-        return Result.success(templateService.createTemplate(request, currentUser));
+        throw BusinessException.of(410, "巡检权限角色模板已迁移到系统管理的角色与权限");
     }
 
-    @Operation(summary = "编辑权限模板")
+    @Operation(summary = "已停用：请使用系统管理的角色与权限")
     @PutMapping("/{id}")
     public Result<InspectionPermissionTemplateVO> updateTemplate(
             @PathVariable Long id,
             @RequestBody InspectionPermissionTemplateRequest request,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
-        return Result.success(templateService.updateTemplate(id, request, currentUser));
+        throw BusinessException.of(410, "巡检权限角色模板已迁移到系统管理的角色与权限");
     }
 
-    @Operation(summary = "启停权限模板")
+    @Operation(summary = "已停用：请使用系统管理的角色与权限")
     @PostMapping("/{id}/status")
     public Result<InspectionPermissionTemplateVO> updateStatus(
             @PathVariable Long id,
             @RequestBody InspectionPermissionTemplateStatusRequest request,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
-        return Result.success(templateService.updateStatus(id, request, currentUser));
+        throw BusinessException.of(410, "巡检权限角色模板已迁移到系统管理的角色与权限");
     }
 }

@@ -86,4 +86,27 @@ public interface SysUserProjectMapper extends BaseMapper<SysUserProject> {
             ORDER BY p.id
             """)
     List<UserProjectRoleVO> selectUserProjectRoles(@Param("userId") Long userId);
+
+    /**
+     * 系统管理员在用户管理页查看某账号的完整项目授权时使用；与登录上下文不同，
+     * 这里保留已暂停项目，便于管理员识别并恢复或调整授权。
+     */
+    @Select("""
+            SELECT p.id AS projectId,
+                   p.project_name AS projectName,
+                   p.short_name AS shortName,
+                   sup.project_role_code AS projectRoleCode,
+                   sup.status AS accessStatus,
+                   sup.status_reason AS statusReason,
+                   sup.inspection_permission_template_id AS permissionTemplateId,
+                   ipt.template_name AS permissionTemplateName,
+                   ipt.template_code AS permissionTemplateCode,
+                   ipt.permission_codes AS permissionCodeText
+            FROM sys_user_project sup
+            INNER JOIN project_info p ON p.id = sup.project_id AND p.deleted = 0
+            LEFT JOIN inspection_permission_template ipt ON ipt.id = sup.inspection_permission_template_id AND ipt.deleted = 0
+            WHERE sup.user_id = #{userId}
+            ORDER BY p.id
+            """)
+    List<UserProjectRoleVO> selectUserProjectRolesForManagement(@Param("userId") Long userId);
 }

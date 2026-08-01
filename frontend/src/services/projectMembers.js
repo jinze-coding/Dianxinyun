@@ -8,6 +8,10 @@ export function getProjectUserOptions(projectId, keyword) {
   return get('/project-members/users', { projectId, keyword });
 }
 
+export function getAssignableProjectRoles(projectId) {
+  return get('/project-members/roles', { projectId });
+}
+
 export function createProjectUser(data) {
   return post('/project-members/users', data);
 }

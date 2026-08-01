@@ -33,6 +33,19 @@ class WechatPlatformClientTest {
     }
 
     @Test
+    void localProfileDerivesAStableMockPhoneFromWechatAuthorizationCode() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles("local");
+        WechatPlatformClient client = client(true, false, environment);
+
+        String first = client.getPhoneNumber("phone-authorization-code", null);
+        String second = client.getPhoneNumber("phone-authorization-code", null);
+
+        assertEquals(first, second);
+        assertTrue(first.matches("^1\\d{10}$"));
+    }
+
+    @Test
     void missingOfficialConfigurationFailsClosedOutsideDevelopment() {
         IllegalStateException exception = assertThrows(IllegalStateException.class,
                 () -> client(false, false, new MockEnvironment()));

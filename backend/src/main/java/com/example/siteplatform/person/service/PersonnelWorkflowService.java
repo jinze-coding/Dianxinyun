@@ -30,6 +30,17 @@ import java.util.Objects;
 
 @Service
 public class PersonnelWorkflowService {
+    private static final int PERSON_NAME_MAX_LENGTH = 50;
+    private static final int GENDER_MAX_LENGTH = 10;
+    private static final int IDCARD_MAX_LENGTH = 20;
+    private static final int PHONE_MAX_LENGTH = 20;
+    private static final int UNIT_MAX_LENGTH = 100;
+    private static final int ROLE_MAX_LENGTH = 50;
+    private static final int REMARK_MAX_LENGTH = 500;
+    private static final int CERTIFICATE_TYPE_MAX_LENGTH = 80;
+    private static final int CERTIFICATE_NO_MAX_LENGTH = 100;
+    private static final String PERSON_CERTIFICATE_BUSINESS_TYPE = "PERSON_CERTIFICATE";
+
     private final TemporaryPersonMapper personMapper;
     private final PersonEntryExitLogMapper movementMapper;
     private final PersonCertificateMapper certificateMapper;
@@ -54,18 +65,17 @@ public class PersonnelWorkflowService {
             throw new BusinessException("项目ID不能为空");
         }
         requireManage(currentUser, person.getProjectId());
-        if (!StringUtils.hasText(person.getName())) {
-            throw new BusinessException("人员姓名不能为空");
-        }
         LocalDateTime occurredAt = person.getEntryTime() == null ? LocalDateTime.now() : person.getEntryTime();
-        person.setName(person.getName().trim());
-        person.setEntryTime(occurredAt);
-        person.setStatus(PersonnelStatus.WAIT_EDUCATION);
-        person.setCreateTime(LocalDateTime.now());
-        person.setUpdateTime(LocalDateTime.now());
-        personMapper.insert(person);
-        writeMovement(person, "ENTRY", occurredAt, currentUser, "首次登记进场");
-        return person;
+        TemporaryPerson created = new TemporaryPerson();
+        created.setProjectId(person.getProjectId());
+        copyEditablePersonFields(person, created, true);
+        created.setEntryTime(occurredAt);
+        created.setStatus(PersonnelStatus.WAIT_EDUCATION);
+        created.setCreateTime(LocalDateTime.now());
+        created.setUpdateTime(LocalDateTime.now());
+        requireSingleWrite(personMapper.insert(created), "人员新增");
+        writeMovement(created, "ENTRY", occurredAt, currentUser, "首次登记进场");
+        return created;
     }
 
     @Transactional
@@ -79,20 +89,17 @@ public class PersonnelWorkflowService {
                 && !PersonnelStatus.normalize(request.getStatus()).equals(PersonnelStatus.normalize(existing.getStatus()))) {
             throw new BusinessException("人员状态请通过进退场或安全教育流程更新");
         }
-        request.setId(id);
-        request.setProjectId(existing.getProjectId());
-        request.setStatus(request.getStatus() == null ? existing.getStatus() : PersonnelStatus.normalize(request.getStatus()));
-        request.setEntryTime(request.getEntryTime() == null ? existing.getEntryTime() : request.getEntryTime());
-        request.setUpdateTime(LocalDateTime.now());
-        personMapper.updateById(request);
-        return personMapper.selectById(id);
+        copyEditablePersonFields(request, existing, false);
+        existing.setUpdateTime(LocalDateTime.now());
+        requireSingleWrite(personMapper.updateById(existing), "人员更新");
+        return existing;
     }
 
     @Transactional
     public void delete(Long id, SysUser currentUser) {
         TemporaryPerson existing = requirePerson(id);
         requireManage(currentUser, existing.getProjectId());
-        personMapper.deleteById(id);
+        requireSingleWrite(personMapper.deleteById(id), "人员删除");
     }
 
     @Transactional
@@ -117,7 +124,7 @@ public class PersonnelWorkflowService {
             throw new BusinessException("进退场动作不正确");
         }
         person.setUpdateTime(LocalDateTime.now());
-        personMapper.updateById(person);
+        requireSingleWrite(personMapper.updateById(person), "人员进退场状态更新");
         return writeMovement(person, action, occurredAt, currentUser, request == null ? null : request.getRemark());
     }
 
@@ -156,10 +163,10 @@ public class PersonnelWorkflowService {
         certificate.setPersonId(personId);
         certificate.setCreateTime(LocalDateTime.now());
         certificate.setUpdateTime(LocalDateTime.now());
-        validateFile(request.getFileId(), person.getProjectId());
-        certificateMapper.insert(certificate);
-        bindFile(request.getFileId(), person.getProjectId(), certificate.getId());
-        return toCertificateVO(certificateMapper.selectById(certificate.getId()));
+        FileResource file = validateFile(request.getFileId(), person.getProjectId(), currentUser.getId(), null);
+        requireSingleWrite(certificateMapper.insert(certificate), "人员证件新增");
+        bindFile(file, person.getProjectId(), certificate.getId(), currentUser.getId());
+        return toCertificateVO(certificate);
     }
 
     @Transactional
@@ -167,11 +174,11 @@ public class PersonnelWorkflowService {
         PersonCertificate existing = requireCertificate(certificateId);
         requireManage(currentUser, existing.getProjectId());
         validateCertificate(request);
-        validateFile(request.getFileId(), existing.getProjectId());
+        FileResource file = validateFile(request.getFileId(), existing.getProjectId(), currentUser.getId(), existing.getId());
         BeanUtils.copyProperties(request, existing);
         existing.setUpdateTime(LocalDateTime.now());
-        certificateMapper.updateById(existing);
-        bindFile(request.getFileId(), existing.getProjectId(), existing.getId());
+        requireSingleWrite(certificateMapper.updateById(existing), "人员证件更新");
+        bindFile(file, existing.getProjectId(), existing.getId(), currentUser.getId());
         return toCertificateVO(existing);
     }
 
@@ -179,7 +186,7 @@ public class PersonnelWorkflowService {
     public void deleteCertificate(Long certificateId, SysUser currentUser) {
         PersonCertificate existing = requireCertificate(certificateId);
         requireManage(currentUser, existing.getProjectId());
-        certificateMapper.deleteById(certificateId);
+        requireSingleWrite(certificateMapper.deleteById(certificateId), "人员证件删除");
     }
 
     public TemporaryPerson requirePerson(Long id) {
@@ -198,10 +205,10 @@ public class PersonnelWorkflowService {
         log.setActionType(action);
         log.setOccurredAt(occurredAt);
         log.setOperatorId(operator.getId());
-        log.setOperatorName(displayName(operator));
-        log.setRemark(remark);
+        log.setOperatorName(optionalText(displayName(operator), PERSON_NAME_MAX_LENGTH, "操作人姓名"));
+        log.setRemark(optionalText(remark, REMARK_MAX_LENGTH, "进退场备注"));
         log.setCreateTime(LocalDateTime.now());
-        movementMapper.insert(log);
+        requireSingleWrite(movementMapper.insert(log), "进退场流水新增");
         return log;
     }
 
@@ -212,28 +219,54 @@ public class PersonnelWorkflowService {
         if (!StringUtils.hasText(request.getCertificateNo())) {
             throw new BusinessException("证件编号不能为空");
         }
+        request.setCertificateType(requireText(request.getCertificateType(), CERTIFICATE_TYPE_MAX_LENGTH, "证件类型"));
+        request.setCertificateNo(requireText(request.getCertificateNo(), CERTIFICATE_NO_MAX_LENGTH, "证件编号"));
+        request.setRemark(optionalText(request.getRemark(), REMARK_MAX_LENGTH, "证件备注"));
+        if (request.getFileId() != null && request.getFileId() <= 0) {
+            throw new BusinessException("证件附件ID不正确");
+        }
         if (request.getIssueDate() != null && request.getExpiryDate() != null
                 && request.getExpiryDate().isBefore(request.getIssueDate())) {
             throw new BusinessException("证件到期日期不能早于发证日期");
         }
     }
 
-    private void validateFile(Long fileId, Long projectId) {
-        if (fileId == null) return;
+    private FileResource validateFile(Long fileId, Long projectId, Long operatorId, Long certificateId) {
+        if (fileId == null) return null;
         FileResource file = fileMapper.selectById(fileId);
         if (file == null || !Objects.equals(file.getProjectId(), projectId)) {
             throw new BusinessException("证件附件不属于当前项目");
         }
+        if (!PERSON_CERTIFICATE_BUSINESS_TYPE.equalsIgnoreCase(file.getBusinessType())) {
+            throw new BusinessException("证件附件类型不正确");
+        }
+        if (file.getBusinessId() == null) {
+            if (!Objects.equals(file.getUploaderId(), operatorId)) {
+                throw BusinessException.forbidden("只能关联本人刚上传的证件附件");
+            }
+        } else if (!Objects.equals(file.getBusinessId(), certificateId)) {
+            throw new BusinessException("证件附件已关联其他业务记录");
+        }
+        return file;
     }
 
-    private void bindFile(Long fileId, Long projectId, Long certificateId) {
-        if (fileId == null) return;
-        FileResource file = fileMapper.selectById(fileId);
-        file.setProjectId(projectId);
-        file.setBusinessType("PERSON_CERTIFICATE");
-        file.setBusinessId(certificateId);
-        file.setUpdateTime(LocalDateTime.now());
-        fileMapper.updateById(file);
+    private void bindFile(FileResource file, Long projectId, Long certificateId, Long operatorId) {
+        if (file == null) return;
+        LambdaUpdateWrapper<FileResource> wrapper = new LambdaUpdateWrapper<FileResource>()
+                .eq(FileResource::getId, file.getId())
+                .eq(FileResource::getProjectId, projectId)
+                .eq(FileResource::getBusinessType, file.getBusinessType())
+                .eq(FileResource::getDeleted, 0);
+        if (file.getBusinessId() == null) {
+            wrapper.isNull(FileResource::getBusinessId)
+                    .eq(FileResource::getUploaderId, operatorId);
+        } else {
+            wrapper.eq(FileResource::getBusinessId, certificateId);
+        }
+        wrapper.set(FileResource::getBusinessType, PERSON_CERTIFICATE_BUSINESS_TYPE)
+                .set(FileResource::getBusinessId, certificateId)
+                .set(FileResource::getUpdateTime, LocalDateTime.now());
+        requireSingleWrite(fileMapper.update(null, wrapper), "证件附件绑定");
     }
 
     private PersonCertificate requireCertificate(Long id) {
@@ -279,5 +312,56 @@ public class PersonnelWorkflowService {
 
     private String displayName(SysUser user) {
         return StringUtils.hasText(user.getRealName()) ? user.getRealName() : user.getUsername();
+    }
+
+    private void copyEditablePersonFields(TemporaryPerson source, TemporaryPerson target, boolean requireName) {
+        if (requireName || source.getName() != null) {
+            target.setName(requireText(source.getName(), PERSON_NAME_MAX_LENGTH, "人员姓名"));
+        }
+        if (source.getGender() != null) {
+            target.setGender(optionalText(source.getGender(), GENDER_MAX_LENGTH, "性别"));
+        }
+        if (source.getIdcard() != null) {
+            target.setIdcard(optionalText(source.getIdcard(), IDCARD_MAX_LENGTH, "身份证号"));
+        }
+        if (source.getPhone() != null) {
+            target.setPhone(optionalText(source.getPhone(), PHONE_MAX_LENGTH, "手机号"));
+        }
+        if (source.getUnit() != null) {
+            target.setUnit(optionalText(source.getUnit(), UNIT_MAX_LENGTH, "所属单位"));
+        }
+        if (source.getRole() != null) {
+            target.setRole(optionalText(source.getRole(), ROLE_MAX_LENGTH, "工种"));
+        }
+        if (source.getEntryTime() != null) {
+            target.setEntryTime(source.getEntryTime());
+        }
+        if (source.getRemark() != null) {
+            target.setRemark(optionalText(source.getRemark(), REMARK_MAX_LENGTH, "人员备注"));
+        }
+    }
+
+    private String requireText(String value, int maxLength, String fieldName) {
+        String normalized = optionalText(value, maxLength, fieldName);
+        if (normalized == null) {
+            throw new BusinessException(fieldName + "不能为空");
+        }
+        return normalized;
+    }
+
+    private String optionalText(String value, int maxLength, String fieldName) {
+        if (value == null) return null;
+        String normalized = value.trim();
+        if (normalized.isEmpty()) return null;
+        if (normalized.length() > maxLength) {
+            throw new BusinessException(fieldName + "不能超过" + maxLength + "个字符");
+        }
+        return normalized;
+    }
+
+    private void requireSingleWrite(int affectedRows, String operation) {
+        if (affectedRows != 1) {
+            throw BusinessException.of(409, operation + "未生效，请刷新后重试");
+        }
     }
 }

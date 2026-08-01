@@ -8,6 +8,7 @@ import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.common.Result;
 import com.example.siteplatform.file.entity.FileResource;
 import com.example.siteplatform.file.mapper.FileResourceMapper;
+import com.example.siteplatform.file.constant.FileStatus;
 import com.example.siteplatform.person.entity.TemporaryPerson;
 import com.example.siteplatform.person.constant.PersonnelStatus;
 import com.example.siteplatform.person.mapper.TemporaryPersonMapper;
@@ -25,15 +26,29 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Tag(name = "安全教育管理", description = "安全三级教育培训批次管理接口")
 @RestController
 @RequestMapping("/api/v1/safety-education")
 public class SafetyEducationController {
+
+    private static final String FILE_BUSINESS_TYPE = "safety_education";
+    private static final int BATCH_NAME_MAX_LENGTH = 200;
+    private static final int EDU_TYPE_MAX_LENGTH = 50;
+    private static final int PLACE_MAX_LENGTH = 100;
+    private static final int TRAINER_MAX_LENGTH = 50;
+    private static final int REMARK_MAX_LENGTH = 500;
+    private static final int EXAM_TYPE_MAX_LENGTH = 100;
+    private static final int MATERIAL_MAX_LENGTH = 200;
+    private static final int MAX_FILE_COUNT = 20;
+    private static final int MAX_PERSON_COUNT = 500;
 
     @Autowired
     private SafetyEducationBatchMapper batchMapper;
@@ -146,7 +161,7 @@ public class SafetyEducationController {
 
         SafetyEducationBatch batch = batchMapper.selectById(id);
         if (batch == null) {
-            return Result.error("培训批次不存在");
+            throw BusinessException.notFound("培训批次不存在");
         }
         projectPermissionService.checkProjectPermission(currentUser.getId(), batch.getProjectId());
 
@@ -211,64 +226,46 @@ public class SafetyEducationController {
             @RequestBody Map<String, Object> params,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
+        requireParams(params);
 
         SafetyEducationBatch batch = new SafetyEducationBatch();
-        batch.setProjectId(params.get("projectId") != null ? Long.valueOf(params.get("projectId").toString()) : null);
-        if (batch.getProjectId() == null) {
-            throw new BusinessException("项目ID不能为空");
-        }
+        batch.setProjectId(requirePositiveLong(params.get("projectId"), "项目ID"));
         requireManagePermission(currentUser, batch.getProjectId());
-        batch.setBatchName((String) params.get("batchName"));
-        batch.setEduType((String) params.get("eduType"));
+        List<Long> personIds = parseIdList(params.get("personIds"), "培训人员", MAX_PERSON_COUNT, true);
+        List<TemporaryPerson> people = validatePeople(personIds, batch.getProjectId());
+        List<Long> fileIds = parseIdList(params.get("fileIds"), "培训资料", MAX_FILE_COUNT, false);
+        List<FileResource> files = validateFiles(fileIds, batch.getProjectId(), currentUser.getId());
+
+        batch.setBatchName(requireText(params.get("batchName"), BATCH_NAME_MAX_LENGTH, "批次名称"));
+        batch.setEduType(optionalText(params.get("eduType"), EDU_TYPE_MAX_LENGTH, "教育类型"));
         Object timeValue = firstNonNull(params.get("time"), params.get("trainingTime"));
         if (timeValue != null) {
             batch.setTrainingTime(parseTrainingTime(timeValue));
         }
-        batch.setTrainingPlace((String) firstNonNull(params.get("place"), params.get("trainingPlace")));
-        batch.setTrainer((String) params.get("trainer"));
+        batch.setTrainingPlace(optionalText(firstNonNull(params.get("place"), params.get("trainingPlace")),
+                PLACE_MAX_LENGTH, "培训地点"));
+        batch.setTrainer(optionalText(params.get("trainer"), TRAINER_MAX_LENGTH, "培训讲师"));
         batch.setStatus("IN_PROGRESS");
-        batch.setRemark((String) params.get("remark"));
-        if (params.get("courseHours") != null) batch.setCourseHours(Integer.valueOf(params.get("courseHours").toString()));
-        if (params.get("examType") != null) batch.setExamType((String) params.get("examType"));
-        if (params.get("trainingMaterial") != null) batch.setTrainingMaterial((String) params.get("trainingMaterial"));
+        batch.setRemark(optionalText(params.get("remark"), REMARK_MAX_LENGTH, "批次备注"));
+        if (params.get("courseHours") != null) batch.setCourseHours(parseCourseHours(params.get("courseHours")));
+        batch.setExamType(optionalText(params.get("examType"), EXAM_TYPE_MAX_LENGTH, "考核方式"));
+        batch.setTrainingMaterial(optionalText(params.get("trainingMaterial"), MATERIAL_MAX_LENGTH, "培训课件"));
         batch.setCreateTime(LocalDateTime.now());
         batch.setUpdateTime(LocalDateTime.now());
 
-        batchMapper.insert(batch);
+        requireSingleWrite(batchMapper.insert(batch), "培训批次新增");
 
-        // 更新文件关联的businessId
-        List<Integer> fileIds = (List<Integer>) params.get("fileIds");
-        if (fileIds != null) {
-            for (Integer fileId : fileIds) {
-                FileResource file = fileMapper.selectById(Long.valueOf(fileId));
-                if (file != null) {
-                    if (file.getProjectId() != null && !batch.getProjectId().equals(file.getProjectId())) {
-                        throw new BusinessException("培训资料不属于当前项目");
-                    }
-                    file.setBusinessId(batch.getId());
-                    fileMapper.updateById(file);
-                }
-            }
+        for (FileResource file : files) {
+            bindFile(file, batch.getProjectId(), batch.getId(), currentUser.getId());
         }
 
-        // 插入关联人员
-        List<Integer> personIds = (List<Integer>) params.get("personIds");
-        if (personIds == null || personIds.isEmpty()) {
-            throw new BusinessException("请至少选择一名培训人员");
-        }
-        if (personIds != null) {
-            for (Integer personId : personIds) {
-                TemporaryPerson person = personnelMapper.selectById(Long.valueOf(personId));
-                if (person == null || !batch.getProjectId().equals(person.getProjectId())) {
-                    throw new BusinessException("培训人员不属于当前项目");
-                }
-                SafetyEducationPerson relation = new SafetyEducationPerson();
-                relation.setBatchId(batch.getId());
-                relation.setPersonId(Long.valueOf(personId));
-                relation.setStatus("IN_PROGRESS");
-                relation.setCreateTime(LocalDateTime.now());
-                personRelationMapper.insert(relation);
-            }
+        for (TemporaryPerson person : people) {
+            SafetyEducationPerson relation = new SafetyEducationPerson();
+            relation.setBatchId(batch.getId());
+            relation.setPersonId(person.getId());
+            relation.setStatus("IN_PROGRESS");
+            relation.setCreateTime(LocalDateTime.now());
+            requireSingleWrite(personRelationMapper.insert(relation), "培训人员关联新增");
         }
 
         Map<String, Object> result = new HashMap<>();
@@ -285,28 +282,29 @@ public class SafetyEducationController {
             @RequestBody Map<String, Object> params,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
+        requireParams(params);
 
         SafetyEducationBatch batch = batchMapper.selectById(id);
         if (batch == null) {
-            return Result.error("培训批次不存在");
+            throw BusinessException.notFound("培训批次不存在");
         }
         requireManagePermission(currentUser, batch.getProjectId());
 
-        if (params.get("batchName") != null) batch.setBatchName((String) params.get("batchName"));
-        if (params.get("eduType") != null) batch.setEduType((String) params.get("eduType"));
+        if (params.get("batchName") != null) batch.setBatchName(requireText(params.get("batchName"), BATCH_NAME_MAX_LENGTH, "批次名称"));
+        if (params.get("eduType") != null) batch.setEduType(optionalText(params.get("eduType"), EDU_TYPE_MAX_LENGTH, "教育类型"));
         Object timeValue = firstNonNull(params.get("time"), params.get("trainingTime"));
         if (timeValue != null) {
             batch.setTrainingTime(parseTrainingTime(timeValue));
         }
         Object placeValue = firstNonNull(params.get("place"), params.get("trainingPlace"));
-        if (placeValue != null) batch.setTrainingPlace((String) placeValue);
-        if (params.get("trainer") != null) batch.setTrainer((String) params.get("trainer"));
-        if (params.get("remark") != null) batch.setRemark((String) params.get("remark"));
-        if (params.get("courseHours") != null) batch.setCourseHours(Integer.valueOf(params.get("courseHours").toString()));
-        if (params.get("examType") != null) batch.setExamType((String) params.get("examType"));
-        if (params.get("trainingMaterial") != null) batch.setTrainingMaterial((String) params.get("trainingMaterial"));
+        if (placeValue != null) batch.setTrainingPlace(optionalText(placeValue, PLACE_MAX_LENGTH, "培训地点"));
+        if (params.get("trainer") != null) batch.setTrainer(optionalText(params.get("trainer"), TRAINER_MAX_LENGTH, "培训讲师"));
+        if (params.get("remark") != null) batch.setRemark(optionalText(params.get("remark"), REMARK_MAX_LENGTH, "批次备注"));
+        if (params.get("courseHours") != null) batch.setCourseHours(parseCourseHours(params.get("courseHours")));
+        if (params.get("examType") != null) batch.setExamType(optionalText(params.get("examType"), EXAM_TYPE_MAX_LENGTH, "考核方式"));
+        if (params.get("trainingMaterial") != null) batch.setTrainingMaterial(optionalText(params.get("trainingMaterial"), MATERIAL_MAX_LENGTH, "培训课件"));
         batch.setUpdateTime(LocalDateTime.now());
-        batchMapper.updateById(batch);
+        requireSingleWrite(batchMapper.updateById(batch), "培训批次更新");
 
         return Result.success();
     }
@@ -321,7 +319,7 @@ public class SafetyEducationController {
 
         SafetyEducationBatch batch = batchMapper.selectById(id);
         if (batch == null) {
-            return Result.error("培训批次不存在");
+            throw BusinessException.notFound("培训批次不存在");
         }
         requireManagePermission(currentUser, batch.getProjectId());
 
@@ -332,7 +330,7 @@ public class SafetyEducationController {
         // 更新批次状态
         batch.setStatus("COMPLETED");
         batch.setUpdateTime(LocalDateTime.now());
-        batchMapper.updateById(batch);
+        requireSingleWrite(batchMapper.updateById(batch), "培训批次完成");
 
         // 更新关联人员状态为"已教育"
         LambdaQueryWrapper<SafetyEducationPerson> relationWrapper = new LambdaQueryWrapper<>();
@@ -346,13 +344,13 @@ public class SafetyEducationController {
                 personWrapper.eq(TemporaryPerson::getId, relation.getPersonId())
                         .set(TemporaryPerson::getStatus, PersonnelStatus.EDUCATED)
                         .set(TemporaryPerson::getUpdateTime, LocalDateTime.now());
-                personnelMapper.update(null, personWrapper);
+                requireSingleWrite(personnelMapper.update(null, personWrapper), "培训人员教育状态更新");
             }
 
             // 更新关联记录状态
             relation.setStatus("COMPLETED");
             relation.setFinishTime(LocalDateTime.now());
-            personRelationMapper.updateById(relation);
+            requireSingleWrite(personRelationMapper.updateById(relation), "培训人员关联完成");
         }
 
         return Result.success();
@@ -368,17 +366,21 @@ public class SafetyEducationController {
 
         SafetyEducationBatch batch = batchMapper.selectById(id);
         if (batch == null) {
-            return Result.error("培训批次不存在");
+            throw BusinessException.notFound("培训批次不存在");
         }
         requireManagePermission(currentUser, batch.getProjectId());
 
         // 删除关联记录
         LambdaQueryWrapper<SafetyEducationPerson> relationWrapper = new LambdaQueryWrapper<>();
         relationWrapper.eq(SafetyEducationPerson::getBatchId, id);
-        personRelationMapper.delete(relationWrapper);
+        long relationCount = personRelationMapper.selectCount(relationWrapper);
+        int deletedRelations = personRelationMapper.delete(relationWrapper);
+        if (deletedRelations != relationCount) {
+            throw BusinessException.of(409, "培训人员关联删除未完整生效，请刷新后重试");
+        }
 
         // 删除批次
-        batchMapper.deleteById(id);
+        requireSingleWrite(batchMapper.deleteById(id), "培训批次删除");
         return Result.success();
     }
 
@@ -393,6 +395,9 @@ public class SafetyEducationController {
     }
 
     private LocalDateTime parseTrainingTime(Object value) {
+        if (value instanceof LocalDateTime localDateTime) {
+            return localDateTime;
+        }
         String text = value.toString().trim();
         if (text.isEmpty()) {
             return null;
@@ -405,6 +410,142 @@ public class SafetyEducationController {
         } else if (text.length() > 19) {
             text = text.substring(0, 19);
         }
-        return LocalDateTime.parse(text);
+        try {
+            return LocalDateTime.parse(text);
+        } catch (DateTimeParseException exception) {
+            throw new BusinessException("培训时间格式不正确");
+        }
+    }
+
+    private void requireParams(Map<String, Object> params) {
+        if (params == null) {
+            throw new BusinessException("培训批次信息不能为空");
+        }
+    }
+
+    private Long requirePositiveLong(Object value, String fieldName) {
+        if (value == null) {
+            throw new BusinessException(fieldName + "不能为空");
+        }
+        try {
+            long parsed = Long.parseLong(value.toString().trim());
+            if (parsed <= 0) throw new NumberFormatException();
+            return parsed;
+        } catch (NumberFormatException exception) {
+            throw new BusinessException(fieldName + "不正确");
+        }
+    }
+
+    private List<Long> parseIdList(Object value, String fieldName, int maxCount, boolean required) {
+        if (value == null) {
+            if (required) throw new BusinessException("请至少选择一名培训人员");
+            return List.of();
+        }
+        if (!(value instanceof List<?> values)) {
+            throw new BusinessException(fieldName + "格式不正确");
+        }
+        if (required && values.isEmpty()) {
+            throw new BusinessException("请至少选择一名培训人员");
+        }
+        if (values.size() > maxCount) {
+            throw new BusinessException(fieldName + "数量不能超过" + maxCount);
+        }
+        List<Long> result = new ArrayList<>();
+        Set<Long> distinct = new HashSet<>();
+        for (Object item : values) {
+            Long id = requirePositiveLong(item, fieldName + "ID");
+            if (!distinct.add(id)) {
+                throw new BusinessException(fieldName + "不能重复");
+            }
+            result.add(id);
+        }
+        return result;
+    }
+
+    private List<TemporaryPerson> validatePeople(List<Long> personIds, Long projectId) {
+        List<TemporaryPerson> people = new ArrayList<>();
+        for (Long personId : personIds) {
+            TemporaryPerson person = personnelMapper.selectById(personId);
+            if (person == null || !projectId.equals(person.getProjectId())) {
+                throw new BusinessException("培训人员不属于当前项目");
+            }
+            people.add(person);
+        }
+        return people;
+    }
+
+    private List<FileResource> validateFiles(List<Long> fileIds, Long projectId, Long uploaderId) {
+        List<FileResource> files = new ArrayList<>();
+        for (Long fileId : fileIds) {
+            FileResource file = fileMapper.selectById(fileId);
+            if (file == null || !projectId.equals(file.getProjectId())) {
+                throw new BusinessException("培训资料不属于当前项目");
+            }
+            if (!FILE_BUSINESS_TYPE.equalsIgnoreCase(file.getBusinessType())) {
+                throw new BusinessException("培训资料类型不正确");
+            }
+            if (!FileStatus.UPLOADED.equals(FileStatus.normalize(file.getStatus()))) {
+                throw new BusinessException("培训资料状态不允许绑定");
+            }
+            if (!uploaderId.equals(file.getUploaderId())) {
+                throw BusinessException.forbidden("只能关联本人刚上传的培训资料");
+            }
+            if (file.getBusinessId() != null) {
+                throw new BusinessException("培训资料已关联其他业务记录");
+            }
+            files.add(file);
+        }
+        return files;
+    }
+
+    private void bindFile(FileResource file, Long projectId, Long batchId, Long uploaderId) {
+        LambdaUpdateWrapper<FileResource> wrapper = new LambdaUpdateWrapper<FileResource>()
+                .eq(FileResource::getId, file.getId())
+                .eq(FileResource::getProjectId, projectId)
+                .eq(FileResource::getBusinessType, file.getBusinessType())
+                .eq(FileResource::getStatus, file.getStatus())
+                .eq(FileResource::getUploaderId, uploaderId)
+                .eq(FileResource::getDeleted, 0)
+                .isNull(FileResource::getBusinessId)
+                .set(FileResource::getBusinessId, batchId)
+                .set(FileResource::getUpdateTime, LocalDateTime.now());
+        requireSingleWrite(fileMapper.update(null, wrapper), "培训资料绑定");
+    }
+
+    private String requireText(Object value, int maxLength, String fieldName) {
+        String normalized = optionalText(value, maxLength, fieldName);
+        if (normalized == null) {
+            throw new BusinessException(fieldName + "不能为空");
+        }
+        return normalized;
+    }
+
+    private String optionalText(Object value, int maxLength, String fieldName) {
+        if (value == null) return null;
+        if (value instanceof Map<?, ?> || value instanceof List<?>) {
+            throw new BusinessException(fieldName + "格式不正确");
+        }
+        String normalized = value.toString().trim();
+        if (normalized.isEmpty()) return null;
+        if (normalized.length() > maxLength) {
+            throw new BusinessException(fieldName + "不能超过" + maxLength + "个字符");
+        }
+        return normalized;
+    }
+
+    private Integer parseCourseHours(Object value) {
+        try {
+            int hours = Integer.parseInt(value.toString().trim());
+            if (hours < 0 || hours > 10000) throw new NumberFormatException();
+            return hours;
+        } catch (NumberFormatException exception) {
+            throw new BusinessException("培训课时必须是0到10000之间的整数");
+        }
+    }
+
+    private void requireSingleWrite(int affectedRows, String operation) {
+        if (affectedRows != 1) {
+            throw BusinessException.of(409, operation + "未生效，请刷新后重试");
+        }
     }
 }

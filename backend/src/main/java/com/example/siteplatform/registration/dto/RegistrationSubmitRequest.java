@@ -11,10 +11,11 @@ import java.util.List;
 
 @Data
 public class RegistrationSubmitRequest {
-    @NotBlank
-    @Pattern(regexp = "^[A-Za-z][A-Za-z0-9_-]{3,31}$", message = "账号需以字母开头，长度4-32位")
+    /**
+     * 兼容旧客户端的字段。新注册账号一律由手机号生成，客户端无需填写此字段。
+     */
+    @Size(max = 32, message = "账号长度不能超过32位")
     private String username;
-    @NotBlank
     @Size(min = 8, max = 72)
     private String password;
     @NotBlank
@@ -53,4 +54,7 @@ public class RegistrationSubmitRequest {
     private String phoneCode;
     @Size(max = 30)
     private String phoneVerificationType;
+    /** STANDARD：常规注册；WECHAT_QUICK：微信手机号快捷注册。 */
+    @Size(max = 30)
+    private String registrationMode;
 }

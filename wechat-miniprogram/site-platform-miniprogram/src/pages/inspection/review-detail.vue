@@ -66,7 +66,7 @@ const selectedCategoryLabel = computed(() => categoryOptions.value[categoryIndex
 const assigneeOptions = computed(() => members.value
   .filter((member) => member.status !== 0)
   .map((member) => ({
-    label: `${member.realName || member.username}${member.projectRoleCode === 'USER' ? ' · 负责电工/成员' : ` · ${roleLabel(member.projectRoleCode)}`}`,
+    label: `${member.realName || member.username} · ${roleLabel(member)}`,
     member
   })));
 const selectedAssigneeIndex = computed(() => {
@@ -127,10 +127,8 @@ function resultClass(result: CheckResult) {
   return 'normal';
 }
 
-function roleLabel(role: string) {
-  if (role === 'PROJECT_ADMIN') return '项目管理员';
-  if (role === 'SAFETY_ADMIN') return '项目安全员';
-  return '项目成员';
+function roleLabel(member: { projectRoles?: Array<{ roleName?: string }> }) {
+  return (member.projectRoles || []).map((role) => role.roleName).filter(Boolean).join('、') || '项目成员';
 }
 
 function defaultDeadline() {

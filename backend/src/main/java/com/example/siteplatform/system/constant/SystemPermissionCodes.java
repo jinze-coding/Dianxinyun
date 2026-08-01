@@ -22,7 +22,7 @@ public final class SystemPermissionCodes {
     public static final String USER_RESET_PASSWORD = "system.user.reset_password";
     public static final String ROLE_MANAGE = "system.role.manage";
     public static final String MENU_MANAGE = "system.menu.manage";
-    public static final String PROJECT_MANAGE = "system.project.manage";
+    public static final String PROJECT_MEMBER_MANAGE = "project.member.manage";
     public static final String WECHAT_MANAGE = "system.wechat.manage";
     public static final String AUDIT_VIEW = "system.audit.view";
 }

@@ -31,7 +31,6 @@ const APPLICATION_STATUS_TEXT = {
 };
 
 const createEmptyRegistration = () => ({
-  username: '',
   password: '',
   confirmPassword: '',
   realName: '',
@@ -232,10 +231,6 @@ export default function LoginPage({ onLogin, theme }) {
     event.preventDefault();
     setError('');
     setNotice('');
-    if (!/^[A-Za-z][A-Za-z0-9_-]{3,31}$/.test(registration.username.trim())) {
-      setError('用户名需以字母开头，长度 4–32 位，可包含数字、下划线或短横线');
-      return;
-    }
     if (registration.password.length < 8 || registration.password.length > 72
       || !/[A-Za-z]/.test(registration.password) || !/\d/.test(registration.password)) {
       setError('密码需为 8–72 位，并同时包含字母和数字');
@@ -256,7 +251,7 @@ export default function LoginPage({ onLogin, theme }) {
 
     setLoading(true);
     try {
-      const payload = { ...registration };
+      const payload = { ...registration, username: registration.phone.trim() };
       delete payload.confirmPassword;
       payload.desiredProjectText = registration.desiredProjectName.trim() || undefined;
       payload.applicationReason = registration.applicationReason.trim() || undefined;
@@ -362,8 +357,8 @@ export default function LoginPage({ onLogin, theme }) {
 
         {mode === 'PASSWORD' && (
           <form onSubmit={handlePasswordLogin} className="login-form">
-            <Field label="用户名" required>
-              <input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="请输入用户名" />
+            <Field label="账号/手机号" required>
+              <input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="请输入账号或手机号" />
             </Field>
             <Field label="密码" required>
               <input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" />
@@ -398,11 +393,10 @@ export default function LoginPage({ onLogin, theme }) {
         {mode === 'REGISTER' && (
           <form onSubmit={handleRegistration} className="login-form registration-form">
             <div className="login-field-grid">
-              <Field label="用户名" required><input value={registration.username} onChange={(event) => updateRegistration('username', event.target.value)} placeholder="4–32 位" /></Field>
+              <Field label="手机号（登录账号）" required><input inputMode="tel" autoComplete="tel" value={registration.phone} onChange={(event) => updateRegistration('phone', event.target.value)} placeholder="审批通过后使用此手机号登录" /></Field>
               <Field label="真实姓名" required><input value={registration.realName} onChange={(event) => updateRegistration('realName', event.target.value)} /></Field>
               <Field label="登录密码" required><input type="password" autoComplete="new-password" value={registration.password} onChange={(event) => updateRegistration('password', event.target.value)} placeholder="至少 8 位" /></Field>
               <Field label="确认密码" required><input type="password" autoComplete="new-password" value={registration.confirmPassword} onChange={(event) => updateRegistration('confirmPassword', event.target.value)} /></Field>
-              <Field label="手机号" required><input inputMode="tel" value={registration.phone} onChange={(event) => updateRegistration('phone', event.target.value)} placeholder="由管理员人工核验" /></Field>
               <Field label="邮箱"><input type="email" value={registration.email} onChange={(event) => updateRegistration('email', event.target.value)} /></Field>
             </div>
             <Field label="期望项目/项目意向"><input value={registration.desiredProjectName} onChange={(event) => updateRegistration('desiredProjectName', event.target.value)} placeholder="选填，例如：智慧工地综合演示项目" /></Field>

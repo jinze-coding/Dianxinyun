@@ -2,11 +2,16 @@ import type { ElectricBox, PublicElectricBoxMonthly, PublicElectricBoxSummary, U
 import { request, USE_MOCK } from './request';
 import { getMockElectricBoxDetail, getMockElectricBoxes, getMockPublicElectricBoxMonthly, getMockPublicElectricBoxSummary, resolveMockQrCode, resolveMockUnifiedCode } from '@/mock/runtime';
 
-export async function getElectricBoxes(projectId: number): Promise<ElectricBox[]> {
+export async function getElectricBoxes(projectId: number, keyword?: string): Promise<ElectricBox[]> {
+  const normalizedKeyword = keyword?.trim() || '';
   if (USE_MOCK) {
-    return getMockElectricBoxes(projectId);
+    return getMockElectricBoxes(projectId, normalizedKeyword);
   }
-  return request<ElectricBox[]>(`/electric-boxes?projectId=${projectId}`);
+  const query = [
+    `projectId=${encodeURIComponent(projectId)}`,
+    normalizedKeyword ? `keyword=${encodeURIComponent(normalizedKeyword)}` : ''
+  ].filter(Boolean).join('&');
+  return request<ElectricBox[]>(`/electric-boxes?${query}`);
 }
 
 export async function getElectricBoxDetail(id: number): Promise<ElectricBox | undefined> {

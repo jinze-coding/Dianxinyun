@@ -31,14 +31,15 @@ const projects = computed(() => projectStore.state.projects);
 const currentProject = computed(() => projects.value.find((item) => item.id === projectStore.state.currentProjectId));
 const currentRole = computed(() => authStore.state.user?.projectRoles?.find((item) => item.projectId === currentProject.value?.id));
 const isPlatformAdmin = computed(() => authStore.state.user?.roles?.includes('PLATFORM_ADMIN'));
-const canReview = computed(() => isPlatformAdmin.value || currentRole.value?.projectRoleCode !== 'USER' || currentRole.value?.permissionCodes?.includes('INSPECTION_REVIEW'));
+const canReview = computed(() => isPlatformAdmin.value || currentRole.value?.permissionCodes?.includes('INSPECTION_REVIEW'));
 const roleLabel = computed(() => {
   if (isPlatformAdmin.value) return '平台管理员';
-  if (currentRole.value?.projectRoleCode === 'PROJECT_ADMIN') return '项目管理员';
-  if (currentRole.value?.projectRoleCode === 'SAFETY_ADMIN') return '项目安全员';
-  return '负责电工';
+  const names = (currentRole.value?.projectRoles || []).map((role) => role.roleName).filter(Boolean);
+  return names.join('、') || '项目成员';
 });
-const projectTodos = computed(() => todos.value.filter((todo) => !todo.projectId || todo.projectId === currentProject.value?.id));
+const projectTodos = computed(() => todos.value.filter((todo) =>
+  todo.businessType !== 'QUALITY_ISSUE'
+  && (!todo.projectId || todo.projectId === currentProject.value?.id)));
 const filteredTodos = computed(() => projectTodos.value.filter((todo) => {
   if (!canReview.value && ['REVIEW', 'RECHECK'].includes(todo.type)) return false;
   if (activeFilter.value === 'ALL') return true;

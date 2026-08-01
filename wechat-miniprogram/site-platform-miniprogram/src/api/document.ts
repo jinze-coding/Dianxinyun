@@ -4,6 +4,7 @@ import type {
   DocumentStatus,
   PageResult,
   ProjectDocument,
+  ProjectDocumentActivity,
   ProjectDocumentDetail,
   ProjectDocumentSummary,
   ProjectDocumentVersion
@@ -39,6 +40,8 @@ export interface DocumentUpdateInput {
   title: string;
   remark?: string;
 }
+
+export type ProjectDocumentClientAction = 'OPEN_SAVE_MENU' | 'SHARE_WECHAT_FILE';
 
 let mockDocumentId = 100;
 let mockFolderId = 20;
@@ -276,6 +279,33 @@ export async function purgeProjectDocument(id: number) {
     return;
   }
   return documentAction(`/project-documents/${id}/purge`, 'DELETE');
+}
+
+export async function recordProjectDocumentClientAction(
+  id: number,
+  action: ProjectDocumentClientAction,
+  versionId?: number
+) {
+  if (USE_MOCK) {
+    const document = mockDocuments.find((item) => item.id === id);
+    const version = versionId
+      ? (document?.currentVersion?.id === versionId ? document.currentVersion : undefined)
+      : document?.currentVersion;
+    const operationLabel = action === 'OPEN_SAVE_MENU' ? '打开保存菜单' : '发送文件';
+    return {
+      id: Date.now(),
+      documentId: id,
+      operationType: action === 'OPEN_SAVE_MENU' ? 'DOCUMENT_SAVE_MENU' : 'DOCUMENT_SHARE',
+      operationLabel,
+      description: `${operationLabel}《${document?.title || '项目资料'}》${version?.versionLabel || ''}`,
+      operatorName: '当前用户',
+      createTime: new Date().toISOString()
+    } as ProjectDocumentActivity;
+  }
+  return request<ProjectDocumentActivity>(`/project-documents/${id}/client-actions`, {
+    method: 'POST',
+    data: { action, versionId }
+  });
 }
 
 async function readJsonTempFile(filePath: string): Promise<{ code?: number; message?: string } | null> {

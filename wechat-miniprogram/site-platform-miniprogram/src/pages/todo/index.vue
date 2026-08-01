@@ -136,6 +136,11 @@ function openTodo(todo: TodoItem) {
     navigateTo(`/pages/inspection/form?boxId=${todo.targetId}`);
     return;
   }
+  if (todo.businessType === 'QUALITY_ISSUE') {
+    uni.setStorageSync('site_platform_quality_issue_id', todo.targetId);
+    switchTab('/pages/quality/index');
+    return;
+  }
   if (todo.type === 'REVIEW') {
     navigateTo(`/pages/inspection/review-detail?id=${todo.targetId}`);
     return;

@@ -34,9 +34,8 @@ const maskedPhone = computed(() => {
 const currentRole = computed(() => user.value?.projectRoles?.find((item) => item.projectId === currentProject.value?.id));
 const roleLabel = computed(() => {
   if (user.value?.roles?.includes('PLATFORM_ADMIN')) return '平台管理员';
-  if (currentRole.value?.projectRoleCode === 'PROJECT_ADMIN') return '项目领导';
-  if (currentRole.value?.projectRoleCode === 'SAFETY_ADMIN') return '项目领导';
-  return '普通用户';
+  const names = (currentRole.value?.projectRoles || []).map((role) => role.roleName).filter(Boolean);
+  return names.join('、') || '普通用户';
 });
 const authorizedProjectCount = computed(() => projectStore.state.projects.length);
 const wechatBound = computed(() => user.value?.wechatBound === true

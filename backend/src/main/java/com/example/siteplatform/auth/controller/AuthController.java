@@ -3,6 +3,7 @@ package com.example.siteplatform.auth.controller;
 import com.example.siteplatform.auth.dto.LoginRequest;
 import com.example.siteplatform.auth.dto.LoginResponse;
 import com.example.siteplatform.auth.dto.CurrentUserVO;
+import com.example.siteplatform.auth.dto.InitialPasswordRequest;
 import com.example.siteplatform.auth.dto.WechatPhoneRequest;
 import com.example.siteplatform.auth.dto.WechatSessionRequest;
 import com.example.siteplatform.auth.dto.WechatSessionResponse;
@@ -24,6 +25,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;
+import java.util.Locale;
 import java.util.Map;
 
 @Tag(name = "认证管理", description = "用户登录、登出、用户信息接口")
@@ -55,7 +57,7 @@ public class AuthController {
     public Result<LoginResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
         String remoteAddress = httpRequest.getRemoteAddr();
         rateLimitService.check("password-login-ip", remoteAddress, 30, Duration.ofMinutes(10));
-        rateLimitService.check("password-login-account", remoteAddress + ":" + request.getUsername().trim(),
+        rateLimitService.check("password-login-account", normalizeAccount(request.getUsername()),
                 10, Duration.ofMinutes(10));
         LoginResponse response = authService.login(request);
         return Result.success(response);
@@ -83,7 +85,7 @@ public class AuthController {
                                                          HttpServletRequest httpRequest) {
         String remoteAddress = httpRequest.getRemoteAddr();
         rateLimitService.check("wechat-bind-login-ip", remoteAddress, 30, Duration.ofMinutes(10));
-        rateLimitService.check("wechat-bind-login-account", remoteAddress + ":" + request.getUsername().trim(),
+        rateLimitService.check("wechat-bind-login-account", normalizeAccount(request.getUsername()),
                 10, Duration.ofMinutes(10));
         return Result.success(wechatAuthService.bindLogin(request));
     }
@@ -92,15 +94,18 @@ public class AuthController {
     @PostMapping("/wechat/bind")
     public Result<WechatSessionResponse> bindCurrentWechat(@Valid @RequestBody WechatCurrentBindRequest request,
                                                             HttpServletRequest httpRequest) {
-        return Result.success(wechatAuthService.bindCurrent(request.getCode(),
-                authService.getCurrentUser(extractToken(httpRequest))));
+        SysUser currentUser = authService.getCurrentUser(extractToken(httpRequest));
+        limitWechatSelfService("bind", currentUser, httpRequest, 20);
+        return Result.success(wechatAuthService.bindCurrent(request.getCode(), currentUser));
     }
 
     @Operation(summary = "当前账号解绑微信")
     @PostMapping("/wechat/unbind")
     public Result<Void> unbindCurrentWechat(@Valid @RequestBody WechatSelfUnbindRequest request,
                                              HttpServletRequest httpRequest) {
-        wechatAuthService.unbindCurrent(authService.getCurrentUser(extractToken(httpRequest)), request.getPassword());
+        SysUser currentUser = authService.getCurrentUser(extractToken(httpRequest));
+        limitWechatSelfService("unbind", currentUser, httpRequest, 5);
+        wechatAuthService.unbindCurrent(currentUser, request.getPassword());
         return Result.success();
     }
 
@@ -116,8 +121,9 @@ public class AuthController {
     @PostMapping("/wechat/project-access")
     public Result<WechatSessionResponse> wechatProjectAccess(@Valid @RequestBody WechatProjectAccessRequest request,
                                                              HttpServletRequest httpRequest) {
-        return Result.success(wechatAuthService.requestProjectAccess(request,
-                authService.getCurrentUser(extractToken(httpRequest))));
+        SysUser currentUser = authService.getCurrentUser(extractToken(httpRequest));
+        limitWechatSelfService("project-access", currentUser, httpRequest, 10);
+        return Result.success(wechatAuthService.requestProjectAccess(request, currentUser));
     }
 
     @Operation(summary = "获取当前用户信息")
@@ -127,12 +133,20 @@ public class AuthController {
         return Result.success(authService.getCurrentUserInfo(token));
     }
 
+    @Operation(summary = "微信快捷注册账号设置初始密码")
+    @PostMapping("/initial-password")
+    public Result<LoginResponse> setupInitialPassword(@Valid @RequestBody InitialPasswordRequest request,
+                                                       HttpServletRequest httpRequest) {
+        rateLimitService.check("initial-password", httpRequest.getRemoteAddr(), 10, Duration.ofMinutes(10));
+        return Result.success(authService.setupInitialPassword(extractToken(httpRequest), request.getNewPassword()));
+    }
+
     @Operation(summary = "用户登出")
     @PostMapping("/logout")
     public Result<Void> logout(HttpServletRequest request) {
         String token = extractToken(request);
         if (token != null) {
-            authService.getCurrentUser(token);
+            authService.getCurrentUserAllowInitialPasswordSetup(token);
             authService.logoutSession(token);
         }
         return Result.success();
@@ -144,5 +158,22 @@ public class AuthController {
             return bearerToken.substring(7);
         }
         return null;
+    }
+
+    private String normalizeAccount(String username) {
+        return username == null ? "" : username.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private void limitWechatSelfService(String action, SysUser currentUser,
+                                        HttpServletRequest request, int maxAttempts) {
+        rateLimitService.check("wechat-self-" + action + "-ip", request.getRemoteAddr(),
+                maxAttempts * 2, Duration.ofMinutes(10));
+        rateLimitService.check("wechat-self-" + action + "-account",
+                accountLimitSubject(currentUser), maxAttempts, Duration.ofMinutes(10));
+    }
+
+    private String accountLimitSubject(SysUser currentUser) {
+        String normalizedAccount = normalizeAccount(currentUser.getUsername());
+        return normalizedAccount.isEmpty() ? "user-id:" + currentUser.getId() : normalizedAccount;
     }
 }

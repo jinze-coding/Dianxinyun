@@ -5,16 +5,19 @@ import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.auth.mapper.SysUserMapper;
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.project.constant.InspectionPermissionCodes;
-import com.example.siteplatform.project.entity.InspectionPermissionTemplate;
 import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.entity.SysUserProject;
-import com.example.siteplatform.project.mapper.InspectionPermissionTemplateMapper;
 import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
+import com.example.siteplatform.project.mapper.SysUserProjectRoleMapper;
+import com.example.siteplatform.system.constant.BusinessModuleCodes;
+import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import com.example.siteplatform.system.service.SystemPermissionService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -36,13 +39,13 @@ public class ProjectPermissionService {
     private SysUserProjectMapper userProjectMapper;
 
     @Autowired
-    private InspectionPermissionTemplateMapper permissionTemplateMapper;
-
-    @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
     @Autowired
     private SystemPermissionService systemPermissionService;
+
+    @Autowired
+    private SysUserProjectRoleMapper userProjectRoleMapper;
 
     private static final String USER_PROJECTS_CACHE_PREFIX = "user:projects:";
     public static final String ROLE_PLATFORM_ADMIN = "PLATFORM_ADMIN";
@@ -55,27 +58,30 @@ public class ProjectPermissionService {
     }
 
     public boolean isProjectAdmin(Long userId) {
-        return hasRole(userId, ROLE_PROJECT_ADMIN);
+        return false;
     }
 
     public boolean canManageProject(Long userId, Long projectId) {
         if (isPlatformAdmin(userId)) {
             return true;
         }
-        return hasProjectRole(userId, projectId, ROLE_PROJECT_ADMIN)
-                || (isProjectAdmin(userId) && hasProjectPermission(userId, projectId));
+        return hasProjectManagerRole(userId, projectId);
     }
 
     public boolean canManagePersonnel(Long userId, Long projectId) {
         if (isPlatformAdmin(userId)) {
             return true;
         }
-        return hasProjectRole(userId, projectId, ROLE_PROJECT_ADMIN, ROLE_SAFETY_ADMIN)
-                || ((isProjectAdmin(userId) || isSafetyAdmin(userId)) && hasProjectPermission(userId, projectId));
+        return hasProjectManagerRole(userId, projectId)
+                || hasProjectRole(userId, projectId, ROLE_SAFETY_ADMIN);
     }
 
     public boolean canManageQuality(Long userId, Long projectId) {
-        return canManagePersonnel(userId, projectId);
+        if (!systemPermissionService.hasBusinessModule(userId, projectId, BusinessModuleCodes.QUALITY)) {
+            return false;
+        }
+        return systemPermissionService.hasProjectPermission(
+                userId, projectId, SystemPermissionCodes.QUALITY_MANAGE);
     }
 
     public boolean hasRole(Long userId, String roleCode) {
@@ -84,10 +90,13 @@ public class ProjectPermissionService {
     }
 
     public boolean isSafetyAdmin(Long userId) {
-        return hasRole(userId, ROLE_SAFETY_ADMIN);
+        return false;
     }
 
     public boolean canManageInspection(Long userId, Long projectId) {
+        if (!systemPermissionService.hasBusinessModule(userId, projectId, BusinessModuleCodes.INSPECTION)) {
+            return false;
+        }
         if (isPlatformAdmin(userId)) {
             return true;
         }
@@ -101,8 +110,7 @@ public class ProjectPermissionService {
                 InspectionPermissionCodes.RECTIFICATION_VIEW,
                 InspectionPermissionCodes.RECTIFICATION_REVIEW,
                 InspectionPermissionCodes.SUMMARY_VIEW,
-                InspectionPermissionCodes.SUMMARY_EXPORT,
-                InspectionPermissionCodes.PERMISSION_MANAGE
+                InspectionPermissionCodes.SUMMARY_EXPORT
         );
     }
 
@@ -110,16 +118,9 @@ public class ProjectPermissionService {
         if (isPlatformAdmin(userId)) {
             return true;
         }
-        SysUserProject membership = findUserProject(userId, projectId);
-        if (membership == null) {
-            return false;
-        }
-        if (systemPermissionService.permissionCodes(userId).contains("system.project.manage")) {
-            return true;
-        }
-        return systemPermissionService
-                .projectRolePermissionCodes(normalizeProjectRoleCode(membership.getProjectRoleCode()))
-                .contains("system.project.manage");
+        return hasProjectManagerRole(userId, projectId)
+                && systemPermissionService.hasProjectPermission(userId, projectId,
+                com.example.siteplatform.system.constant.SystemPermissionCodes.PROJECT_MEMBER_MANAGE);
     }
 
     public boolean hasSystemPermission(Long userId, Long projectId, String permissionCode) {
@@ -136,6 +137,9 @@ public class ProjectPermissionService {
         if (!StringUtils.hasText(permissionCode)) {
             return false;
         }
+        if (!systemPermissionService.hasBusinessModule(userId, projectId, BusinessModuleCodes.INSPECTION)) {
+            return false;
+        }
         if (isPlatformAdmin(userId)) {
             return true;
         }
@@ -144,6 +148,9 @@ public class ProjectPermissionService {
 
     public boolean hasAnyInspectionPermission(Long userId, Long projectId, String... permissionCodes) {
         if (permissionCodes == null || permissionCodes.length == 0) {
+            return false;
+        }
+        if (!systemPermissionService.hasBusinessModule(userId, projectId, BusinessModuleCodes.INSPECTION)) {
             return false;
         }
         if (isPlatformAdmin(userId)) {
@@ -160,6 +167,9 @@ public class ProjectPermissionService {
         if (userId == null || projectId == null) {
             return List.of();
         }
+        if (!systemPermissionService.hasBusinessModule(userId, projectId, BusinessModuleCodes.INSPECTION)) {
+            return List.of();
+        }
         if (isPlatformAdmin(userId)) {
             return InspectionPermissionCodes.ALL_CODES;
         }
@@ -167,15 +177,9 @@ public class ProjectPermissionService {
         if (userProject == null) {
             return List.of();
         }
-        if (userProject.getInspectionPermissionTemplateId() != null) {
-            InspectionPermissionTemplate template = permissionTemplateMapper.selectById(userProject.getInspectionPermissionTemplateId());
-            if (template != null
-                    && (template.getDeleted() == null || template.getDeleted() == 0)
-                    && (template.getEnabled() != null && template.getEnabled() == 1)) {
-                return InspectionPermissionCodes.parse(template.getPermissionCodes());
-            }
-        }
-        return InspectionPermissionCodes.defaultCodesForProjectRole(normalizeProjectRoleCode(userProject.getProjectRoleCode()));
+        return systemPermissionService.projectPermissionCodes(userId, projectId).stream()
+                .filter(InspectionPermissionCodes.ALL_CODES::contains)
+                .toList();
     }
 
     public String getProjectRoleCode(Long userId, Long projectId) {
@@ -208,11 +212,20 @@ public class ProjectPermissionService {
         if (isPlatformAdmin(userId)) {
             return true;
         }
-        String projectRoleCode = getProjectRoleCode(userId, projectId);
-        if (!StringUtils.hasText(projectRoleCode)) {
-            return false;
-        }
-        return Arrays.asList(roleCodes).contains(projectRoleCode);
+        if (findUserProject(userId, projectId) == null || roleCodes == null) return false;
+        Set<String> expected = Arrays.stream(roleCodes)
+                .filter(StringUtils::hasText)
+                .map(code -> code.trim().toUpperCase())
+                .collect(java.util.stream.Collectors.toSet());
+        return userProjectRoleMapper.selectEnabledRoles(userId, projectId).stream()
+                .map(role -> role.getRoleCode())
+                .anyMatch(expected::contains);
+    }
+
+    public boolean hasProjectManagerRole(Long userId, Long projectId) {
+        if (isPlatformAdmin(userId)) return true;
+        if (findUserProject(userId, projectId) == null) return false;
+        return userProjectRoleMapper.countEnabledProjectManagerRoles(userId, projectId) > 0;
     }
 
     public String normalizeProjectRoleCode(String roleCode) {
@@ -295,8 +308,18 @@ public class ProjectPermissionService {
     }
 
     public void clearUserProjectsCache(Long userId) {
-        if (userId != null) {
-            redisTemplate.delete(USER_PROJECTS_CACHE_PREFIX + userId);
+        if (userId == null) {
+            return;
+        }
+        String cacheKey = USER_PROJECTS_CACHE_PREFIX + userId;
+        redisTemplate.delete(cacheKey);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    redisTemplate.delete(cacheKey);
+                }
+            });
         }
     }
 }

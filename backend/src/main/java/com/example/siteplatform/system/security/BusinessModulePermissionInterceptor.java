@@ -54,12 +54,17 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
         String path = applicationPath(request);
         String permissionCode = resolveStaticPermission(request.getMethod(), path);
         SysUser currentUser = null;
+        Long targetProjectId = null;
 
         if (permissionCode == null && matchesModule(path, FILES)) {
             // /files 是多个业务共享的附件通道，只对本期正式巡检、质量附件启用
             // 新 RBAC；人员、安全教育等旧模块继续沿用原项目范围规则。
             currentUser = authService.getCurrentUser(request.getHeader("Authorization"));
-            permissionCode = resolveSharedFilePermission(request, path);
+            SharedFilePermission sharedPermission = resolveSharedFilePermission(request, path);
+            if (sharedPermission != null) {
+                permissionCode = sharedPermission.permissionCode();
+                targetProjectId = sharedPermission.projectId();
+            }
         }
         if (permissionCode == null) {
             return true;
@@ -67,7 +72,10 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
         if (currentUser == null) {
             currentUser = authService.getCurrentUser(request.getHeader("Authorization"));
         }
-        if (!permissionService.hasPermission(currentUser.getId(), permissionCode)) {
+        boolean permitted = targetProjectId == null
+                ? permissionService.hasPermission(currentUser.getId(), permissionCode)
+                : permissionService.hasProjectPermission(currentUser.getId(), targetProjectId, permissionCode);
+        if (!permitted) {
             throw BusinessException.forbidden("无操作权限：" + permissionCode);
         }
         return true;
@@ -117,29 +125,31 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
         return null;
     }
 
-    private String resolveSharedFilePermission(HttpServletRequest request, String path) {
+    private SharedFilePermission resolveSharedFilePermission(HttpServletRequest request, String path) {
         String businessType = request.getParameter("businessType");
+        Long projectId = parseLong(request.getParameter("projectId"));
         Long fileId = fileId(path);
         if (fileId != null) {
             FileResource file = fileMapper.selectById(fileId);
             if (file != null) {
                 businessType = file.getBusinessType();
+                projectId = file.getProjectId();
             }
         }
         String normalizedType = normalizeBusinessType(businessType);
         boolean read = isReadMethod(request.getMethod());
+        String permissionCode = null;
         if (normalizedType.startsWith("QUALITY_")) {
-            if (read) return SystemPermissionCodes.QUALITY_VIEW;
-            if (normalizedType.contains("RECTIFICATION")) return SystemPermissionCodes.QUALITY_RECTIFY;
-            if (normalizedType.contains("REVIEW")) return SystemPermissionCodes.QUALITY_REVIEW;
-            return SystemPermissionCodes.QUALITY_MANAGE;
+            if (read) permissionCode = SystemPermissionCodes.QUALITY_VIEW;
+            else if (normalizedType.contains("RECTIFICATION")) permissionCode = SystemPermissionCodes.QUALITY_RECTIFY;
+            else if (normalizedType.contains("REVIEW")) permissionCode = SystemPermissionCodes.QUALITY_REVIEW;
+            else permissionCode = SystemPermissionCodes.QUALITY_MANAGE;
+        } else if (normalizedType.startsWith("INSPECTION_")) {
+            if (read) permissionCode = SystemPermissionCodes.INSPECTION_VIEW;
+            else if (normalizedType.contains("RECTIFICATION")) permissionCode = SystemPermissionCodes.INSPECTION_MANAGE;
+            else permissionCode = SystemPermissionCodes.INSPECTION_SUBMIT;
         }
-        if (normalizedType.startsWith("INSPECTION_")) {
-            if (read) return SystemPermissionCodes.INSPECTION_VIEW;
-            if (normalizedType.contains("RECTIFICATION")) return SystemPermissionCodes.INSPECTION_MANAGE;
-            return SystemPermissionCodes.INSPECTION_SUBMIT;
-        }
-        return null;
+        return permissionCode == null ? null : new SharedFilePermission(permissionCode, projectId);
     }
 
     private Long fileId(String path) {
@@ -149,6 +159,15 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
         String firstSegment = tail.contains("/") ? tail.substring(0, tail.indexOf('/')) : tail;
         try {
             return Long.valueOf(firstSegment);
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private Long parseLong(String value) {
+        if (!StringUtils.hasText(value)) return null;
+        try {
+            return Long.valueOf(value.trim());
         } catch (NumberFormatException ignored) {
             return null;
         }
@@ -182,5 +201,8 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
 
     private boolean matchesModule(String path, String moduleRoot) {
         return moduleRoot.equals(path) || path.startsWith(moduleRoot + "/");
+    }
+
+    private record SharedFilePermission(String permissionCode, Long projectId) {
     }
 }

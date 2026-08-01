@@ -1,4 +1,11 @@
-export type RoleCode = 'PLATFORM_ADMIN' | 'PROJECT_ADMIN' | 'SAFETY_ADMIN' | 'USER';
+export type RoleCode = string;
+
+export interface ProjectRole {
+  id: number;
+  roleName: string;
+  roleCode: string;
+  projectManagerRole?: number | boolean;
+}
 
 export interface Result<T> {
   code: number;
@@ -20,6 +27,7 @@ export interface User {
   permissionCodes?: string[];
   projectContexts?: ProjectPermissionContext[];
   passwordLoginEnabled?: boolean | number | string;
+  initialPasswordSetupRequired?: boolean;
   wechatBindingStatus?: 'BOUND' | 'ACTIVE' | 'UNBOUND' | 'DISABLED';
   wechatBound?: boolean;
 }
@@ -41,7 +49,8 @@ export interface UserMenu {
 export interface ProjectPermissionContext {
   projectId: number;
   projectName?: string;
-  roleCodes?: string[];
+  projectRoles?: ProjectRole[];
+  menuCodes?: string[];
   permissionCodes?: string[];
   accessStatus?: 'ACTIVE' | 'DISABLED' | string;
   statusReason?: string;
@@ -51,10 +60,10 @@ export interface UserProjectRole {
   projectId: number;
   projectName?: string;
   shortName?: string;
-  projectRoleCode: RoleCode;
-  permissionTemplateId?: number;
-  permissionTemplateName?: string;
-  permissionTemplateCode?: string;
+  /** 多角色并集；旧 projectRoleCode 不再作为权限判断依据。 */
+  projectRoles?: ProjectRole[];
+  projectRoleCode?: RoleCode;
+  menuCodes?: string[];
   permissionCodes?: string[];
   accessStatus?: 'ACTIVE' | 'DISABLED' | string;
   statusReason?: string;
@@ -69,14 +78,20 @@ export interface ProjectMember {
   phone?: string;
   email?: string;
   status?: number;
-  projectRoleCode: RoleCode;
-  permissionTemplateId?: number;
-  permissionTemplateName?: string;
-  permissionTemplateCode?: string;
+  projectRoles?: ProjectRole[];
+  projectRoleCode?: RoleCode;
   permissionCodes?: string[];
   globalRoles?: RoleCode[];
+  accessStatus?: 'ACTIVE' | 'DISABLED' | string;
   responsibleBoxCount?: number;
   pendingRectificationCount?: number;
+}
+
+export interface QualityAssignee {
+  userId: number;
+  username: string;
+  realName?: string;
+  displayName: string;
 }
 
 export interface Project {
@@ -163,6 +178,7 @@ export interface InspectionItemResult {
 
 export type InspectionSource = 'ELECTRICIAN_DAILY' | 'SAFETY_SPOT_CHECK';
 export type InspectionStatus = 'COMPLETED' | 'DRAFT' | 'REVIEW_PENDING' | 'REVIEW_PASSED' | 'REVIEW_REJECTED' | 'RECTIFICATION_PENDING' | 'CLOSED';
+export type InspectionPeriodMode = 'MONTH' | 'DAY';
 
 export interface InspectionReviewLog {
   id?: number;
@@ -279,6 +295,7 @@ export interface TodoItem {
   installLocation?: string;
   dueText: string;
   targetId: number;
+  businessType?: string;
   priority?: 'normal' | 'warning' | 'danger';
   reviewDueTime?: string | null;
   assignedReviewerId?: number | null;
@@ -449,7 +466,7 @@ export interface PersonnelSummary {
   trainings: PersonnelTraining[];
 }
 
-export type QualityIssueStatus = 'PENDING' | 'RECHECK' | 'CLOSED';
+export type QualityIssueStatus = 'PENDING' | 'RECHECK' | 'CLOSED' | 'VOIDED';
 
 export interface QualityIssueLog {
   id: number;
@@ -458,6 +475,7 @@ export interface QualityIssueLog {
   toStatus?: string;
   operatorName?: string;
   comment?: string;
+  photoFileIds?: string;
   createTime?: string;
 }
 

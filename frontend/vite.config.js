@@ -1,12 +1,13 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import path from 'path';
+
+const proxyTarget = process.env.VITE_PROXY_TARGET || 'http://localhost:8080';
 
 export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': new URL('./src', import.meta.url).pathname,
     },
   },
   server: {
@@ -17,9 +18,14 @@ export default defineConfig({
     ],
     proxy: {
       '/api': {
-        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8080',
+        target: proxyTarget,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, '/api/v1'),
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyRequest) => {
+            proxyRequest.setHeader('Origin', proxyTarget);
+          });
+        },
       },
     },
   },
