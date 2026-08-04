@@ -35,8 +35,16 @@ import PersonnelManagementPage from './pages/PersonnelManagement';
 import QualityManagementPage from './pages/QualityManagement';
 import DocumentManagementPage from './pages/DocumentManagement';
 import SystemManagementPage from './pages/SystemManagement';
-import { canAccessPage, hasProjectPermission, isPlatformAdmin } from './utils/permissions';
+import { canAccessPage, collectProjectMenuCodes, hasProjectPermission, isPlatformAdmin } from './utils/permissions';
+import { pageMenuAllowed } from './utils/roleAuthorization';
 import { buildElectricBoxQrLabelHtml, normalizeQrImageSource } from './utils/html';
+import {
+  buildInspectionExportParams,
+  filterInspectionExportBoxes,
+  getInspectionExportDefaults,
+  toggleInspectionExportBoxSelection,
+  validateInspectionExportRange,
+} from './utils/inspectionExport';
 import { requireProjectList } from './utils/projectList';
 import StatusBadge from './components/StatusBadge';
 import SectionCard from './components/SectionCard';
@@ -3302,8 +3310,8 @@ function PersonnelPage({ projectId, theme: T, compactMode }) {
 // 页面：巡检管理
 // ============================================
 const ELECTRIC_INSPECTION_TABS = [
-  { id: 'ledger', label: '巡检台账' },
-  { id: 'records', label: '巡检记录' },
+  { id: 'ledger', label: '电箱台账', menuCode: 'INSPECTION_LEDGER' },
+  { id: 'records', label: '巡检记录', menuCode: 'INSPECTION_RECORDS' },
 ];
 
 const BOX_STATUS_TEXT = { ACTIVE: '启用', INACTIVE: '停用', REMOVED: '已拆除' };
@@ -4088,6 +4096,16 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   const [selectedSummaryBox, setSelectedSummaryBox] = useState(null);
   const [recordInspectorId, setRecordInspectorId] = useState('');
   const [recordResult, setRecordResult] = useState('');
+  const [showInspectionExportModal, setShowInspectionExportModal] = useState(false);
+  const [inspectionExportStartDate, setInspectionExportStartDate] = useState('');
+  const [inspectionExportEndDate, setInspectionExportEndDate] = useState('');
+  const [inspectionExportAllBoxes, setInspectionExportAllBoxes] = useState(true);
+  const [inspectionExportBoxIds, setInspectionExportBoxIds] = useState([]);
+  const [inspectionExportBoxes, setInspectionExportBoxes] = useState([]);
+  const [inspectionExportBoxKeyword, setInspectionExportBoxKeyword] = useState('');
+  const [inspectionExportLoading, setInspectionExportLoading] = useState(false);
+  const [inspectionExportSubmitting, setInspectionExportSubmitting] = useState(false);
+  const [inspectionExportError, setInspectionExportError] = useState('');
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [selectedRectification, setSelectedRectification] = useState(null);
   const [rectificationFeedback, setRectificationFeedback] = useState('');
@@ -4186,6 +4204,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     setSummaryBoxId('');
     setSelectedSummaryBox(null);
     setRecordInspectorId('');
+    setShowInspectionExportModal(false);
   }, [projectId]);
 
   const loadPermissionData = useCallback(async () => {
@@ -4293,6 +4312,10 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   const summaryExportAllowed = generalInspectionExportAllowed && hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.SUMMARY_EXPORT);
   const dailySubmitAllowed = generalInspectionSubmitAllowed && hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.INSPECTION_DAILY_SUBMIT);
   const singleBoxExportAllowed = Boolean(summaryBoxId) && (summaryExportAllowed || dailySubmitAllowed);
+  const inspectionExportVisibleBoxes = filterInspectionExportBoxes(
+    inspectionExportBoxes,
+    inspectionExportBoxKeyword,
+  );
   const recordInspectors = Array.from(new Map((summary?.records || [])
     .filter(record => record.inspectorId)
     .map(record => [String(record.inspectorId), { id: String(record.inspectorId), name: record.inspectorName || `用户${record.inspectorId}` }])).values());
@@ -5235,32 +5258,102 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     }
   };
 
-  const exportSummary = async () => {
-    if (summaryPeriodMode === 'DAY') return;
+  const openInspectionExportModal = async () => {
+    const defaults = getInspectionExportDefaults({
+      periodMode: summaryPeriodMode,
+      month,
+      checkDate,
+      today: currentDate(),
+    });
+    const preselectedBoxId = summaryBoxId ? String(summaryBoxId) : '';
+    const preselectedBox = selectedSummaryBox
+      || boxes.find(item => String(item.id) === preselectedBoxId)
+      || null;
+    setInspectionExportStartDate(defaults.startDate);
+    setInspectionExportEndDate(defaults.endDate);
+    setInspectionExportAllBoxes(summaryExportAllowed && !preselectedBoxId);
+    setInspectionExportBoxIds(preselectedBoxId ? [preselectedBoxId] : []);
+    setInspectionExportBoxKeyword('');
+    setInspectionExportBoxes(preselectedBox ? [preselectedBox] : []);
+    setInspectionExportError('');
+    setShowInspectionExportModal(true);
+    setInspectionExportLoading(true);
     try {
-      const selectedExportBox = selectedSummaryBox
-        || boxes.find(item => String(item.id) === String(summaryBoxId));
-      const blob = await exportInspectionRecords({
+      if (!summaryExportAllowed) {
+        if (!preselectedBox) setInspectionExportError('未找到当前电箱，请重新选择后再导出');
+        return;
+      }
+      const response = await getElectricBoxList({ projectId });
+      if (response.code !== 200) {
+        setInspectionExportError(response.message || '电箱列表加载失败');
+        return;
+      }
+      const exportableBoxes = response.data || [];
+      setInspectionExportBoxes(exportableBoxes);
+      if (!exportableBoxes.length) setInspectionExportError('当前项目没有可导出的电箱');
+    } catch (err) {
+      console.error('加载报表导出电箱失败', err);
+      setInspectionExportError(err.message || '电箱列表加载失败');
+    } finally {
+      setInspectionExportLoading(false);
+    }
+  };
+
+  const submitInspectionExport = async () => {
+    const rangeError = validateInspectionExportRange(
+      inspectionExportStartDate,
+      inspectionExportEndDate,
+      currentDate(),
+    );
+    if (rangeError) {
+      setInspectionExportError(rangeError);
+      return;
+    }
+    if (!inspectionExportAllBoxes && inspectionExportBoxIds.length === 0) {
+      setInspectionExportError('请选择至少一个电箱，或选择全部电箱');
+      return;
+    }
+    if (inspectionExportAllBoxes && !summaryExportAllowed) {
+      setInspectionExportError('当前账号只能导出一个指定电箱');
+      return;
+    }
+    if (!summaryExportAllowed && inspectionExportBoxIds.length !== 1) {
+      setInspectionExportError('当前账号只能导出一个指定电箱');
+      return;
+    }
+
+    setInspectionExportSubmitting(true);
+    setInspectionExportError('');
+    try {
+      const params = buildInspectionExportParams({
         projectId,
-        templateCode: 'ELECTRIC_BOX_DAILY',
-        month,
-        boxId: summaryBoxId || undefined,
-        inspectorId: summaryBoxId ? undefined : recordInspectorId || undefined,
-        result: summaryBoxId ? undefined : recordResult || undefined,
+        startDate: inspectionExportStartDate,
+        endDate: inspectionExportEndDate,
+        allBoxes: inspectionExportAllBoxes,
+        selectedBoxIds: inspectionExportBoxIds,
       });
+      const blob = await exportInspectionRecords(params);
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
+      const selectedExportBox = !inspectionExportAllBoxes && inspectionExportBoxIds.length === 1
+        ? inspectionExportBoxes.find(item => String(item.id) === String(inspectionExportBoxIds[0]))
+          || selectedSummaryBox
+        : null;
+      const periodName = `${inspectionExportStartDate}至${inspectionExportEndDate}`;
       link.download = selectedExportBox
-        ? `${selectedExportBox.boxCode}-电箱检查记录表-${month}.xlsx`
-        : `电箱巡检记录-${projectId}-${month}.xlsx`;
+        ? `${selectedExportBox.boxCode}-电箱检查记录表-${periodName}.xlsx`
+        : `电箱巡检记录-${projectId}-${periodName}.xlsx`;
       document.body.appendChild(link);
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
+      setShowInspectionExportModal(false);
     } catch (err) {
-      console.error('导出巡检汇总失败', err);
-      alert(err.message || '导出失败');
+      console.error('导出巡检报表失败', err);
+      setInspectionExportError(err.message || '导出失败');
+    } finally {
+      setInspectionExportSubmitting(false);
     }
   };
 
@@ -5548,9 +5641,8 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
           style={{ ...fieldStyle, colorScheme: 'light' }}
         />
       )}
-      {summaryPeriodMode === 'MONTH'
-        && (summaryExportAllowed || singleBoxExportAllowed)
-        && actionButton(summaryBoxId ? '导出本箱月表' : '导出项目月表', exportSummary)}
+      {(summaryExportAllowed || singleBoxExportAllowed)
+        && actionButton('导出报表', openInspectionExportModal)}
       {actionButton('刷新', loadInspectionData, 'secondary')}
     </div>
   );
@@ -6223,6 +6315,192 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     </div>
   );
 
+  const renderInspectionExportModal = () => showInspectionExportModal && (
+    <div
+      style={{ position: 'fixed', inset: 0, zIndex: 1012, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18, background: 'rgba(15,23,42,.58)' }}
+      onClick={() => {
+        if (!inspectionExportSubmitting) setShowInspectionExportModal(false);
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="inspection-export-title"
+        style={{ width: 620, maxWidth: '100%', maxHeight: '88vh', overflow: 'auto', padding: 18, borderRadius: 10, border: `1px solid ${T.borderColor}`, background: T.modalBg, boxShadow: '0 20px 55px rgba(15,23,42,.22)' }}
+        onClick={event => event.stopPropagation()}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div>
+            <div id="inspection-export-title" style={{ color: T.textPrimary, fontSize: 16, fontWeight: 900 }}>导出巡检报表</div>
+            <div style={{ color: T.textMuted, fontSize: 11, marginTop: 4 }}>按所选日期范围和电箱生成正式 Excel 报表</div>
+          </div>
+          <button
+            type="button"
+            aria-label="关闭导出报表弹窗"
+            disabled={inspectionExportSubmitting}
+            onClick={() => setShowInspectionExportModal(false)}
+            style={{ border: 0, background: 'transparent', color: T.textMuted, fontSize: 20, cursor: inspectionExportSubmitting ? 'not-allowed' : 'pointer' }}
+          >×</button>
+        </div>
+
+        <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, color: T.textSecondary, fontSize: 11 }}>
+            开始日期
+            <input
+              type="date"
+              value={inspectionExportStartDate}
+              max={inspectionExportEndDate || currentDate()}
+              disabled={inspectionExportSubmitting}
+              onChange={event => {
+                setInspectionExportStartDate(event.target.value);
+                setInspectionExportError('');
+              }}
+              style={{ ...fieldStyle, width: '100%', colorScheme: 'light' }}
+            />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, color: T.textSecondary, fontSize: 11 }}>
+            结束日期
+            <input
+              type="date"
+              value={inspectionExportEndDate}
+              min={inspectionExportStartDate || undefined}
+              max={currentDate()}
+              disabled={inspectionExportSubmitting}
+              onChange={event => {
+                setInspectionExportEndDate(event.target.value);
+                setInspectionExportError('');
+              }}
+              style={{ ...fieldStyle, width: '100%', colorScheme: 'light' }}
+            />
+          </label>
+        </div>
+        <div style={{ marginTop: 8, color: T.textMuted, fontSize: 10 }}>首尾日期均包含，最长可导出 366 天，结束日期不能晚于今天。</div>
+
+        <div style={{ marginTop: 16, padding: 12, borderRadius: 8, border: `1px solid ${T.borderColor}`, background: T.surface2 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ color: T.textPrimary, fontSize: 12, fontWeight: 800 }}>导出电箱</div>
+              <div style={{ color: T.textMuted, fontSize: 10, marginTop: 3 }}>
+                {inspectionExportAllBoxes
+                  ? `全部电箱${inspectionExportBoxes.length ? `（${inspectionExportBoxes.length} 个）` : ''}`
+                  : `已选择 ${inspectionExportBoxIds.length} 个电箱`}
+              </div>
+            </div>
+            {summaryExportAllowed && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  type="button"
+                  disabled={inspectionExportSubmitting || inspectionExportLoading}
+                  onClick={() => {
+                    setInspectionExportAllBoxes(true);
+                    setInspectionExportBoxIds([]);
+                    setInspectionExportError('');
+                  }}
+                  style={{ minHeight: 28, padding: '0 10px', borderRadius: 5, border: `1px solid ${T.borderColor}`, background: T.cardBg, color: T.textSecondary, cursor: 'pointer', fontSize: 11 }}
+                >全选</button>
+                <button
+                  type="button"
+                  disabled={inspectionExportSubmitting}
+                  onClick={() => {
+                    setInspectionExportAllBoxes(false);
+                    setInspectionExportBoxIds([]);
+                    setInspectionExportError('');
+                  }}
+                  style={{ minHeight: 28, padding: '0 10px', borderRadius: 5, border: `1px solid ${T.borderColor}`, background: T.cardBg, color: T.textSecondary, cursor: 'pointer', fontSize: 11 }}
+                >清空</button>
+              </div>
+            )}
+          </div>
+
+          {summaryExportAllowed ? (
+            <>
+              <label style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px', borderRadius: 6, border: `1px solid ${inspectionExportAllBoxes ? T.accent : T.borderColor}`, background: T.cardBg, color: T.textPrimary, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={inspectionExportAllBoxes}
+                  disabled={inspectionExportSubmitting || inspectionExportLoading}
+                  onChange={() => {
+                    setInspectionExportAllBoxes(true);
+                    setInspectionExportBoxIds([]);
+                    setInspectionExportError('');
+                  }}
+                />
+                全部电箱
+              </label>
+              <input
+                value={inspectionExportBoxKeyword}
+                disabled={inspectionExportSubmitting || inspectionExportLoading}
+                onChange={event => setInspectionExportBoxKeyword(event.target.value)}
+                placeholder="搜索电箱编号、名称、位置或负责电工"
+                style={{ ...fieldStyle, width: '100%', marginTop: 10 }}
+              />
+              <div style={{ marginTop: 8, maxHeight: 250, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {inspectionExportLoading && <div style={{ padding: 12, color: T.textMuted, fontSize: 11 }}>正在加载电箱...</div>}
+                {!inspectionExportLoading && inspectionExportVisibleBoxes.map(box => {
+                  const boxId = String(box.id);
+                  const checked = !inspectionExportAllBoxes && inspectionExportBoxIds.includes(boxId);
+                  return (
+                    <label key={box.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '9px 10px', borderRadius: 6, border: `1px solid ${checked ? T.accent : T.borderColor}`, background: T.cardBg, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={inspectionExportSubmitting}
+                        onChange={() => {
+                          setInspectionExportAllBoxes(false);
+                          setInspectionExportBoxIds(current => toggleInspectionExportBoxSelection(
+                            inspectionExportAllBoxes ? [] : current,
+                            boxId,
+                          ));
+                          setInspectionExportError('');
+                        }}
+                      />
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ display: 'block', color: T.textPrimary, fontSize: 11, fontWeight: 800 }}>{box.boxCode || `电箱 #${box.id}`} · {box.boxName || '未命名'}</span>
+                        <span style={{ display: 'block', color: T.textMuted, fontSize: 10, marginTop: 3 }}>{box.installLocation || '未填写位置'}{box.responsibleElectricianName ? ` · ${box.responsibleElectricianName}` : ''}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+                {!inspectionExportLoading && inspectionExportVisibleBoxes.length === 0 && (
+                  <div style={{ padding: 12, color: T.textMuted, fontSize: 11 }}>没有匹配的电箱</div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div style={{ marginTop: 12, padding: 10, borderRadius: 6, border: `1px solid ${T.borderColor}`, background: T.cardBg, color: T.textSecondary, fontSize: 11 }}>
+              {inspectionExportBoxes[0]
+                ? `${inspectionExportBoxes[0].boxCode || `电箱 #${inspectionExportBoxes[0].id}`} · ${inspectionExportBoxes[0].boxName || '未命名'} · ${inspectionExportBoxes[0].installLocation || '未填写位置'}`
+                : '请返回页面重新选择一个电箱'}
+            </div>
+          )}
+        </div>
+
+        <div style={{ marginTop: 12, padding: 10, borderRadius: 6, background: `${T.accent}0D`, border: `1px solid ${T.accent}33`, color: T.textSecondary, fontSize: 10, lineHeight: 1.6 }}>
+          正式报表只按日期范围和电箱生成，不受页面上的巡检员及正常/异常筛选影响。单箱生成一张正式检查记录表；多个或全部电箱生成汇总及逐箱明细。
+        </div>
+        {inspectionExportError && (
+          <div role="alert" style={{ marginTop: 10, padding: '8px 10px', borderRadius: 6, border: `1px solid ${T.danger}`, background: `${T.danger}12`, color: T.danger, fontSize: 11 }}>
+            {inspectionExportError}
+          </div>
+        )}
+        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button
+            type="button"
+            disabled={inspectionExportSubmitting}
+            onClick={() => setShowInspectionExportModal(false)}
+            style={{ minHeight: 34, padding: '0 16px', borderRadius: 6, border: `1px solid ${T.borderColor}`, background: T.cardBg, color: T.textSecondary, cursor: inspectionExportSubmitting ? 'not-allowed' : 'pointer', fontSize: 12 }}
+          >取消</button>
+          <button
+            type="button"
+            disabled={inspectionExportSubmitting || inspectionExportLoading || inspectionExportBoxes.length === 0}
+            onClick={submitInspectionExport}
+            style={{ minHeight: 34, padding: '0 18px', borderRadius: 6, border: `1px solid ${T.accent}`, background: T.accent, color: '#fff', cursor: inspectionExportSubmitting || inspectionExportLoading ? 'not-allowed' : 'pointer', opacity: inspectionExportSubmitting || inspectionExportLoading ? 0.65 : 1, fontSize: 12, fontWeight: 800 }}
+          >{inspectionExportSubmitting ? '正在生成...' : '生成并下载'}</button>
+        </div>
+      </div>
+    </div>
+  );
+
   const renderTemplateModal = () => editingTemplate && (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)', zIndex: 1005, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setEditingTemplate(null)}>
       <div style={{ width: 760, maxHeight: '86vh', overflow: 'auto', background: T.modalBg, border: `1px solid ${T.borderColor}`, borderRadius: 10, padding: 18, boxShadow: '0 18px 60px rgba(0,0,0,0.45)' }} onClick={e => e.stopPropagation()}>
@@ -6413,6 +6691,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
       {renderBoxDrawer()}
       {renderBoxModal()}
       {renderImportModal()}
+      {renderInspectionExportModal()}
       {renderTemplateModal()}
       {renderCreateUserModal()}
       {renderWechatApprovalModal()}
@@ -6422,8 +6701,25 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
 }
 
 function ElectricInspectionPage({ projectId, theme: T, currentUser }) {
-  const [activeTab, setActiveTab] = useState('ledger');
-  const visibleTabs = ELECTRIC_INSPECTION_TABS;
+  const projectMenuCodes = useMemo(
+    () => collectProjectMenuCodes(currentUser, projectId),
+    [currentUser, projectId],
+  );
+  const visibleTabs = useMemo(
+    () => ELECTRIC_INSPECTION_TABS.filter((tab) => isPlatformAdmin(currentUser)
+      || pageMenuAllowed(projectMenuCodes, [tab.menuCode], ['WEB_INSPECTION', 'ELECTRIC_INSPECTION'])),
+    [currentUser, projectMenuCodes],
+  );
+  const [activeTab, setActiveTab] = useState(visibleTabs[0]?.id || '');
+  const [menuNotice, setMenuNotice] = useState('');
+
+  useEffect(() => {
+    if (!visibleTabs.some((tab) => tab.id === activeTab)) {
+      const fallback = visibleTabs[0];
+      setActiveTab(fallback?.id || '');
+      if (fallback) setMenuNotice(`当前角色无原页签菜单权限，已切换到${fallback.label}`);
+    }
+  }, [activeTab, visibleTabs]);
 
   return (
     <div style={{
@@ -6447,11 +6743,11 @@ function ElectricInspectionPage({ projectId, theme: T, currentUser }) {
       }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 800, color: T.textPrimary }}>巡检管理</div>
-          <div style={{ fontSize: 11, color: T.textMuted, marginTop: 3 }}>维护巡检台账和月度检查记录；用户权限已统一迁移至系统管理</div>
+          <div style={{ fontSize: 11, color: menuNotice ? T.warning : T.textMuted, marginTop: 3 }}>{menuNotice || '维护电箱台账和巡检记录；用户权限已统一迁移至系统管理'}</div>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {visibleTabs.map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
+            <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMenuNotice(''); }} style={{
               padding: '7px 14px',
               borderRadius: 5,
               cursor: 'pointer',
@@ -6465,7 +6761,9 @@ function ElectricInspectionPage({ projectId, theme: T, currentUser }) {
         </div>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <InspectionBackendPanel projectId={projectId} theme={T} activeTab={activeTab} currentUser={currentUser} onTabChange={setActiveTab} />
+        {activeTab
+          ? <InspectionBackendPanel projectId={projectId} theme={T} activeTab={activeTab} currentUser={currentUser} onTabChange={setActiveTab} />
+          : <div style={{ padding: 24, color: T.textMuted }}>当前角色没有可访问的巡检页签</div>}
       </div>
     </div>
   );

@@ -108,12 +108,18 @@ docs/
 - `PLATFORM_ADMIN` 只通过角色判断，不允许使用固定用户 ID 兜底。
 - 只有 `PLATFORM_ADMIN` 是平台级全局资格；其他业务角色均为项目角色。用户管理仅分配项目与项目角色，受保护的平台全局身份不作为普通业务角色展示或分配。
 - 同一成员可在同一项目拥有多个角色，菜单和操作权限按并集计算；`sys_user_project.status=ACTIVE` 是项目角色生效前提。
+- 用户管理采用“项目 → 角色”树，项目成员管理采用“用户 → 角色”树；父节点只代表成员关系，首次勾选自动使用启用中的内置 `USER` 角色，不代表全选子角色。
+- 跨项目或同项目的多项成员变更必须通过批量接口一次提交并在同一事务内完成；单项校验失败时整批回滚。暂停/恢复访问仍为独立状态操作，不能被角色保存隐式改变。
 - `PROJECT_ADMIN` 正式展示为受保护的“项目经理”。只有系统管理员能授予、撤销或调整该角色；项目经理只可管理自己项目的普通成员，不能处理任何项目经理角色、其他项目或平台权限。
 - 平台级系统管理接口只认可平台角色提供的平台权限；项目角色不能借聚合权限调用注册、全量用户、角色、菜单、微信全局管理或审计接口。
 - 项目角色权限只在目标 `projectId` 的有效成员关系内生效。用户在 A 项目有写权限，不代表能写 B 项目。
 - `/api/v1/auth/user-info` 是 Web 和小程序菜单、平台权限码、项目角色及项目权限的统一来源。
 - 资料、巡检、质量必须通过一个模块开关统一控制两端入口。关闭模块时保留细分操作权限配置，但 Web、小程序和后端目标项目鉴权都必须拒绝该模块；不得重新在角色页拆成 `WEB_*` 和 `MINI_*` 两次授权。
 - 菜单决定入口可见性，操作权限决定页面内动作；前端显隐只用于体验，不能替代后端鉴权。
+- 角色基本信息、菜单和操作权限必须分开保存；未传授权字段的角色基本信息修改不得清空现有授权。
+- Web 页签菜单固定为资料库/回收站、电箱台账/巡检记录、质量问题/质量资料；页签细分不得将小程序拆成另一套业务授权。
+- 新的角色管理 Web 只调用 `/system/roles/{id}/menus` 和
+  `/system/roles/{id}/operation-permissions`；旧 `/permissions` 组合接口仅作兼容，不删除。
 - 所有业务接口必须以后端 JWT 用户为准，不得信任前端传入的 `userId`、`username`、角色、上传人或操作人。
 - 列表接口必须按有权项目过滤；详情、更新和删除接口必须先查业务记录，再按记录真实 `projectId` 校验。
 - 项目只允许在没有成员、资料、巡检、质量、设备等任何关联记录时删除；禁止以删除项目主记录代替业务归档或级联清库。
@@ -198,7 +204,11 @@ backend/src/main/resources/sql/migrations/20260729_shared_business_module_access
 backend/src/main/resources/sql/migrations/20260729_wechat_quick_registration_initial_password.sql
 backend/src/main/resources/sql/migrations/20260730_quality_issue_resilience.sql
 backend/src/main/resources/sql/migrations/20260801_inspection_template_item_code_alignment.sql
+backend/src/main/resources/sql/migrations/20260803_role_menu_permission_hierarchy.sql
 ```
+
+`20260803_role_menu_permission_hierarchy.sql` 只增加 6 条页签菜单并一次性回填角色菜单关联，
+不增加表或字段。已在隔离副本双跑，但未经备份和明确升级授权不得直接应用到长期本地库或生产库。
 
 - `backend/src/main/resources/sql/init.sql` 是禁用兼容入口，直接执行必须失败。全新空库只能
   使用 `scripts/init-empty-database.sh`；工具要求精确确认并拒绝已有任何表的目标库。

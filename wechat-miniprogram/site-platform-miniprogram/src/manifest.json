@@ -2,8 +2,8 @@
   "name": "电信云平台现场端",
   "appid": "__UNI__SITE_PLATFORM",
   "description": "项目现场电箱检查小程序原型",
-  "versionName": "0.1.0",
-  "versionCode": "100",
+  "versionName": "0.1.2",
+  "versionCode": "102",
   "transformPx": false,
   "h5": {
     "router": {

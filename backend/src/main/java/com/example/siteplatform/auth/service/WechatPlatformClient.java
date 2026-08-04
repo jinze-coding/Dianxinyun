@@ -99,7 +99,7 @@ public class WechatPlatformClient {
         String body = restClient.post()
                 .uri("https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token={token}", accessToken())
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of("code", phoneCode))
+                .body(jsonBody(Map.of("code", phoneCode)))
                 .retrieve().body(String.class);
         JsonNode json = read(body);
         ensureSuccess(json, "获取微信手机号失败");
@@ -126,12 +126,12 @@ public class WechatPlatformClient {
         byte[] bytes = restClient.post()
                 .uri("https://api.weixin.qq.com/wxa/getwxacodeunlimit?access_token={token}", accessToken())
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of(
+                .body(jsonBody(Map.of(
                         "scene", scene,
                         "page", page,
                         "env_version", StringUtils.hasText(envVersion) ? envVersion : "release",
                         "check_path", false,
-                        "width", 430))
+                        "width", 430)))
                 .retrieve().body(byte[].class);
         if (bytes == null || bytes.length == 0) throw new BusinessException("微信小程序码生成失败：返回内容为空");
         if (bytes[0] == '{') {
@@ -158,6 +158,11 @@ public class WechatPlatformClient {
     private JsonNode read(String body) {
         try { return objectMapper.readTree(body); }
         catch (Exception e) { throw new BusinessException("微信接口响应解析失败"); }
+    }
+
+    String jsonBody(Map<String, ?> body) {
+        try { return objectMapper.writeValueAsString(body); }
+        catch (Exception e) { throw new BusinessException("微信接口请求生成失败"); }
     }
 
     private void ensureSuccess(JsonNode json, String message) {

@@ -1,4 +1,4 @@
-import apiClient, { get, post, put } from './api';
+import apiClient, { ensureFileBlob, get, post, put } from './api';
 
 export function getInspectionTemplates() {
   return get('/inspection/templates');
@@ -69,20 +69,24 @@ export function escalateInspectionRectification(id, data = {}) {
 }
 
 export async function exportInspectionRecords(params = {}) {
-  const blob = await apiClient.get('/inspection/records/export', {
-    params,
-    responseType: 'blob',
-  });
-  if (blob instanceof Blob && String(blob.type || '').includes('json')) {
-    try {
-      const result = JSON.parse(await blob.text());
-      throw new Error(result.message || '导出失败');
-    } catch (error) {
-      if (error instanceof SyntaxError) throw new Error('导出失败');
-      throw error;
+  try {
+    const blob = await apiClient.get('/inspection/records/export', {
+      params,
+      responseType: 'blob',
+    });
+    return ensureFileBlob(blob, '导出失败');
+  } catch (error) {
+    const errorBlob = error?.response?.data;
+    if (errorBlob instanceof Blob && String(errorBlob.type || '').toLowerCase().includes('json')) {
+      try {
+        const result = JSON.parse(await errorBlob.text());
+        throw new Error(result.message || '导出失败');
+      } catch (parseError) {
+        if (!(parseError instanceof SyntaxError)) throw parseError;
+      }
     }
+    throw error;
   }
-  return blob;
 }
 
 export async function downloadFileAsObjectUrl(fileId) {

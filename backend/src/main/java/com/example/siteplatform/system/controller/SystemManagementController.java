@@ -10,11 +10,15 @@ import com.example.siteplatform.log.entity.OperationLog;
 import com.example.siteplatform.registration.dto.RegistrationApplicationVO;
 import com.example.siteplatform.registration.dto.RegistrationReviewRequest;
 import com.example.siteplatform.registration.service.RegistrationApplicationService;
+import com.example.siteplatform.project.dto.UserProjectRoleBatchRequest;
+import com.example.siteplatform.project.service.ProjectMemberService;
 import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import com.example.siteplatform.system.dto.PasswordResetRequest;
 import com.example.siteplatform.system.dto.ReviewCommentRequest;
 import com.example.siteplatform.system.dto.RoleSaveRequest;
 import com.example.siteplatform.system.dto.RolePermissionUpdateRequest;
+import com.example.siteplatform.system.dto.RoleMenuUpdateRequest;
+import com.example.siteplatform.system.dto.RoleOperationPermissionUpdateRequest;
 import com.example.siteplatform.system.dto.SystemUserStatusRequest;
 import com.example.siteplatform.system.entity.SystemMenu;
 import com.example.siteplatform.system.entity.SystemPermission;
@@ -36,16 +40,19 @@ public class SystemManagementController {
     private final SystemAdministrationService administrationService;
     private final RegistrationApplicationService registrationService;
     private final WechatUserManagementService wechatUserService;
+    private final ProjectMemberService projectMemberService;
 
     public SystemManagementController(AuthService authService, SystemPermissionService permissionService,
                                       SystemAdministrationService administrationService,
                                       RegistrationApplicationService registrationService,
-                                      WechatUserManagementService wechatUserService) {
+                                      WechatUserManagementService wechatUserService,
+                                      ProjectMemberService projectMemberService) {
         this.authService = authService;
         this.permissionService = permissionService;
         this.administrationService = administrationService;
         this.registrationService = registrationService;
         this.wechatUserService = wechatUserService;
+        this.projectMemberService = projectMemberService;
     }
 
     @GetMapping("/registration-applications")
@@ -140,6 +147,16 @@ public class SystemManagementController {
         return Result.success();
     }
 
+    @PutMapping("/users/{userId}/project-role-assignments")
+    public Result<List<UserProjectRoleVO>> updateUserProjectRoleAssignments(
+            @PathVariable Long userId,
+            @Valid @RequestBody UserProjectRoleBatchRequest body,
+            HttpServletRequest request) {
+        SysUser operator = current(request);
+        permissionService.requirePlatformPermission(operator, SystemPermissionCodes.USER_MANAGE);
+        return Result.success(projectMemberService.batchUpdateUserProjectAssignments(userId, body, operator));
+    }
+
     @GetMapping("/roles")
     public Result<List<SystemRole>> roles(HttpServletRequest request) {
         permissionService.requireAnyPlatformPermission(current(request),
@@ -180,6 +197,27 @@ public class SystemManagementController {
         permissionService.requirePlatformPermission(operator, SystemPermissionCodes.ROLE_MANAGE);
         administrationService.updateRolePermissions(id, body.getPermissionIds(), body.getMenuIds(),
                 body.getBusinessModuleCodes(), operator);
+        return Result.success();
+    }
+
+    @PutMapping("/roles/{id}/menus")
+    public Result<Void> updateRoleMenus(@PathVariable Long id,
+                                        @Valid @RequestBody RoleMenuUpdateRequest body,
+                                        HttpServletRequest request) {
+        SysUser operator = current(request);
+        permissionService.requirePlatformPermission(operator, SystemPermissionCodes.ROLE_MANAGE);
+        administrationService.updateRoleMenus(id, body.getMenuIds(), body.getBusinessModuleCodes(), operator);
+        return Result.success();
+    }
+
+    @PutMapping("/roles/{id}/operation-permissions")
+    public Result<Void> updateRoleOperationPermissions(
+            @PathVariable Long id,
+            @Valid @RequestBody RoleOperationPermissionUpdateRequest body,
+            HttpServletRequest request) {
+        SysUser operator = current(request);
+        permissionService.requirePlatformPermission(operator, SystemPermissionCodes.ROLE_MANAGE);
+        administrationService.updateRoleOperationPermissions(id, body.getPermissionIds(), operator);
         return Result.success();
     }
 

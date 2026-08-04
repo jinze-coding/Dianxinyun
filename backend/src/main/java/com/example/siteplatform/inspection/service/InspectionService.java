@@ -71,6 +71,7 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -935,27 +936,83 @@ public class InspectionService {
 
     public ExportFile exportRecords(Long projectId, String templateCode, String month, Long boxId,
                                     Long inspectorId, String result, SysUser currentUser) {
+        return exportRecords(projectId, templateCode, month, boxId, null, null, null,
+                inspectorId, result, currentUser);
+    }
+
+    public ExportFile exportRecords(Long projectId, String templateCode, String month, Long boxId,
+                                    String startDate, String endDate, String boxIds,
+                                    Long inspectorId, String result, SysUser currentUser) {
         if (projectId == null) {
             throw new BusinessException("项目ID不能为空");
         }
         projectPermissionService.checkProjectPermission(currentUser.getId(), projectId);
+
+        boolean rangeExport = StringUtils.hasText(startDate)
+                || StringUtils.hasText(endDate)
+                || StringUtils.hasText(boxIds);
+        LocalDate exportStartDate;
+        LocalDate exportEndDate;
+        YearMonth legacyMonth = null;
+        List<Long> selectedBoxIds = List.of();
         ElectricBox singleBox = null;
-        if (boxId == null) {
-            requireSummaryExportPermission(currentUser, projectId);
-        } else {
-            singleBox = requireBox(boxId);
-            if (!Objects.equals(singleBox.getProjectId(), projectId)) {
-                throw BusinessException.forbidden("电箱不属于当前项目");
+        List<ElectricBox> boxes;
+
+        if (rangeExport) {
+            if (!StringUtils.hasText(startDate) || !StringUtils.hasText(endDate)) {
+                throw new BusinessException("开始日期和结束日期必须同时传入");
             }
-            requireSingleBoxExportPermission(currentUser, projectId);
+            if (StringUtils.hasText(month) || boxId != null) {
+                throw new BusinessException("日期范围参数不能与月份或单箱月报参数同时传入");
+            }
+            if (inspectorId != null || StringUtils.hasText(result)) {
+                throw new BusinessException("日期范围正式报表不支持巡检员或结果筛选");
+            }
+            exportStartDate = parseExportDate(startDate, "开始日期");
+            exportEndDate = parseExportDate(endDate, "结束日期");
+            validateExportRange(exportStartDate, exportEndDate);
+            selectedBoxIds = parseExportBoxIds(boxIds);
+
+            if (selectedBoxIds.isEmpty()) {
+                requireSummaryExportPermission(currentUser, projectId);
+                boxes = queryBoxes(projectId, null);
+            } else {
+                boxes = queryBoxes(selectedBoxIds);
+                validateExportBoxes(projectId, selectedBoxIds, boxes);
+                if (selectedBoxIds.size() == 1) {
+                    requireSingleBoxExportPermission(currentUser, projectId);
+                    singleBox = boxes.get(0);
+                } else {
+                    requireSummaryExportPermission(currentUser, projectId);
+                }
+            }
+        } else {
+            legacyMonth = parseMonth(month);
+            exportStartDate = legacyMonth.atDay(1);
+            exportEndDate = legacyMonth.atEndOfMonth();
+            if (boxId == null) {
+                requireSummaryExportPermission(currentUser, projectId);
+            } else {
+                singleBox = requireBox(boxId);
+                if (!Objects.equals(singleBox.getProjectId(), projectId)) {
+                    throw BusinessException.forbidden("电箱不属于当前项目");
+                }
+                requireSingleBoxExportPermission(currentUser, projectId);
+            }
+            boxes = queryBoxes(projectId, boxId);
         }
-        YearMonth yearMonth = parseMonth(month);
-        List<ElectricBox> boxes = queryBoxes(projectId, boxId);
-        String normalizedResult = boxId == null && StringUtils.hasText(result) ? result.trim().toUpperCase() : null;
+
+        if (boxes.isEmpty()) {
+            throw new BusinessException("当前项目没有可导出的电箱");
+        }
+
+        String normalizedResult = !rangeExport && boxId == null && StringUtils.hasText(result)
+                ? result.trim().toUpperCase()
+                : null;
         if (normalizedResult != null && !List.of("NORMAL", "ABNORMAL").contains(normalizedResult)) {
             throw new BusinessException("巡检结果筛选值无效");
         }
-        Long exportInspectorId = boxId == null ? inspectorId : null;
+        Long exportInspectorId = !rangeExport && boxId == null ? inspectorId : null;
         boolean filteredExport = exportInspectorId != null || normalizedResult != null;
         LambdaQueryWrapper<InspectionRecord> recordQuery = new LambdaQueryWrapper<InspectionRecord>()
                 .eq(InspectionRecord::getProjectId, projectId)
@@ -963,9 +1020,11 @@ public class InspectionService {
                         StringUtils.hasText(templateCode) ? templateCode : TEMPLATE_ELECTRIC_BOX_DAILY)
                 .eq(InspectionRecord::getSource, SOURCE_ELECTRICIAN_DAILY)
                 .ne(InspectionRecord::getStatus, "DRAFT")
-                .between(InspectionRecord::getCheckDate, yearMonth.atDay(1), yearMonth.atEndOfMonth());
+                .between(InspectionRecord::getCheckDate, exportStartDate, exportEndDate);
         if (boxId != null) {
             recordQuery.eq(InspectionRecord::getElectricBoxId, boxId);
+        } else if (rangeExport && !selectedBoxIds.isEmpty()) {
+            recordQuery.in(InspectionRecord::getElectricBoxId, selectedBoxIds);
         }
         if (exportInspectorId != null) {
             recordQuery.eq(InspectionRecord::getInspectorId, exportInspectorId);
@@ -984,34 +1043,55 @@ public class InspectionService {
             boxes = boxes.stream().filter(box -> matchedBoxIds.contains(box.getId())).toList();
         }
         List<InspectionRectification> rectifications = List.of();
+        Map<Long, Map<String, InspectionRecordItem>> itemsByRecord = loadExportItems(records);
+        Map<Long, Set<LocalDate>> requiredDatesByBox = new LinkedHashMap<>();
+        for (ElectricBox box : boxes) {
+            requiredDatesByBox.put(box.getId(), inspectionScopeService.requiredDates(
+                    box, exportStartDate, exportEndDate));
+        }
 
         try (Workbook workbook = new XSSFWorkbook(); ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
             if (singleBox != null) {
                 ProjectInfo project = projectInfoMapper.selectById(projectId);
-                writeSingleBoxMonthlySheet(workbook, singleBox, project, records, yearMonth);
+                writeSingleBoxSheet(workbook, singleBox, project, records, itemsByRecord,
+                        requiredDatesByBox.getOrDefault(singleBox.getId(), Set.of()),
+                        exportStartDate, exportEndDate, rangeExport);
                 workbook.write(outputStream);
-                String fileName = singleBox.getBoxCode() + "-电箱检查记录表-" + yearMonth + ".xlsx";
+                String periodName = rangeExport
+                        ? exportStartDate + "至" + exportEndDate
+                        : legacyMonth.toString();
+                String fileName = singleBox.getBoxCode() + "-电箱检查记录表-" + periodName + ".xlsx";
                 return new ExportFile(fileName, outputStream.toByteArray());
             }
             CellStyle headerStyle = workbook.createCellStyle();
             Font headerFont = workbook.createFont();
             headerFont.setBold(true);
             headerStyle.setFont(headerFont);
-            writeSummarySheet(workbook, headerStyle, boxes, records, rectifications, yearMonth,
+            writeSummarySheet(workbook, headerStyle, boxes, records, rectifications,
+                    exportStartDate, exportEndDate, requiredDatesByBox, rangeExport,
                     filteredExport, exportInspectorId, normalizedResult);
             for (ElectricBox box : boxes) {
-                writeBoxSheet(workbook, headerStyle, box, records, rectifications, yearMonth, filteredExport);
+                writeBoxSheet(workbook, headerStyle, box, records, itemsByRecord, rectifications,
+                        exportStartDate, exportEndDate,
+                        requiredDatesByBox.getOrDefault(box.getId(), Set.of()),
+                        rangeExport, filteredExport);
             }
             workbook.write(outputStream);
-            String fileName = "电箱巡检记录-" + projectId + "-" + yearMonth + ".xlsx";
+            String periodName = rangeExport
+                    ? exportStartDate + "至" + exportEndDate
+                    : legacyMonth.toString();
+            String fileName = "电箱巡检记录-" + projectId + "-" + periodName + ".xlsx";
             return new ExportFile(fileName, outputStream.toByteArray());
         } catch (IOException e) {
             throw new BusinessException("导出巡检记录失败");
         }
     }
 
-    private void writeSingleBoxMonthlySheet(Workbook workbook, ElectricBox box, ProjectInfo project,
-                                            List<InspectionRecord> records, YearMonth yearMonth) {
+    private void writeSingleBoxSheet(Workbook workbook, ElectricBox box, ProjectInfo project,
+                                     List<InspectionRecord> records,
+                                     Map<Long, Map<String, InspectionRecordItem>> itemsByRecord,
+                                     Set<LocalDate> requiredDates,
+                                     LocalDate startDate, LocalDate endDate, boolean rangeExport) {
         Sheet sheet = workbook.createSheet(safeSheetName(box.getBoxCode()));
         sheet.setDisplayGridlines(false);
         sheet.setFitToPage(true);
@@ -1061,7 +1141,9 @@ public class InspectionService {
         boxRow.getCell(0).setCellStyle(metaStyle);
         boxRow.createCell(3).setCellValue("电箱名称：" + (StringUtils.hasText(box.getBoxName()) ? box.getBoxName() : "—"));
         boxRow.getCell(3).setCellStyle(metaStyle);
-        boxRow.createCell(6).setCellValue("检查月份：" + yearMonth);
+        boxRow.createCell(6).setCellValue(rangeExport
+                ? "检查区间：" + startDate + " 至 " + endDate
+                : "检查月份：" + YearMonth.from(startDate));
         boxRow.getCell(6).setCellStyle(metaStyle);
         sheet.addMergedRegion(new CellRangeAddress(2, 2, 0, 2));
         sheet.addMergedRegion(new CellRangeAddress(2, 2, 3, 5));
@@ -1084,13 +1166,12 @@ public class InspectionService {
         Map<LocalDate, InspectionRecord> recordByDate = records.stream()
                 .filter(record -> Objects.equals(record.getElectricBoxId(), box.getId()))
                 .collect(Collectors.toMap(InspectionRecord::getCheckDate, record -> record, (left, right) -> right));
-        Map<Long, Map<String, InspectionRecordItem>> itemsByRecord = loadExportItems(records);
         LocalDate today = LocalDate.now();
-        for (int day = 1; day <= yearMonth.lengthOfMonth(); day++) {
-            LocalDate date = yearMonth.atDay(day);
+        int rowIndex = 5;
+        for (LocalDate date = startDate; !date.isAfter(endDate); date = date.plusDays(1)) {
             InspectionRecord record = recordByDate.get(date);
-            boolean required = inspectionScopeService.isRequired(box, date);
-            Row row = sheet.createRow(day + 4);
+            boolean required = requiredDates.contains(date);
+            Row row = sheet.createRow(rowIndex++);
             row.setHeightInPoints(24);
             row.createCell(0).setCellValue(date.getYear() + "." + date.getMonthValue() + "." + date.getDayOfMonth());
             row.getCell(0).setCellStyle(bodyStyle);
@@ -1165,20 +1246,35 @@ public class InspectionService {
 
     private void writeSummarySheet(Workbook workbook, CellStyle headerStyle, List<ElectricBox> boxes,
                                    List<InspectionRecord> records, List<InspectionRectification> rectifications,
-                                   YearMonth yearMonth, boolean filteredExport, Long inspectorId, String result) {
+                                   LocalDate startDate, LocalDate endDate,
+                                   Map<Long, Set<LocalDate>> requiredDatesByBox,
+                                   boolean rangeExport, boolean filteredExport,
+                                   Long inspectorId, String result) {
         Sheet sheet = workbook.createSheet("巡检汇总");
         String[] headers = filteredExport
                 ? new String[]{"电箱编号", "安装位置", "筛选记录数", "异常记录数", "巡检员筛选", "结果筛选"}
                 : new String[]{"电箱编号", "安装位置", "应检天数", "已检天数", "漏检天数", "异常次数"};
-        writeHeader(sheet, headerStyle, headers);
-        int rowIndex = 1;
+        int headerRowIndex = 0;
+        if (rangeExport) {
+            Row periodRow = sheet.createRow(0);
+            periodRow.createCell(0).setCellValue("统计区间：" + startDate + " 至 " + endDate);
+            periodRow.getCell(0).setCellStyle(headerStyle);
+            sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, headers.length - 1));
+            headerRowIndex = 1;
+        }
+        writeHeader(sheet, headerStyle, headers, headerRowIndex);
+        int rowIndex = headerRowIndex + 1;
         for (ElectricBox box : boxes) {
             List<InspectionRecord> boxRecords = records.stream()
                     .filter(record -> Objects.equals(record.getElectricBoxId(), box.getId()))
                     .toList();
-            int checkedDays = (int) boxRecords.stream().map(InspectionRecord::getCheckDate).distinct().count();
-            int abnormal = (int) boxRecords.stream().filter(record -> record.getAbnormalCount() != null
-                    && record.getAbnormalCount() > 0).count();
+            Set<LocalDate> requiredDates = requiredDatesByBox.getOrDefault(box.getId(), Set.of());
+            List<InspectionRecord> countedRecords = filteredExport
+                    ? boxRecords
+                    : boxRecords.stream().filter(record -> requiredDates.contains(record.getCheckDate())).toList();
+            int checkedDays = (int) countedRecords.stream().map(InspectionRecord::getCheckDate).distinct().count();
+            int abnormal = (int) countedRecords.stream().filter(record -> record.getAbnormalCount() != null
+                    && record.getAbnormalCount() > 0).map(InspectionRecord::getCheckDate).distinct().count();
             Row row = sheet.createRow(rowIndex++);
             row.createCell(0).setCellValue(box.getBoxCode());
             row.createCell(1).setCellValue(box.getInstallLocation());
@@ -1190,7 +1286,7 @@ public class InspectionService {
                 row.createCell(4).setCellValue(inspectorName);
                 row.createCell(5).setCellValue("ABNORMAL".equals(result) ? "有异常" : "NORMAL".equals(result) ? "正常" : "全部");
             } else {
-                int shouldCheck = inspectionScopeService.countRequiredDays(box, yearMonth);
+                int shouldCheck = requiredDates.size();
                 row.createCell(2).setCellValue(shouldCheck);
                 row.createCell(3).setCellValue(checkedDays);
                 row.createCell(4).setCellValue(Math.max(shouldCheck - checkedDays, 0));
@@ -1201,32 +1297,45 @@ public class InspectionService {
     }
 
     private void writeBoxSheet(Workbook workbook, CellStyle headerStyle, ElectricBox box, List<InspectionRecord> records,
-                               List<InspectionRectification> rectifications, YearMonth yearMonth, boolean filteredExport) {
+                               Map<Long, Map<String, InspectionRecordItem>> itemsByRecord,
+                               List<InspectionRectification> rectifications,
+                               LocalDate startDate, LocalDate endDate, Set<LocalDate> requiredDates,
+                               boolean rangeExport, boolean filteredExport) {
         Sheet sheet = workbook.createSheet(safeSheetName(box.getBoxCode()));
         String[] headers = {"日期", "内外观", "漏电保护器", "熔断", "保护接零", "220V插座", "380V插座", "检查人", "备注"};
-        writeHeader(sheet, headerStyle, headers);
+        int headerRowIndex = 0;
+        if (rangeExport) {
+            Row periodRow = sheet.createRow(0);
+            periodRow.createCell(0).setCellValue("检查区间：" + startDate + " 至 " + endDate);
+            periodRow.getCell(0).setCellStyle(headerStyle);
+            sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, headers.length - 1));
+            headerRowIndex = 1;
+        }
+        writeHeader(sheet, headerStyle, headers, headerRowIndex);
         Map<LocalDate, InspectionRecord> dateRecordMap = records.stream()
                 .filter(record -> Objects.equals(record.getElectricBoxId(), box.getId()))
                 .collect(Collectors.toMap(InspectionRecord::getCheckDate, record -> record, (left, right) -> right));
-        int rowIndex = 1;
-        for (int day = 1; day <= yearMonth.lengthOfMonth(); day++) {
-            LocalDate date = yearMonth.atDay(day);
+        int rowIndex = headerRowIndex + 1;
+        LocalDate today = LocalDate.now();
+        for (LocalDate date = startDate; !date.isAfter(endDate); date = date.plusDays(1)) {
             InspectionRecord record = dateRecordMap.get(date);
             Row row = sheet.createRow(rowIndex++);
             row.createCell(0).setCellValue(date.toString());
             if (record == null) {
+                boolean required = requiredDates.contains(date);
+                String value = filteredExport
+                        ? "—"
+                        : !required ? "非巡检范围" : date.isAfter(today) ? "—" : "未检";
                 for (int column = 1; column <= 6; column++) {
-                    row.createCell(column).setCellValue(filteredExport ? "—" : "未检");
+                    row.createCell(column).setCellValue(value);
                 }
                 row.createCell(7).setCellValue("");
-                row.createCell(8).setCellValue(filteredExport ? "不在当前筛选结果" : "未检");
+                row.createCell(8).setCellValue(filteredExport
+                        ? "不在当前筛选结果"
+                        : !required ? "非巡检范围" : date.isAfter(today) ? "" : "未检");
                 continue;
             }
-            Map<String, InspectionRecordItem> itemMap = inspectionRecordItemMapper.selectList(
-                            new LambdaQueryWrapper<InspectionRecordItem>()
-                                    .eq(InspectionRecordItem::getRecordId, record.getId()))
-                    .stream()
-                    .collect(Collectors.toMap(InspectionRecordItem::getItemCode, item -> item, (left, right) -> right));
+            Map<String, InspectionRecordItem> itemMap = itemsByRecord.getOrDefault(record.getId(), Map.of());
             int column = 1;
             for (String itemCode : EXPORT_ITEM_NAMES.keySet()) {
                 row.createCell(column++).setCellValue(displayResult(itemMap.get(itemCode)));
@@ -1238,7 +1347,11 @@ public class InspectionService {
     }
 
     private void writeHeader(Sheet sheet, CellStyle headerStyle, String[] headers) {
-        Row headerRow = sheet.createRow(0);
+        writeHeader(sheet, headerStyle, headers, 0);
+    }
+
+    private void writeHeader(Sheet sheet, CellStyle headerStyle, String[] headers, int rowIndex) {
+        Row headerRow = sheet.createRow(rowIndex);
         for (int index = 0; index < headers.length; index++) {
             headerRow.createCell(index).setCellValue(headers[index]);
             headerRow.getCell(index).setCellStyle(headerStyle);
@@ -2056,6 +2169,12 @@ public class InspectionService {
         return electricBoxMapper.selectList(wrapper);
     }
 
+    private List<ElectricBox> queryBoxes(List<Long> boxIds) {
+        return electricBoxMapper.selectList(new LambdaQueryWrapper<ElectricBox>()
+                .in(ElectricBox::getId, boxIds)
+                .orderByAsc(ElectricBox::getBoxCode));
+    }
+
     private List<InspectionRecord> querySummaryRecords(Long projectId, Long boxId, YearMonth month,
                                                        LocalDate checkDate) {
         LambdaQueryWrapper<InspectionRecord> wrapper = new LambdaQueryWrapper<InspectionRecord>()
@@ -2146,6 +2265,59 @@ public class InspectionService {
             return YearMonth.parse(month);
         } catch (Exception e) {
             throw new BusinessException("月份格式应为 yyyy-MM");
+        }
+    }
+
+    private LocalDate parseExportDate(String value, String fieldName) {
+        try {
+            return LocalDate.parse(value.trim());
+        } catch (Exception e) {
+            throw new BusinessException(fieldName + "格式应为 yyyy-MM-dd");
+        }
+    }
+
+    private void validateExportRange(LocalDate startDate, LocalDate endDate) {
+        if (startDate.isAfter(endDate)) {
+            throw new BusinessException("开始日期不能晚于结束日期");
+        }
+        if (endDate.isAfter(LocalDate.now())) {
+            throw new BusinessException("结束日期不能晚于今天");
+        }
+        if (ChronoUnit.DAYS.between(startDate, endDate) > 365) {
+            throw new BusinessException("导出日期范围不能超过366天");
+        }
+    }
+
+    private List<Long> parseExportBoxIds(String boxIds) {
+        if (!StringUtils.hasText(boxIds)) {
+            return List.of();
+        }
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        for (String rawId : boxIds.split(",", -1)) {
+            try {
+                long id = Long.parseLong(rawId.trim());
+                if (id <= 0) {
+                    throw new NumberFormatException();
+                }
+                ids.add(id);
+            } catch (NumberFormatException e) {
+                throw new BusinessException("电箱ID列表格式无效");
+            }
+        }
+        return List.copyOf(ids);
+    }
+
+    private void validateExportBoxes(Long projectId, List<Long> selectedBoxIds, List<ElectricBox> boxes) {
+        Map<Long, ElectricBox> boxById = boxes.stream()
+                .collect(Collectors.toMap(ElectricBox::getId, box -> box, (left, right) -> left));
+        for (Long selectedBoxId : selectedBoxIds) {
+            ElectricBox box = boxById.get(selectedBoxId);
+            if (box == null) {
+                throw BusinessException.notFound("所选电箱不存在");
+            }
+            if (!Objects.equals(box.getProjectId(), projectId)) {
+                throw BusinessException.forbidden("电箱不属于当前项目");
+            }
         }
     }
 

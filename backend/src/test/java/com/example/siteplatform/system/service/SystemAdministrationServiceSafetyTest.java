@@ -207,10 +207,14 @@ class SystemAdministrationServiceSafetyTest {
     void projectRolePermissionChangeRevokesGlobalAndProjectUserSessionsOnce() {
         SystemRole projectRole = role(30L, "CUSTOM_REVIEWER", "PROJECT", 0, 1);
         SystemPermission permission = permission(100L, "document.manage");
+        SystemPermission viewPermission = permission(101L, "document.view");
         SystemMenu menu = menu(200L, "WEB_DOCUMENT");
         when(roleMapper.selectByIdForUpdate(30L)).thenReturn(projectRole);
         when(permissionMapper.selectById(100L)).thenReturn(permission);
+        when(permissionMapper.selectById(101L)).thenReturn(viewPermission);
+        when(permissionMapper.selectList(any())).thenReturn(List.of(permission, viewPermission));
         when(menuMapper.selectById(200L)).thenReturn(menu);
+        when(menuMapper.selectList(any())).thenReturn(List.of(menu));
         when(userMapper.selectUserIdsByRoleId(30L)).thenReturn(List.of(2L));
         when(userProjectRoleMapper.selectUserIdsByRoleId(30L)).thenReturn(List.of(2L, 3L));
 
@@ -220,6 +224,176 @@ class SystemAdministrationServiceSafetyTest {
         verify(authService, times(1)).logout(3L);
         verify(authService, times(1)).repeatLogoutAfterCommit(2L);
         verify(authService, times(1)).repeatLogoutAfterCommit(3L);
+        verify(projectPermissionService, times(1)).clearUserProjectsCache(2L);
+        verify(projectPermissionService, times(1)).clearUserProjectsCache(3L);
+    }
+
+    @Test
+    void editingRoleBasicsPreservesExistingMenusAndPermissions() {
+        SystemRole projectRole = role(30L, "CUSTOM_REVIEWER", "PROJECT", 0, 1);
+        projectRole.setRoleName("旧名称");
+        when(roleMapper.selectByIdForUpdate(30L)).thenReturn(projectRole);
+        when(roleMapper.selectMenuIds(30L)).thenReturn(List.of(200L));
+        when(roleMapper.selectPermissionIds(30L)).thenReturn(List.of(100L));
+        when(roleBusinessModuleMapper.selectModuleCodesByRoleId(30L)).thenReturn(List.of("DOCUMENT"));
+
+        RoleSaveRequest request = new RoleSaveRequest();
+        request.setRoleName("新名称");
+        request.setScopeType("PROJECT");
+        request.setEnabled(1);
+
+        SystemRole saved = service.saveRole(30L, request, operator());
+
+        assertEquals("新名称", saved.getRoleName());
+        assertEquals("CUSTOM_REVIEWER", saved.getRoleCode());
+        assertEquals(List.of(200L), saved.getMenuIds());
+        assertEquals(List.of(100L), saved.getPermissionIds());
+        verify(roleMapper, never()).deleteMenus(30L);
+        verify(roleMapper, never()).deletePermissions(30L);
+    }
+
+    @Test
+    void creatingRoleWithoutCodeGeneratesUniqueStableProjectCode() {
+        when(roleMapper.insert(any(SystemRole.class))).thenAnswer(invocation -> {
+            SystemRole inserted = invocation.getArgument(0);
+            inserted.setId(31L);
+            return 1;
+        });
+        when(roleMapper.selectMenuIds(31L)).thenReturn(List.of());
+        when(roleMapper.selectPermissionIds(31L)).thenReturn(List.of());
+        when(roleBusinessModuleMapper.selectModuleCodesByRoleId(31L)).thenReturn(List.of());
+        when(userMapper.selectUserIdsByRoleId(31L)).thenReturn(List.of());
+        when(userProjectRoleMapper.selectUserIdsByRoleId(31L)).thenReturn(List.of());
+
+        RoleSaveRequest request = new RoleSaveRequest();
+        request.setRoleName("材料查看员");
+        request.setScopeType("PROJECT");
+        request.setEnabled(1);
+        request.setMenuIds(List.of());
+        request.setPermissionIds(List.of());
+        request.setBusinessModuleCodes(List.of());
+
+        SystemRole saved = service.saveRole(null, request, operator());
+
+        assertTrue(saved.getRoleCode().matches("^ROLE_[A-F0-9]{12}$"));
+        assertEquals("PROJECT", saved.getScopeType());
+    }
+
+    @Test
+    void menuUpdateRemovesPermissionsOutsideSelectedPages() {
+        SystemRole projectRole = role(30L, "CUSTOM_REVIEWER", "PROJECT", 0, 1);
+        SystemMenu webDocument = menu(200L, "WEB_DOCUMENT");
+        SystemMenu miniDocument = menu(201L, "MINI_DOCUMENT");
+        SystemMenu library = menu(202L, "DOCUMENT_LIBRARY");
+        library.setParentId(200L);
+        SystemMenu qualityIssues = menu(203L, "QUALITY_ISSUES");
+        SystemPermission documentView = permission(100L, "document.view");
+        documentView.setModuleCode("WEB_DOCUMENT");
+        SystemPermission qualityView = permission(101L, "quality.view");
+        qualityView.setModuleCode("WEB_QUALITY");
+        when(roleMapper.selectByIdForUpdate(30L)).thenReturn(projectRole);
+        when(roleMapper.selectPermissionIds(30L)).thenReturn(List.of(100L, 101L));
+        when(permissionMapper.selectById(100L)).thenReturn(documentView);
+        when(permissionMapper.selectById(101L)).thenReturn(qualityView);
+        when(menuMapper.selectById(200L)).thenReturn(webDocument);
+        when(menuMapper.selectById(201L)).thenReturn(miniDocument);
+        when(menuMapper.selectById(202L)).thenReturn(library);
+        when(menuMapper.selectList(any())).thenReturn(List.of(webDocument, miniDocument, library, qualityIssues));
+
+        service.updateRoleMenus(30L, List.of(202L), List.of("DOCUMENT"), operator());
+
+        verify(roleMapper).insertPermission(30L, 100L);
+        verify(roleMapper, never()).insertPermission(30L, 101L);
+        verify(roleMapper).insertMenu(30L, 200L);
+        verify(roleMapper).insertMenu(30L, 201L);
+        verify(roleMapper).insertMenu(30L, 202L);
+    }
+
+    @Test
+    void inspectionSummaryExportAddsTechnicalPrerequisites() {
+        SystemRole projectRole = role(30L, "CUSTOM_REVIEWER", "PROJECT", 0, 1);
+        SystemMenu webInspection = menu(200L, "WEB_INSPECTION");
+        SystemMenu miniInspection = menu(201L, "MINI_INSPECTION");
+        SystemMenu records = menu(202L, "INSPECTION_RECORDS");
+        records.setParentId(200L);
+        SystemPermission summaryExport = permission(100L, "SUMMARY_EXPORT");
+        SystemPermission summaryView = permission(101L, "SUMMARY_VIEW");
+        SystemPermission inspectionView = permission(102L, "inspection.view");
+        SystemPermission inspectionExport = permission(103L, "inspection.export");
+        List<SystemPermission> permissions = List.of(summaryExport, summaryView, inspectionView, inspectionExport);
+        permissions.forEach(item -> item.setModuleCode("WEB_INSPECTION"));
+        when(roleMapper.selectByIdForUpdate(30L)).thenReturn(projectRole);
+        when(roleMapper.selectMenuIds(30L)).thenReturn(List.of(200L, 201L, 202L));
+        when(roleBusinessModuleMapper.selectModuleCodesByRoleId(30L)).thenReturn(List.of("INSPECTION"));
+        permissions.forEach(item -> when(permissionMapper.selectById(item.getId())).thenReturn(item));
+        when(permissionMapper.selectList(any())).thenReturn(permissions);
+        when(menuMapper.selectList(any())).thenReturn(List.of(webInspection, miniInspection, records));
+        when(menuMapper.selectById(200L)).thenReturn(webInspection);
+        when(menuMapper.selectById(201L)).thenReturn(miniInspection);
+        when(menuMapper.selectById(202L)).thenReturn(records);
+
+        service.updateRoleOperationPermissions(30L, List.of(100L), operator());
+
+        verify(roleMapper).insertPermission(30L, 100L);
+        verify(roleMapper).insertPermission(30L, 101L);
+        verify(roleMapper).insertPermission(30L, 102L);
+        verify(roleMapper).insertPermission(30L, 103L);
+    }
+
+    @Test
+    void inspectionQrPermissionAddsLedgerViewButNotLedgerManage() {
+        SystemRole projectRole = role(30L, "CUSTOM_REVIEWER", "PROJECT", 0, 1);
+        SystemMenu webInspection = menu(200L, "WEB_INSPECTION");
+        SystemMenu miniInspection = menu(201L, "MINI_INSPECTION");
+        SystemMenu ledger = menu(202L, "INSPECTION_LEDGER");
+        ledger.setParentId(200L);
+        SystemPermission qr = permission(100L, "BOX_QR_MANAGE");
+        SystemPermission boxView = permission(101L, "BOX_VIEW");
+        SystemPermission inspectionView = permission(102L, "inspection.view");
+        SystemPermission inspectionManage = permission(103L, "inspection.manage");
+        List<SystemPermission> permissions = List.of(qr, boxView, inspectionView, inspectionManage);
+        permissions.forEach(item -> item.setModuleCode("WEB_INSPECTION"));
+        when(roleMapper.selectByIdForUpdate(30L)).thenReturn(projectRole);
+        when(roleMapper.selectMenuIds(30L)).thenReturn(List.of(200L, 201L, 202L));
+        when(roleBusinessModuleMapper.selectModuleCodesByRoleId(30L)).thenReturn(List.of("INSPECTION"));
+        List.of(qr, boxView, inspectionView)
+                .forEach(item -> when(permissionMapper.selectById(item.getId())).thenReturn(item));
+        when(permissionMapper.selectList(any())).thenReturn(permissions);
+        when(menuMapper.selectList(any())).thenReturn(List.of(webInspection, miniInspection, ledger));
+        when(menuMapper.selectById(200L)).thenReturn(webInspection);
+        when(menuMapper.selectById(201L)).thenReturn(miniInspection);
+        when(menuMapper.selectById(202L)).thenReturn(ledger);
+
+        service.updateRoleOperationPermissions(30L, List.of(100L), operator());
+
+        verify(roleMapper).insertPermission(30L, 100L);
+        verify(roleMapper).insertPermission(30L, 101L);
+        verify(roleMapper).insertPermission(30L, 102L);
+        verify(roleMapper, never()).insertPermission(30L, 103L);
+    }
+
+    @Test
+    void operationPermissionOutsideSelectedMenuIsRejected() {
+        SystemRole projectRole = role(30L, "CUSTOM_REVIEWER", "PROJECT", 0, 1);
+        SystemMenu webDocument = menu(200L, "WEB_DOCUMENT");
+        SystemMenu library = menu(201L, "DOCUMENT_LIBRARY");
+        library.setParentId(200L);
+        SystemPermission qualityView = permission(100L, "quality.view");
+        qualityView.setModuleCode("WEB_QUALITY");
+        when(roleMapper.selectByIdForUpdate(30L)).thenReturn(projectRole);
+        when(roleMapper.selectMenuIds(30L)).thenReturn(List.of(200L, 201L));
+        when(roleBusinessModuleMapper.selectModuleCodesByRoleId(30L)).thenReturn(List.of("DOCUMENT"));
+        when(permissionMapper.selectById(100L)).thenReturn(qualityView);
+        when(menuMapper.selectList(any())).thenReturn(List.of(webDocument, library));
+        when(menuMapper.selectById(200L)).thenReturn(webDocument);
+        when(menuMapper.selectById(201L)).thenReturn(library);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.updateRoleOperationPermissions(30L, List.of(100L), operator()));
+
+        assertEquals(400, exception.getCode());
+        verify(roleMapper, never()).deletePermissions(30L);
+        verify(roleMapper, never()).deleteMenus(30L);
     }
 
     @Test
@@ -402,6 +576,13 @@ class SystemAdministrationServiceSafetyTest {
         permission.setId(id);
         permission.setPermissionCode(code);
         permission.setPermissionName(code);
+        String normalized = code == null ? "" : code.toLowerCase();
+        if (normalized.startsWith("document.")) permission.setModuleCode("WEB_DOCUMENT");
+        else if (normalized.startsWith("quality.")) permission.setModuleCode("WEB_QUALITY");
+        else if (normalized.startsWith("inspection.") || normalized.startsWith("box_")
+                || normalized.startsWith("summary_") || normalized.startsWith("inspection_")) {
+            permission.setModuleCode("WEB_INSPECTION");
+        } else if (normalized.startsWith("system.role.")) permission.setModuleCode("SYSTEM_ROLE");
         permission.setEnabled(1);
         permission.setDeleted(0);
         return permission;

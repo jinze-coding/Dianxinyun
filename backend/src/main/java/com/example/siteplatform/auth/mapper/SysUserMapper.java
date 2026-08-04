@@ -12,6 +12,9 @@ import java.util.List;
 
 @Mapper
 public interface SysUserMapper extends BaseMapper<SysUser> {
+    @Select("SELECT * FROM sys_user WHERE id = #{userId} FOR UPDATE")
+    SysUser selectByIdForUpdate(@Param("userId") Long userId);
+
     @Select("""
             SELECT r.role_code
             FROM sys_role r

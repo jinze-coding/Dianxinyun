@@ -1,6 +1,6 @@
 {
   "name": "site-platform-miniprogram",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "电信云平台现场端小程序",
   "type": "module",
   "scripts": {
@@ -11,8 +11,10 @@
     "dev:mp-weixin:real": "uni -p mp-weixin --mode mp-real",
     "build:h5": "uni build -p h5",
     "build:mp-weixin": "uni build -p mp-weixin",
-    "build:mp-weixin:real": "uni build -p mp-weixin --mode mp-real",
-    "type-check": "vue-tsc --noEmit"
+    "build:mp-weixin:real": "uni build -p mp-weixin --mode mp-real && npm run verify:mp-weixin:real",
+    "type-check": "vue-tsc --noEmit",
+    "test:scan": "node --experimental-strip-types scripts/test-electric-box-scene.mjs",
+    "verify:mp-weixin:real": "node scripts/verify-mp-weixin-real.mjs"
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-alpha-5010420260626001",

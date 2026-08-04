@@ -143,10 +143,16 @@ export default function LoginPage({ onLogin, theme }) {
 
   useEffect(() => {
     if (mode !== 'QR' || !challenge?.challengeId) return undefined;
-    if (['CANCELLED', 'EXPIRED', 'CONSUMED'].includes(qrStatus)) return undefined;
     if (qrExchangeStartedRef.current) return undefined;
     let cancelled = false;
     let polling = false;
+
+    const stopPolling = () => {
+      if (qrPollTimerRef.current) {
+        window.clearInterval(qrPollTimerRef.current);
+        qrPollTimerRef.current = null;
+      }
+    };
 
     const poll = async () => {
       if (polling || cancelled) return;
@@ -161,12 +167,13 @@ export default function LoginPage({ onLogin, theme }) {
         const data = res.data || {};
         const nextStatus = data.status || data.state || 'WAITING';
         setQrStatus(nextStatus);
+        if (['CANCELLED', 'EXPIRED', 'CONSUMED'].includes(nextStatus)) {
+          stopPolling();
+          return;
+        }
         if (nextStatus === 'CONFIRMED' && data.exchangeCode && !qrExchangeStartedRef.current) {
           qrExchangeStartedRef.current = true;
-          if (qrPollTimerRef.current) {
-            window.clearInterval(qrPollTimerRef.current);
-            qrPollTimerRef.current = null;
-          }
+          stopPolling();
           const exchange = await exchangeWebQrChallenge(challenge.challengeId, {
             browserVerifier: challenge.browserVerifier,
             browserSecret: challenge.browserVerifier,
@@ -193,12 +200,9 @@ export default function LoginPage({ onLogin, theme }) {
     qrPollTimerRef.current = window.setInterval(poll, 2000);
     return () => {
       cancelled = true;
-      if (qrPollTimerRef.current) {
-        window.clearInterval(qrPollTimerRef.current);
-        qrPollTimerRef.current = null;
-      }
+      stopPolling();
     };
-  }, [challenge, mode, onLogin, qrStatus]);
+  }, [challenge, mode, onLogin]);
 
   const captchaImage = useMemo(() => {
     const value = captcha?.imageBase64 || captcha?.image || captcha?.imageUrl;

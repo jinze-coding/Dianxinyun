@@ -41,9 +41,19 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
+import java.util.regex.Pattern;
 
 @Service
 public class SystemAdministrationService {
+
+    private static final Set<String> INSPECTION_LEDGER_PERMISSION_CODES = Set.of(
+            "BOX_VIEW", "BOX_MANAGE", "BOX_QR_MANAGE", "BOX_PUBLIC_ACCESS");
+    private static final Set<String> INSPECTION_RECORD_PERMISSION_CODES = Set.of(
+            "INSPECTION_DAILY_SUBMIT", "INSPECTION_RECORD_VIEW", "SUMMARY_VIEW", "SUMMARY_EXPORT");
+    private static final String GENERATED_ROLE_CODE_PREFIX = "ROLE_";
+    private static final int GENERATED_ROLE_CODE_ATTEMPTS = 10;
+    private static final Pattern ROLE_CODE_PATTERN = Pattern.compile("^[A-Z][A-Z0-9_-]{1,49}$");
 
     private final SysUserMapper userMapper;
     private final SysUserProjectMapper userProjectMapper;
@@ -179,11 +189,15 @@ public class SystemAdministrationService {
 
     @Transactional
     public SystemRole saveRole(Long id, RoleSaveRequest request, SysUser operator) {
-        String code = request.getRoleCode().trim().toUpperCase(Locale.ROOT);
         SystemRole role = id == null ? new SystemRole() : roleMapper.selectByIdForUpdate(id);
         if (id != null && role == null) throw BusinessException.notFound("角色不存在");
         String previousRoleCode = role.getRoleCode();
         String previousScopeType = role.getScopeType();
+        String scopeType = id == null ? "PROJECT" : role.getScopeType();
+        if (id != null && isProtectedPlatformAdministratorRole(role)) {
+            scopeType = "PLATFORM";
+        }
+        String code = resolveRoleCode(id, request.getRoleCode(), role, scopeType);
         if (id != null && Integer.valueOf(1).equals(role.getBuiltin()) && !code.equals(role.getRoleCode())) {
             throw new BusinessException("内置角色编码不能修改");
         }
@@ -193,10 +207,6 @@ public class SystemAdministrationService {
                 throw BusinessException.of(409, "已分配给用户的角色不能修改编码或作用域");
             }
             throw new BusinessException("已存在角色的作用域不能修改");
-        }
-        String scopeType = id == null ? "PROJECT" : role.getScopeType();
-        if (id != null && isProtectedPlatformAdministratorRole(role)) {
-            scopeType = "PLATFORM";
         }
         if (id != null && Integer.valueOf(1).equals(role.getBuiltin())
                 && !Objects.equals(role.getScopeType(), scopeType)) {
@@ -208,7 +218,9 @@ public class SystemAdministrationService {
                 && isRoleAssigned(role.getId(), previousScopeType, previousRoleCode)) {
             throw BusinessException.of(409, "已分配给用户的角色不能修改编码或作用域");
         }
-        int enabled = request.getEnabled() == null ? 1 : request.getEnabled();
+        int enabled = request.getEnabled() == null
+                ? (id == null || role.getEnabled() == null ? 1 : role.getEnabled())
+                : request.getEnabled();
         if (isProtectedPlatformAdministratorRole(role)) {
             if (!"PLATFORM".equals(scopeType)) {
                 throw new BusinessException("内置平台管理员角色范围不能修改");
@@ -236,10 +248,25 @@ public class SystemAdministrationService {
         if (duplicate != null && duplicate > 0) throw new BusinessException("角色编码已存在");
         boolean projectManagerRole = isProtectedProjectManagerRole(role)
                 || ("PROJECT".equals(scopeType) && ProjectPermissionService.ROLE_PROJECT_ADMIN.equals(code));
-        Set<String> businessModuleCodes = resolveBusinessModuleCodes(role, request.getBusinessModuleCodes(), request.getMenuIds());
-        List<Long> normalizedMenuIds = normalizeRoleMenuIds(request.getMenuIds(), businessModuleCodes);
-        validateRolePermissions(scopeType, request.getPermissionIds(), projectManagerRole);
-        validateRoleMenus(scopeType, normalizedMenuIds, projectManagerRole);
+        boolean authorizationSupplied = request.getMenuIds() != null
+                || request.getPermissionIds() != null
+                || request.getBusinessModuleCodes() != null;
+        Set<String> businessModuleCodes = authorizationSupplied || id == null
+                ? resolveBusinessModuleCodes(role, request.getBusinessModuleCodes(), request.getMenuIds())
+                : new LinkedHashSet<>(safeList(roleBusinessModuleMapper.selectModuleCodesByRoleId(role.getId())));
+        List<Long> normalizedMenuIds = authorizationSupplied || id == null
+                ? normalizeRoleMenuIds(request.getMenuIds(), businessModuleCodes)
+                : safeList(roleMapper.selectMenuIds(role.getId()));
+        List<Long> normalizedPermissionIds = authorizationSupplied || id == null
+                ? normalizeRolePermissionIds(request.getPermissionIds())
+                : safeList(roleMapper.selectPermissionIds(role.getId()));
+        if (authorizationSupplied || id == null) {
+            validateRolePermissions(scopeType, normalizedPermissionIds, projectManagerRole);
+            validateRoleMenus(scopeType, normalizedMenuIds, projectManagerRole);
+            validateMenuHierarchy(normalizedMenuIds, false);
+            validatePermissionsMatchMenus(normalizedPermissionIds, normalizedMenuIds,
+                    businessModuleCodes, false);
+        }
         role.setRoleName(request.getRoleName().trim());
         role.setRoleCode(code);
         role.setDescription(trim(request.getDescription()));
@@ -255,13 +282,9 @@ public class SystemAdministrationService {
         } else {
             requireSingleWrite(roleMapper.updateById(role), "角色状态已变化，请刷新后重试");
         }
-        roleMapper.deleteMenus(role.getId());
-        normalizedMenuIds.forEach(menuId -> roleMapper.insertMenu(role.getId(), menuId));
-        replaceBusinessModules(role.getId(), businessModuleCodes);
-        roleMapper.deletePermissions(role.getId());
-        if (request.getPermissionIds() != null) {
-            request.getPermissionIds().stream().distinct()
-                    .forEach(permissionId -> roleMapper.insertPermission(role.getId(), permissionId));
+        if (authorizationSupplied || id == null) {
+            replaceRoleMenus(role.getId(), normalizedMenuIds, businessModuleCodes);
+            replaceRolePermissions(role.getId(), normalizedPermissionIds);
         }
         Set<Long> affectedUserIds = affectedRoleUserIds(role.getId(), previousScopeType, previousRoleCode);
         affectedUserIds.addAll(affectedRoleUserIds(role.getId(), role.getScopeType(), role.getRoleCode()));
@@ -305,19 +328,54 @@ public class SystemAdministrationService {
                                       List<String> requestedBusinessModuleCodes, SysUser operator) {
         SystemRole role = roleMapper.selectByIdForUpdate(roleId);
         if (role == null) throw BusinessException.notFound("角色不存在");
+        requireRoleAuthorizationEditable(role);
         Set<String> businessModuleCodes = resolveBusinessModuleCodes(role, requestedBusinessModuleCodes, menuIds);
         List<Long> normalizedMenuIds = normalizeRoleMenuIds(menuIds, businessModuleCodes);
-        validateRolePermissions(role.getScopeType(), permissionIds, isProtectedProjectManagerRole(role));
+        List<Long> normalizedPermissionIds = normalizeRolePermissionIds(permissionIds);
+        validateRolePermissions(role.getScopeType(), normalizedPermissionIds, isProtectedProjectManagerRole(role));
         validateRoleMenus(role.getScopeType(), normalizedMenuIds, isProtectedProjectManagerRole(role));
-        roleMapper.deletePermissions(roleId);
-        if (permissionIds != null) {
-            permissionIds.stream().distinct().forEach(id -> roleMapper.insertPermission(roleId, id));
-        }
-        roleMapper.deleteMenus(roleId);
-        normalizedMenuIds.forEach(id -> roleMapper.insertMenu(roleId, id));
-        replaceBusinessModules(roleId, businessModuleCodes);
+        validateMenuHierarchy(normalizedMenuIds, false);
+        validatePermissionsMatchMenus(normalizedPermissionIds, normalizedMenuIds, businessModuleCodes, false);
+        replaceRolePermissions(roleId, normalizedPermissionIds);
+        replaceRoleMenus(roleId, normalizedMenuIds, businessModuleCodes);
         logoutUsers(affectedRoleUserIds(role.getId(), role.getScopeType(), role.getRoleCode()));
         record(operator, "UPDATE_ROLE_PERMISSIONS", "SYS_ROLE", roleId, "更新角色业务模块、菜单和操作权限");
+    }
+
+    @Transactional
+    public void updateRoleMenus(Long roleId, List<Long> menuIds, List<String> requestedBusinessModuleCodes,
+                                SysUser operator) {
+        SystemRole role = roleMapper.selectByIdForUpdate(roleId);
+        if (role == null) throw BusinessException.notFound("角色不存在");
+        requireRoleAuthorizationEditable(role);
+        Set<String> businessModuleCodes = resolveBusinessModuleCodes(role, requestedBusinessModuleCodes, menuIds);
+        List<Long> normalizedMenuIds = normalizeRoleMenuIds(menuIds, businessModuleCodes);
+        validateRoleMenus(role.getScopeType(), normalizedMenuIds, isProtectedProjectManagerRole(role));
+        validateMenuHierarchy(normalizedMenuIds, true);
+
+        List<Long> currentPermissionIds = normalizeRolePermissionIds(roleMapper.selectPermissionIds(roleId));
+        List<Long> retainedPermissionIds = filterPermissionsForMenus(
+                currentPermissionIds, normalizedMenuIds, businessModuleCodes, true);
+        replaceRoleMenus(roleId, normalizedMenuIds, businessModuleCodes);
+        replaceRolePermissions(roleId, retainedPermissionIds);
+        logoutUsers(affectedRoleUserIds(role.getId(), role.getScopeType(), role.getRoleCode()));
+        record(operator, "UPDATE_ROLE_MENUS", "SYS_ROLE", roleId, "更新角色菜单并清理失效操作权限");
+    }
+
+    @Transactional
+    public void updateRoleOperationPermissions(Long roleId, List<Long> permissionIds, SysUser operator) {
+        SystemRole role = roleMapper.selectByIdForUpdate(roleId);
+        if (role == null) throw BusinessException.notFound("角色不存在");
+        requireRoleAuthorizationEditable(role);
+        List<Long> menuIds = safeList(roleMapper.selectMenuIds(roleId));
+        Set<String> businessModuleCodes = new LinkedHashSet<>(
+                safeList(roleBusinessModuleMapper.selectModuleCodesByRoleId(roleId)));
+        List<Long> normalizedPermissionIds = normalizeRolePermissionIds(permissionIds);
+        validateRolePermissions(role.getScopeType(), normalizedPermissionIds, isProtectedProjectManagerRole(role));
+        validatePermissionsMatchMenus(normalizedPermissionIds, menuIds, businessModuleCodes, true);
+        replaceRolePermissions(roleId, normalizedPermissionIds);
+        logoutUsers(affectedRoleUserIds(role.getId(), role.getScopeType(), role.getRoleCode()));
+        record(operator, "UPDATE_ROLE_OPERATION_PERMISSIONS", "SYS_ROLE", roleId, "更新角色操作权限");
     }
 
     /** 保留给旧服务调用的兼容入口；未传模块时保持该角色现有模块选择。 */
@@ -569,6 +627,34 @@ public class SystemAdministrationService {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
+    private String resolveRoleCode(Long id, String requestedCode, SystemRole role, String scopeType) {
+        if (StringUtils.hasText(requestedCode)) {
+            String normalized = requestedCode.trim().toUpperCase(Locale.ROOT);
+            if (!ROLE_CODE_PATTERN.matcher(normalized).matches()) {
+                throw new BusinessException("角色编码格式不正确");
+            }
+            return normalized;
+        }
+        if (id != null) {
+            if (!StringUtils.hasText(role.getRoleCode())) {
+                throw BusinessException.of(409, "角色编码缺失，请联系系统管理员处理");
+            }
+            return role.getRoleCode();
+        }
+        for (int attempt = 0; attempt < GENERATED_ROLE_CODE_ATTEMPTS; attempt++) {
+            String generated = GENERATED_ROLE_CODE_PREFIX
+                    + UUID.randomUUID().toString().replace("-", "")
+                    .substring(0, 12).toUpperCase(Locale.ROOT);
+            Long duplicate = roleMapper.selectCount(new LambdaQueryWrapper<SystemRole>()
+                    .eq(SystemRole::getRoleCode, generated)
+                    .eq(SystemRole::getScopeType, scopeType));
+            if (duplicate == null || duplicate == 0) {
+                return generated;
+            }
+        }
+        throw BusinessException.of(409, "角色编码生成失败，请重试");
+    }
+
     private Integer normalizeUserStatus(Object value) {
         if (value instanceof Number number) {
             int status = number.intValue();
@@ -705,6 +791,234 @@ public class SystemAdministrationService {
         return List.copyOf(normalized);
     }
 
+    private List<Long> normalizeRolePermissionIds(List<Long> requestedPermissionIds) {
+        Set<Long> normalizedIds = new LinkedHashSet<>();
+        Map<String, SystemPermission> selectedByCode = new LinkedHashMap<>();
+        for (Long permissionId : safeList(requestedPermissionIds).stream()
+                .filter(Objects::nonNull).distinct().toList()) {
+            SystemPermission permission = permissionMapper.selectById(permissionId);
+            if (permission == null || Integer.valueOf(1).equals(permission.getDeleted())
+                    || Integer.valueOf(0).equals(permission.getEnabled())) {
+                throw new BusinessException("操作权限不存在或已停用：" + permissionId);
+            }
+            normalizedIds.add(permissionId);
+            selectedByCode.put(normalizePermissionCode(permission.getPermissionCode()), permission);
+        }
+
+        Set<String> requiredCodes = new LinkedHashSet<>();
+        for (String code : selectedByCode.keySet()) {
+            if ("BOX_VIEW".equals(code)) requiredCodes.add("INSPECTION.VIEW");
+            if ("BOX_MANAGE".equals(code)) {
+                requiredCodes.add("BOX_VIEW");
+                requiredCodes.add("INSPECTION.VIEW");
+                requiredCodes.add("INSPECTION.MANAGE");
+            }
+            if (Set.of("BOX_QR_MANAGE", "BOX_PUBLIC_ACCESS").contains(code)) {
+                requiredCodes.add("BOX_VIEW");
+                requiredCodes.add("INSPECTION.VIEW");
+            }
+            if ("INSPECTION_DAILY_SUBMIT".equals(code)) requiredCodes.add("INSPECTION.SUBMIT");
+            if (Set.of("INSPECTION_RECORD_VIEW", "SUMMARY_VIEW").contains(code)) {
+                requiredCodes.add("INSPECTION.VIEW");
+            }
+            if ("SUMMARY_EXPORT".equals(code)) {
+                requiredCodes.add("SUMMARY_VIEW");
+                requiredCodes.add("INSPECTION.VIEW");
+                requiredCodes.add("INSPECTION.EXPORT");
+            }
+            if (Set.of("DOCUMENT.UPLOAD", "DOCUMENT.MANAGE").contains(code)) {
+                requiredCodes.add("DOCUMENT.VIEW");
+            }
+            if (Set.of("QUALITY.MANAGE", "QUALITY.RECTIFY", "QUALITY.REVIEW").contains(code)) {
+                requiredCodes.add("QUALITY.VIEW");
+            }
+        }
+        if (!requiredCodes.isEmpty()) {
+            Map<String, SystemPermission> enabledByCode = new LinkedHashMap<>();
+            permissionMapper.selectList(new LambdaQueryWrapper<SystemPermission>()
+                    .eq(SystemPermission::getEnabled, 1)).forEach(permission ->
+                    enabledByCode.put(normalizePermissionCode(permission.getPermissionCode()), permission));
+            for (String code : requiredCodes) {
+                SystemPermission required = enabledByCode.get(code);
+                if (required == null || Integer.valueOf(1).equals(required.getDeleted())) {
+                    throw new BusinessException("操作权限前置项不存在或已停用：" + code);
+                }
+                normalizedIds.add(required.getId());
+            }
+        }
+        return List.copyOf(normalizedIds);
+    }
+
+    private void validateMenuHierarchy(List<Long> menuIds, boolean strictTabs) {
+        List<SystemMenu> allMenus = menuMapper.selectList(new LambdaQueryWrapper<SystemMenu>()
+                .eq(SystemMenu::getEnabled, 1));
+        Map<Long, SystemMenu> menuById = new LinkedHashMap<>();
+        Set<String> catalogCodes = new LinkedHashSet<>();
+        for (SystemMenu menu : allMenus) {
+            if (Integer.valueOf(1).equals(menu.getDeleted())) continue;
+            menuById.put(menu.getId(), menu);
+            catalogCodes.add(normalizeMenuCode(menu.getMenuCode()));
+        }
+        Set<Long> selectedIds = new LinkedHashSet<>(safeList(menuIds));
+        Set<String> selectedCodes = selectedIds.stream().map(menuById::get).filter(Objects::nonNull)
+                .map(menu -> normalizeMenuCode(menu.getMenuCode()))
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        for (Long menuId : selectedIds) {
+            SystemMenu menu = menuById.get(menuId);
+            if (menu == null) throw new BusinessException("菜单不存在或已停用：" + menuId);
+            if (menu.getParentId() != null && !selectedIds.contains(menu.getParentId())) {
+                throw BusinessException.of(400, "子菜单必须同时选择上级菜单：" + menu.getMenuCode());
+            }
+        }
+        if (!strictTabs) return;
+        requireSelectedPageWhenCatalogExists("WEB_DOCUMENT",
+                Set.of("DOCUMENT_LIBRARY", "DOCUMENT_RECYCLE"), selectedCodes, catalogCodes);
+        requireSelectedPageWhenCatalogExists("WEB_INSPECTION",
+                Set.of("INSPECTION_LEDGER", "INSPECTION_RECORDS"), selectedCodes, catalogCodes);
+        requireSelectedPageWhenCatalogExists("WEB_QUALITY",
+                Set.of("QUALITY_ISSUES", "QUALITY_DOCUMENTS"), selectedCodes, catalogCodes);
+        if (selectedCodes.contains("WEB_SYSTEM")
+                && catalogCodes.stream().anyMatch(code -> code.startsWith("SYSTEM_"))
+                && selectedCodes.stream().noneMatch(code -> code.startsWith("SYSTEM_"))) {
+            throw BusinessException.of(400, "系统管理至少需要选择一个页面");
+        }
+    }
+
+    private void requireSelectedPageWhenCatalogExists(String parentCode, Set<String> pageCodes,
+                                                       Set<String> selectedCodes, Set<String> catalogCodes) {
+        if (selectedCodes.contains(parentCode)
+                && pageCodes.stream().anyMatch(catalogCodes::contains)
+                && pageCodes.stream().noneMatch(selectedCodes::contains)) {
+            throw BusinessException.of(400, parentCode + " 至少需要选择一个页面");
+        }
+    }
+
+    private void validatePermissionsMatchMenus(List<Long> permissionIds, List<Long> menuIds,
+                                               Set<String> businessModuleCodes, boolean strictTabs) {
+        Set<String> selectedMenuCodes = selectedMenuCodes(menuIds);
+        Set<String> catalogMenuCodes = menuMapper.selectList(new LambdaQueryWrapper<SystemMenu>()
+                        .eq(SystemMenu::getEnabled, 1)).stream()
+                .filter(menu -> !Integer.valueOf(1).equals(menu.getDeleted()))
+                .map(menu -> normalizeMenuCode(menu.getMenuCode()))
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> normalizedModules = safeList(new ArrayList<>(businessModuleCodes)).stream()
+                .map(this::normalizeMenuCode).collect(java.util.stream.Collectors.toSet());
+        for (Long permissionId : safeList(permissionIds)) {
+            SystemPermission permission = permissionMapper.selectById(permissionId);
+            if (permission == null || !permissionAllowedByMenus(permission, selectedMenuCodes,
+                    normalizedModules, catalogMenuCodes, strictTabs)) {
+                String code = permission == null ? String.valueOf(permissionId) : permission.getPermissionCode();
+                throw BusinessException.of(400, "操作权限不属于已分配菜单：" + code);
+            }
+        }
+    }
+
+    private List<Long> filterPermissionsForMenus(List<Long> permissionIds, List<Long> menuIds,
+                                                 Set<String> businessModuleCodes, boolean strictTabs) {
+        Set<String> selectedMenuCodes = selectedMenuCodes(menuIds);
+        Set<String> catalogMenuCodes = menuMapper.selectList(new LambdaQueryWrapper<SystemMenu>()
+                        .eq(SystemMenu::getEnabled, 1)).stream()
+                .filter(menu -> !Integer.valueOf(1).equals(menu.getDeleted()))
+                .map(menu -> normalizeMenuCode(menu.getMenuCode()))
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> normalizedModules = businessModuleCodes.stream().map(this::normalizeMenuCode)
+                .collect(java.util.stream.Collectors.toSet());
+        List<Long> retained = new ArrayList<>();
+        for (Long permissionId : safeList(permissionIds)) {
+            SystemPermission permission = permissionMapper.selectById(permissionId);
+            if (permission != null && permissionAllowedByMenus(permission, selectedMenuCodes,
+                    normalizedModules, catalogMenuCodes, strictTabs)) {
+                retained.add(permissionId);
+            }
+        }
+        return retained.stream().distinct().toList();
+    }
+
+    private boolean permissionAllowedByMenus(SystemPermission permission, Set<String> selectedMenuCodes,
+                                             Set<String> businessModuleCodes, Set<String> catalogMenuCodes,
+                                             boolean strictTabs) {
+        String module = normalizeMenuCode(permission.getModuleCode());
+        String code = normalizePermissionCode(permission.getPermissionCode());
+        if ("WEB_DOCUMENT".equals(module)) {
+            if (!businessModuleCodes.contains("DOCUMENT")) return false;
+            if (!strictTabs || !catalogHasAny(catalogMenuCodes, "DOCUMENT_LIBRARY", "DOCUMENT_RECYCLE")) return true;
+            if ("DOCUMENT.UPLOAD".equals(code)) return selectedMenuCodes.contains("DOCUMENT_LIBRARY");
+            return selectedMenuCodes.contains("DOCUMENT_LIBRARY") || selectedMenuCodes.contains("DOCUMENT_RECYCLE");
+        }
+        if ("WEB_INSPECTION".equals(module)) {
+            if (!businessModuleCodes.contains("INSPECTION")) return false;
+            if (!strictTabs || !catalogHasAny(catalogMenuCodes, "INSPECTION_LEDGER", "INSPECTION_RECORDS")) return true;
+            if (INSPECTION_LEDGER_PERMISSION_CODES.contains(code) || "INSPECTION.MANAGE".equals(code)) {
+                return selectedMenuCodes.contains("INSPECTION_LEDGER");
+            }
+            if (INSPECTION_RECORD_PERMISSION_CODES.contains(code)
+                    || Set.of("INSPECTION.SUBMIT", "INSPECTION.EXPORT").contains(code)) {
+                return selectedMenuCodes.contains("INSPECTION_RECORDS");
+            }
+            return selectedMenuCodes.contains("INSPECTION_LEDGER")
+                    || selectedMenuCodes.contains("INSPECTION_RECORDS");
+        }
+        if ("WEB_QUALITY".equals(module)) {
+            if (!businessModuleCodes.contains("QUALITY")) return false;
+            if (!strictTabs || !catalogHasAny(catalogMenuCodes, "QUALITY_ISSUES", "QUALITY_DOCUMENTS")) return true;
+            if (Set.of("QUALITY.RECTIFY", "QUALITY.REVIEW").contains(code)) {
+                return selectedMenuCodes.contains("QUALITY_ISSUES");
+            }
+            return selectedMenuCodes.contains("QUALITY_ISSUES") || selectedMenuCodes.contains("QUALITY_DOCUMENTS");
+        }
+        if (StringUtils.hasText(module)) {
+            return selectedMenuCodes.contains(module);
+        }
+        return false;
+    }
+
+    private Set<String> selectedMenuCodes(List<Long> menuIds) {
+        Set<String> result = new LinkedHashSet<>();
+        for (Long menuId : safeList(menuIds)) {
+            SystemMenu menu = menuMapper.selectById(menuId);
+            if (menu != null && !Integer.valueOf(1).equals(menu.getDeleted())
+                    && !Integer.valueOf(0).equals(menu.getEnabled())) {
+                result.add(normalizeMenuCode(menu.getMenuCode()));
+            }
+        }
+        return result;
+    }
+
+    private boolean catalogHasAny(Set<String> codes, String... expected) {
+        return java.util.Arrays.stream(expected).anyMatch(codes::contains);
+    }
+
+    private String normalizePermissionCode(String code) {
+        return code == null ? "" : code.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeMenuCode(String code) {
+        return code == null ? "" : code.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private void replaceRoleMenus(Long roleId, List<Long> menuIds, Set<String> businessModuleCodes) {
+        roleMapper.deleteMenus(roleId);
+        safeList(menuIds).stream().filter(Objects::nonNull).distinct()
+                .forEach(menuId -> roleMapper.insertMenu(roleId, menuId));
+        replaceBusinessModules(roleId, businessModuleCodes);
+    }
+
+    private void replaceRolePermissions(Long roleId, List<Long> permissionIds) {
+        roleMapper.deletePermissions(roleId);
+        safeList(permissionIds).stream().filter(Objects::nonNull).distinct()
+                .forEach(permissionId -> roleMapper.insertPermission(roleId, permissionId));
+    }
+
+    private void requireRoleAuthorizationEditable(SystemRole role) {
+        if (isProtectedPlatformAdministratorRole(role)) {
+            throw new BusinessException("内置平台管理员权限由系统保护，不能在业务界面修改");
+        }
+    }
+
+    private <T> List<T> safeList(List<T> values) {
+        return values == null ? List.of() : values;
+    }
+
     private void replaceBusinessModules(Long roleId, Set<String> moduleCodes) {
         roleBusinessModuleMapper.delete(new LambdaQueryWrapper<SystemRoleBusinessModule>()
                 .eq(SystemRoleBusinessModule::getRoleId, roleId));
@@ -744,13 +1058,14 @@ public class SystemAdministrationService {
     }
 
     private void validateRoleMenus(String scopeType, List<Long> menuIds, boolean projectManagerRole) {
-        if (!"PROJECT".equalsIgnoreCase(scopeType) || menuIds == null || menuIds.isEmpty()) return;
+        if (menuIds == null || menuIds.isEmpty()) return;
         for (Long menuId : menuIds.stream().filter(Objects::nonNull).distinct().toList()) {
             SystemMenu menu = menuMapper.selectById(menuId);
             if (menu == null || Integer.valueOf(1).equals(menu.getDeleted())
                     || Integer.valueOf(0).equals(menu.getEnabled())) {
                 throw new BusinessException("菜单不存在或已停用：" + menuId);
             }
+            if (!"PROJECT".equalsIgnoreCase(scopeType)) continue;
             String menuCode = menu.getMenuCode();
             if (StringUtils.hasText(menuCode) && menuCode.startsWith("SYSTEM_")) {
                 if (!projectManagerRole || !"SYSTEM_PROJECT".equals(menuCode)) {
@@ -799,6 +1114,7 @@ public class SystemAdministrationService {
 
     private void logoutUsers(Set<Long> userIds) {
         userIds.stream().filter(Objects::nonNull).forEach(userId -> {
+            projectPermissionService.clearUserProjectsCache(userId);
             authService.logout(userId);
             authService.repeatLogoutAfterCommit(userId);
         });

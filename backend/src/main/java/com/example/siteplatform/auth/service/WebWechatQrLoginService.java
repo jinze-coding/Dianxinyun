@@ -191,8 +191,9 @@ public class WebWechatQrLoginService {
                 if redis.call('HGET', KEYS[1], 'browserSecretHash') ~= ARGV[1] then return 'BROWSER' end
                 if redis.call('HGET', KEYS[1], 'state') ~= 'CONFIRMED' then return 'STATE' end
                 if redis.call('HGET', KEYS[1], 'exchangeHash') ~= ARGV[2] then return 'CODE' end
-                local exchanged = redis.call('GETDEL', KEYS[2])
+                local exchanged = redis.call('GET', KEYS[2])
                 if not exchanged or exchanged ~= ARGV[3] then return 'CODE' end
+                redis.call('DEL', KEYS[2])
                 local userId = redis.call('HGET', KEYS[1], 'userId')
                 redis.call('HSET', KEYS[1], 'state', 'CONSUMED')
                 redis.call('HDEL', KEYS[1], 'exchangeCode', 'exchangeHash')

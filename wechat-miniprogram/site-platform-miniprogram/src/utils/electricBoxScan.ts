@@ -1,5 +1,10 @@
 import { getElectricBoxes } from '@/api/electricBox';
 import { USE_MOCK } from '@/api/request';
+import {
+  extractElectricBoxScene,
+  extractElectricBoxSceneFromScanResult,
+  type WechatScanCodeResult
+} from '@/utils/electricBoxScene';
 import jsQR from 'jsqr';
 
 let scanStarting = false;
@@ -14,38 +19,6 @@ function isWechatDevtools() {
   } catch {
     return false;
   }
-}
-
-function extractScene(rawValue: string) {
-  const raw = (rawValue || '').trim();
-  if (!raw) return '';
-  try {
-    const decoded = decodeURIComponent(raw);
-    if (/^B:/i.test(decoded)) return decoded;
-
-    const sceneMatch = decoded.match(/[?&]scene=([^&#]+)/i);
-    if (sceneMatch?.[1]) {
-      const scene = decodeURIComponent(sceneMatch[1]);
-      return /^B:/i.test(scene) ? scene : `B:${scene}`;
-    }
-
-    const publicCodeMatch = decoded.match(/[?&]publicCode=([^&#]+)/i);
-    if (publicCodeMatch?.[1]) return `B:${decodeURIComponent(publicCodeMatch[1])}`;
-
-    const pageMatch = decoded.match(/pages\/scan-entry\/index\?(?:[^#]*&)?scene=([^&#]+)/i);
-    if (pageMatch?.[1]) {
-      const scene = decodeURIComponent(pageMatch[1]);
-      return /^B:/i.test(scene) ? scene : `B:${scene}`;
-    }
-
-    const publicPathMatch = decoded.match(/\/public\/electric-boxes\/([^/?#]+)\/(?:summary|monthly-records)/i);
-    if (publicPathMatch?.[1]) return `B:${decodeURIComponent(publicPathMatch[1])}`;
-
-    if (/^PUB[-_]/i.test(decoded)) return `B:${decoded}`;
-  } catch (error) {
-    console.warn('巡检码解析失败', error);
-  }
-  return '';
 }
 
 function openScanResult(scene: string) {
@@ -140,7 +113,7 @@ async function startWechatDevtoolsImageScan() {
   const imagePath = await chooseQrImage();
   if (!imagePath) return;
   const decoded = await decodeQrImage(imagePath);
-  const scene = extractScene(decoded);
+  const scene = extractElectricBoxScene(decoded);
   if (!scene) throw new Error('所选图片不是有效的电箱巡检二维码');
   // 开发者工具关闭本机文件选择器并完成离屏画布解码后，需要先把渲染线程
   // 交还给模拟器。随后重启到中转页，避免文件选择器留下失活的空白 WebView。
@@ -155,13 +128,22 @@ async function runElectricBoxScan(projectId: number) {
     return;
   }
   await new Promise<void>((resolve, reject) => {
-    uni.scanCode({
-      scanType: ['qrCode'],
+    const wxApi = (globalThis as typeof globalThis & { wx?: any }).wx;
+    if (!wxApi?.scanCode) {
+      reject(new Error('微信扫码组件不可用，请退出小程序后重试'));
+      return;
+    }
+    // 使用微信原生接口识别普通二维码和 wxCode。正式电箱码会在
+    // success.path 返回业务页面及 scene 参数。
+    wxApi.scanCode({
+      scanType: ['qrCode', 'wxCode'],
       onlyFromCamera: false,
-      success: async (scanResult) => {
-        const scene = extractScene(scanResult.result || scanResult.path || '');
+      success: async (scanResult: WechatScanCodeResult) => {
+        const scene = extractElectricBoxSceneFromScanResult(scanResult);
         if (!scene) {
-          reject(new Error('未识别到有效的电箱巡检码'));
+          reject(new Error(String(scanResult.scanType || '').toUpperCase() === 'WX_CODE'
+            ? '该小程序码不是电箱巡检码，请扫描电箱台账生成的统一巡检码'
+            : '未识别到有效的电箱巡检码'));
           return;
         }
         try {
@@ -171,12 +153,12 @@ async function runElectricBoxScan(projectId: number) {
           reject(error);
         }
       },
-      fail: (error) => {
+      fail: (error: { errMsg?: string }) => {
         if (String(error.errMsg || '').toLowerCase().includes('cancel')) {
           resolve();
           return;
         }
-        reject(new Error('扫码失败，请重试'));
+        reject(new Error(`扫码失败：${error.errMsg || '请退出小程序后重试'}`));
       }
     });
   });
@@ -202,4 +184,4 @@ export async function startElectricBoxScan(projectId = 1) {
   }
 }
 
-export { extractScene as extractElectricBoxScene };
+export { extractElectricBoxScene };

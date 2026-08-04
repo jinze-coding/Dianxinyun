@@ -47,7 +47,17 @@ async function wechatLogin() {
     }
     showToast(response.message || '账号暂不可登录，请联系管理员');
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '微信登录失败');
+    const message = error instanceof Error ? error.message : '微信登录失败';
+    if (message.includes('微信未授权请求地址')) {
+      uni.showModal({
+        title: '快捷登录连接诊断',
+        content: message,
+        showCancel: false,
+        confirmText: '知道了'
+      });
+    } else {
+      showToast(message);
+    }
   } finally {
     wechatLoading.value = false;
   }

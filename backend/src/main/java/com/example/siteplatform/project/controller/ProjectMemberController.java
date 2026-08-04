@@ -5,13 +5,17 @@ import com.example.siteplatform.auth.service.AuthService;
 import com.example.siteplatform.common.Result;
 import com.example.siteplatform.project.dto.CreateProjectUserRequest;
 import com.example.siteplatform.project.dto.ProjectMemberRequest;
+import com.example.siteplatform.project.dto.ProjectMemberAssignmentOptionVO;
+import com.example.siteplatform.project.dto.ProjectMemberBatchRequest;
 import com.example.siteplatform.project.dto.ProjectMemberVO;
+import com.example.siteplatform.common.PageResult;
 import com.example.siteplatform.project.dto.ProjectMemberStatusRequest;
 import com.example.siteplatform.project.dto.ProjectUserOptionVO;
 import com.example.siteplatform.project.service.ProjectMemberService;
 import com.example.siteplatform.system.entity.SystemRole;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -56,6 +60,19 @@ public class ProjectMemberController {
         return Result.success(projectMemberService.listUserOptions(projectId, keyword, currentUser));
     }
 
+    @Operation(summary = "分页查询当前项目用户角色分配树")
+    @GetMapping("/assignment-options")
+    public Result<PageResult<ProjectMemberAssignmentOptionVO>> assignmentOptions(
+            @RequestParam Long projectId,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "ALL") String membership,
+            @RequestParam(defaultValue = "1") Integer pageNo,
+            @RequestParam(defaultValue = "100") Integer pageSize,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(projectMemberService.listAssignmentOptions(
+                projectId, keyword, membership, pageNo, pageSize, authService.getCurrentUser(token)));
+    }
+
     @Operation(summary = "查询当前项目可分配角色")
     @GetMapping("/roles")
     public Result<List<SystemRole>> listAssignableRoles(
@@ -96,6 +113,16 @@ public class ProjectMemberController {
         request.setProjectId(projectId);
         request.setUserId(userId);
         return Result.success(projectMemberService.saveMember(request, currentUser));
+    }
+
+    @Operation(summary = "批量更新当前项目的用户角色分配")
+    @PutMapping("/{projectId}/role-assignments")
+    public Result<List<ProjectMemberVO>> updateRoleAssignments(
+            @PathVariable Long projectId,
+            @Valid @RequestBody ProjectMemberBatchRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(projectMemberService.batchUpdateProjectAssignments(
+                projectId, request, authService.getCurrentUser(token)));
     }
 
     @Operation(summary = "移除项目成员")

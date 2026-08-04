@@ -17,7 +17,12 @@ import {
   updateFileStatus,
   uploadFile,
 } from "../../services/file";
-import { hasProjectPermission, isPlatformAdmin } from "../../utils/permissions";
+import {
+  collectProjectMenuCodes,
+  hasProjectPermission,
+  isPlatformAdmin,
+} from "../../utils/permissions";
+import { pageMenuAllowed } from "../../utils/roleAuthorization";
 
 const EMPTY_CREATE = {
   requestKey: "",
@@ -221,6 +226,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
   const [documentScope, setDocumentScope] = useState("ACTIVE");
   const [members, setMembers] = useState([]);
   const [activeTab, setActiveTab] = useState("issues");
+  const [menuNotice, setMenuNotice] = useState("");
   const [status, setStatus] = useState("ALL");
   const [pageNo, setPageNo] = useState(1);
   const [keyword, setKeyword] = useState("");
@@ -261,6 +267,12 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
   const openingFileRef = useRef(false);
 
   currentProjectIdRef.current = projectId;
+
+  const projectMenuCodes = collectProjectMenuCodes(currentUser, projectId);
+  const canViewIssues = isPlatformAdmin(currentUser)
+    || pageMenuAllowed(projectMenuCodes, ["QUALITY_ISSUES"], ["WEB_QUALITY", "QUALITY_MANAGEMENT"]);
+  const canViewDocuments = isPlatformAdmin(currentUser)
+    || pageMenuAllowed(projectMenuCodes, ["QUALITY_DOCUMENTS"], ["WEB_QUALITY", "QUALITY_MANAGEMENT"]);
 
   const releaseEvidenceUrls = () => {
     evidenceUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
@@ -476,13 +488,22 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
     setDocumentFile(null);
   }, [projectId]);
   useEffect(() => {
-    loadQualityData();
-  }, [projectId, status, appliedKeyword, pageNo]);
+    if (activeTab === "issues" && canViewIssues) loadQualityData();
+  }, [activeTab, canViewIssues, projectId, status, appliedKeyword, pageNo]);
   useEffect(() => {
-    if (activeTab === "documents") {
+    if (activeTab === "documents" && canViewDocuments) {
       loadDocuments();
     }
-  }, [activeTab, projectId]);
+  }, [activeTab, canViewDocuments, projectId]);
+  useEffect(() => {
+    if (activeTab === "issues" && !canViewIssues && canViewDocuments) {
+      setActiveTab("documents");
+      setMenuNotice("当前角色无质量问题菜单权限，已切换到质量资料");
+    } else if (activeTab === "documents" && !canViewDocuments && canViewIssues) {
+      setActiveTab("issues");
+      setMenuNotice("当前角色无质量资料菜单权限，已切换到质量问题");
+    }
+  }, [activeTab, canViewDocuments, canViewIssues]);
 
   const currentProjectKey = projectKey(projectId);
   const currentQueryKey = issueQueryKey(
@@ -1040,17 +1061,17 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
         }}
       >
         <div style={{ display: "flex", gap: 6 }}>
-          <button
-            onClick={() => setActiveTab("issues")}
+          {canViewIssues && <button
+            onClick={() => { setActiveTab("issues"); setMenuNotice(""); }}
             style={{
               ...buttonStyle(activeTab === "issues" ? "primary" : "secondary"),
               background: activeTab === "issues" ? T.accent : T.surface2,
             }}
           >
             质量问题
-          </button>
-          <button
-            onClick={() => setActiveTab("documents")}
+          </button>}
+          {canViewDocuments && <button
+            onClick={() => { setActiveTab("documents"); setMenuNotice(""); }}
             style={{
               ...buttonStyle(
                 activeTab === "documents" ? "primary" : "secondary",
@@ -1059,7 +1080,8 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
             }}
           >
             质量资料
-          </button>
+          </button>}
+          {menuNotice && <span style={{ alignSelf: "center", color: T.warning, fontSize: 11 }}>{menuNotice}</span>}
         </div>
         {activeTab === "issues" ? (
           <div style={{ display: "flex", gap: 7 }}>
@@ -1201,8 +1223,21 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
                 T={T}
                 columns="120px 1.5fr 1fr .8fr .8fr .8fr 90px"
               >
-                <span style={{ color: T.textMuted }}>{issue.issueNo}</span>
-                <span>
+                <span
+                  title={issue.issueNo || "-"}
+                  style={{
+                    display: "block",
+                    minWidth: 0,
+                    maxWidth: "100%",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    color: T.textMuted,
+                  }}
+                >
+                  {issue.issueNo || "-"}
+                </span>
+                <span style={{ minWidth: 0 }}>
                   <strong style={{ display: "block", color: T.textPrimary }}>
                     {issue.title}
                   </strong>

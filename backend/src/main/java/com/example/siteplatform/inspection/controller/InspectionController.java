@@ -135,19 +135,23 @@ public class InspectionController {
         return Result.success(inspectionService.getMonthSummary(projectId, boxId, month, checkDate, currentUser));
     }
 
-    @Operation(summary = "导出月度巡检记录")
+    @Operation(summary = "导出月度或日期范围巡检记录")
     @GetMapping("/records/export")
     public ResponseEntity<byte[]> exportRecords(
             @RequestParam Long projectId,
             @RequestParam(required = false) String templateCode,
             @RequestParam(required = false) String month,
             @RequestParam(required = false) Long boxId,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
+            @RequestParam(required = false) String boxIds,
             @RequestParam(required = false) Long inspectorId,
             @RequestParam(required = false) String result,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
         InspectionService.ExportFile exportFile = inspectionService.exportRecords(
-                projectId, templateCode, month, boxId, inspectorId, result, currentUser);
+                projectId, templateCode, month, boxId, startDate, endDate, boxIds,
+                inspectorId, result, currentUser);
         String encodedFileName = URLEncoder.encode(exportFile.fileName(), StandardCharsets.UTF_8)
                 .replaceAll("\\+", "%20");
         return ResponseEntity.ok()

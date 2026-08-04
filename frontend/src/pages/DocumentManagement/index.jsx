@@ -20,7 +20,8 @@ import {
   updateProjectDocument,
   uploadProjectDocumentVersion,
 } from '../../services/document';
-import { hasProjectPermission, isPlatformAdmin } from '../../utils/permissions';
+import { collectProjectMenuCodes, hasProjectPermission, isPlatformAdmin } from '../../utils/permissions';
+import { pageMenuAllowed } from '../../utils/roleAuthorization';
 import './index.css';
 
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
@@ -62,7 +63,7 @@ function Modal({ title, subtitle, children, footer, onClose, wide = false }) {
   );
 }
 
-function FolderTree({ folders, selectedId, onSelect, onCreate, onRename, onDelete, recycle, onRecycle, canManage }) {
+function FolderTree({ folders, selectedId, onSelect, onCreate, onRename, onDelete, recycle, onRecycle, canManage, canAccessRecycle }) {
   return (
     <aside className="dm-folders">
       <div className="dm-panel-heading">
@@ -91,7 +92,7 @@ function FolderTree({ folders, selectedId, onSelect, onCreate, onRename, onDelet
           </div>
         ))}
       </div>
-      {canManage && <button className={`dm-recycle-button ${recycle ? 'is-active' : ''}`} onClick={onRecycle}>
+      {canAccessRecycle && <button className={`dm-recycle-button ${recycle ? 'is-active' : ''}`} onClick={onRecycle}>
         <span>回收站</span>
       </button>}
     </aside>
@@ -121,6 +122,7 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
   const [moveState, setMoveState] = useState(null);
   const [preview, setPreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [menuNotice, setMenuNotice] = useState('');
 
   const projectName = projectList?.find((item) => item.id === projectId)?.projectName || '当前作业区域';
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -129,6 +131,11 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
     && (isPlatformAdmin(currentUser) || hasProjectPermission(currentUser, projectId, 'document.manage'));
   const canUpload = isPlatformAdmin(currentUser)
     || hasProjectPermission(currentUser, projectId, 'document.upload');
+  const projectMenuCodes = collectProjectMenuCodes(currentUser, projectId);
+  const canViewLibrary = isPlatformAdmin(currentUser)
+    || pageMenuAllowed(projectMenuCodes, ['DOCUMENT_LIBRARY'], ['WEB_DOCUMENT', 'DOCUMENT_MANAGEMENT']);
+  const canViewRecycle = isPlatformAdmin(currentUser)
+    || pageMenuAllowed(projectMenuCodes, ['DOCUMENT_RECYCLE'], ['WEB_DOCUMENT', 'DOCUMENT_MANAGEMENT']);
   const themeVars = {
     '--dm-page-bg': T.pageBg,
     '--dm-card-bg': T.cardBg,
@@ -196,6 +203,17 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
     setRecycle(false);
     setDetail(null);
   }, [projectId]);
+  useEffect(() => {
+    if (recycle && !canViewRecycle && canViewLibrary) {
+      setRecycle(false);
+      setPageNo(1);
+      setMenuNotice('当前角色无回收站菜单权限，已返回资料库');
+    } else if (!recycle && !canViewLibrary && canViewRecycle) {
+      setRecycle(true);
+      setPageNo(1);
+      setMenuNotice('当前角色无资料库菜单权限，已切换到回收站');
+    }
+  }, [canViewLibrary, canViewRecycle, recycle]);
   useEffect(() => { loadFolders().catch(() => setFolders([])); }, [loadFolders]);
   useEffect(() => { loadSummary().catch(() => setSummary({})); }, [loadSummary]);
   useEffect(() => { loadDocuments(); }, [loadDocuments]);
@@ -355,10 +373,11 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
   return (
     <div className="dm-page" style={themeVars}>
       <header className="dm-page-header">
-        <div><span>{projectName}</span><h1>资料管理</h1><p>工程资料库</p></div>
+        <div><span>{projectName}</span><h1>资料管理</h1><p>{menuNotice || '工程资料库'}</p></div>
         <div className="dm-header-actions">
-          {canManage && <button className="dm-button dm-button-secondary" onClick={() => { setRecycle(!recycle); setPageNo(1); }}>{recycle ? '返回资料库' : '回收站'}</button>}
-          {canUpload && <button className="dm-button dm-button-primary" onClick={startUpload}>上传资料</button>}
+          {recycle && canViewLibrary && <button className="dm-button dm-button-secondary" onClick={() => { setRecycle(false); setMenuNotice(''); setPageNo(1); }}>返回资料库</button>}
+          {!recycle && canViewRecycle && <button className="dm-button dm-button-secondary" onClick={() => { setRecycle(true); setMenuNotice(''); setPageNo(1); }}>回收站</button>}
+          {!recycle && canUpload && <button className="dm-button dm-button-primary" onClick={startUpload}>上传资料</button>}
         </div>
       </header>
 
@@ -375,11 +394,12 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
           selectedId={selectedFolder}
           recycle={recycle}
           canManage={canManage}
-          onSelect={(id) => { setSelectedFolder(id); setRecycle(false); setPageNo(1); }}
+          canAccessRecycle={canViewRecycle}
+          onSelect={(id) => { if (canViewLibrary) { setSelectedFolder(id); setRecycle(false); setMenuNotice(''); setPageNo(1); } }}
           onCreate={() => setFolderState({ name: '' })}
           onRename={(folder) => setFolderState({ folder, name: folder.folderName })}
           onDelete={removeFolder}
-          onRecycle={() => { setRecycle(true); setPageNo(1); }}
+          onRecycle={() => { setRecycle(true); setMenuNotice(''); setPageNo(1); }}
         />
 
         <section className="dm-list-panel">

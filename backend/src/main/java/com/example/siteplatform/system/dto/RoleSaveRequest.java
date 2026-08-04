@@ -1,8 +1,8 @@
 package com.example.siteplatform.system.dto;
 
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -14,8 +14,8 @@ public class RoleSaveRequest {
     @NotBlank
     @Size(max = 50)
     private String roleName;
-    @NotBlank
-    @Pattern(regexp = "^[A-Za-z][A-Za-z0-9_-]{1,49}$", message = "角色编码格式不正确")
+    @Size(max = 50)
+    @Pattern(regexp = "^(?:\\s*|[A-Za-z][A-Za-z0-9_-]{1,49})$", message = "角色编码格式不正确")
     private String roleCode;
     @Size(max = 200)
     private String description;

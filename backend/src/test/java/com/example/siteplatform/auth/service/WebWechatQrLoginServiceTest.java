@@ -5,6 +5,7 @@ import com.example.siteplatform.common.BusinessException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -171,6 +173,30 @@ class WebWechatQrLoginServiceTest {
                 () -> service.exchange("challenge", "browser-secret", "one-time-code"));
 
         assertTrue(exception.getMessage().contains("尚未确认") || exception.getMessage().contains("失效"));
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void exchangeScriptUsesCommandsCompatibleWithProductionRedis() {
+        WebWechatQrLoginService service = service();
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(any())).thenReturn(Map.of(
+                "state", "CONFIRMED",
+                "userId", "7",
+                "browserSecretHash", digest("browser-secret")
+        ));
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class)))
+                .thenReturn("CODE");
+
+        assertThrows(BusinessException.class,
+                () -> service.exchange("challenge", "browser-secret", "one-time-code"));
+
+        ArgumentCaptor<RedisScript<String>> scriptCaptor = ArgumentCaptor.forClass(RedisScript.class);
+        verify(redisTemplate).execute(scriptCaptor.capture(), anyList(), any(Object[].class));
+        String script = scriptCaptor.getValue().getScriptAsString();
+        assertTrue(script.contains("redis.call('GET', KEYS[2])"));
+        assertTrue(script.contains("redis.call('DEL', KEYS[2])"));
+        assertFalse(script.contains("GETDEL"));
     }
 
     @Test

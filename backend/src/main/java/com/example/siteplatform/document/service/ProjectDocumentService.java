@@ -119,7 +119,7 @@ public class ProjectDocumentService {
     public PageResult<ProjectDocumentVO> recycleBin(Long projectId, String keyword, Integer pageNo,
                                                      Integer pageSize, SysUser currentUser) {
         permissionService.checkProjectPermission(currentUser.getId(), projectId);
-        checkManage(currentUser, projectId);
+        permissionService.requireSystemPermission(currentUser.getId(), projectId, SystemPermissionCodes.DOCUMENT_VIEW);
         int page = pageNo == null ? 1 : Math.max(1, pageNo);
         int size = pageSize == null ? 20 : Math.max(1, Math.min(pageSize, 100));
         String query = keyword == null ? "" : keyword.trim().toLowerCase(Locale.ROOT);

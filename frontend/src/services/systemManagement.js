@@ -36,6 +36,10 @@ export function updateSystemUserRoles(id, data) {
   return put(`/system/users/${id}/roles`, data);
 }
 
+export function updateSystemUserProjectRoleAssignments(id, data) {
+  return put(`/system/users/${id}/project-role-assignments`, data);
+}
+
 export function getSystemRoles(params = {}) {
   return get('/system/roles', params);
 }
@@ -54,6 +58,14 @@ export function deleteSystemRole(id) {
 
 export function updateSystemRolePermissions(id, data) {
   return put(`/system/roles/${id}/permissions`, data);
+}
+
+export function updateSystemRoleMenus(id, data) {
+  return put(`/system/roles/${id}/menus`, data);
+}
+
+export function updateSystemRoleOperationPermissions(id, data) {
+  return put(`/system/roles/${id}/operation-permissions`, data);
 }
 
 export function getSystemMenus(params = {}) {

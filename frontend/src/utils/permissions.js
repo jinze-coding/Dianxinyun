@@ -48,6 +48,30 @@ function flattenMenus(menus = [], result = []) {
   return result;
 }
 
+function menuIdentity(menu) {
+  return menu?.pageId || menu?.menuCode || menu?.code || menu?.routeKey || menu?.routePath || menu?.path;
+}
+
+export function collectAssignedMenuCodes(user) {
+  return [...new Set(flattenMenus(user?.menus || [])
+    .filter((menu) => menu?.enabled !== false && Number(menu?.enabled) !== 0
+      && String(menu?.status || '').toUpperCase() !== 'DISABLED')
+    .map(menuIdentity)
+    .filter(Boolean))];
+}
+
+export function collectProjectMenuCodes(user, projectId) {
+  const result = new Set();
+  (user?.projectContexts || user?.projectRoles || []).forEach((context) => {
+    if (Number(context?.projectId) !== Number(projectId)) return;
+    if (String(context?.accessStatus || 'ACTIVE').toUpperCase() !== 'ACTIVE') return;
+    (context?.menuCodes || []).forEach((code) => result.add(code));
+  });
+  // 兼容尚未返回按项目菜单的旧会话；后端权限校验仍是最终安全边界。
+  if (!result.size) collectAssignedMenuCodes(user).forEach((code) => result.add(code));
+  return [...result];
+}
+
 export function hasPermission(user, ...codes) {
   if (isPlatformAdmin(user)) return true;
   const granted = collectPermissionCodes(user);
@@ -62,23 +86,16 @@ export function hasProjectPermission(user, projectId, ...codes) {
 
 export function hasAssignedMenu(user, ...menuCodes) {
   const expected = new Set(menuCodes.filter(Boolean));
-  return flattenMenus(user?.menus || []).some((menu) => {
-    if (menu?.enabled === false || Number(menu?.enabled) === 0
-      || String(menu?.status || '').toUpperCase() === 'DISABLED') {
-      return false;
-    }
-    const candidates = [menu?.pageId, menu?.menuCode, menu?.code, menu?.routeKey, menu?.routePath, menu?.path];
-    return candidates.some((candidate) => expected.has(candidate));
-  });
+  return collectAssignedMenuCodes(user).some((code) => expected.has(code));
 }
 
 export function hasAssignedProjectMenu(user, projectId, ...menuCodes) {
   const expected = new Set(menuCodes.filter(Boolean));
   const contexts = user?.projectContexts || user?.projectRoles || [];
-  const context = contexts.find((item) => Number(item?.projectId) === Number(projectId)
+  const hasActiveContext = contexts.some((item) => Number(item?.projectId) === Number(projectId)
     && String(item?.accessStatus || 'ACTIVE').toUpperCase() === 'ACTIVE');
-  if (!context) return false;
-  const projectMenus = context?.menuCodes || [];
+  if (!hasActiveContext) return false;
+  const projectMenus = collectProjectMenuCodes(user, projectId);
   if (projectMenus.length) return projectMenus.some((code) => expected.has(code));
   // 兼容尚未返回按项目菜单的旧会话，服务端仍是最终安全边界。
   return hasAssignedMenu(user, ...menuCodes);

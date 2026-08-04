@@ -1,4 +1,5 @@
 import type { Result } from '@/types';
+import { MINI_PROGRAM_BUILD_ID } from '@/constants/release';
 
 function resolveApiBaseUrl() {
   // H5 默认使用同源代理，避免手机扫码后把 127.0.0.1 误认为手机自身。
@@ -55,11 +56,31 @@ interface RequestOptions {
   timeout?: number;
 }
 
+function getMiniProgramRuntimeLabel() {
+  const labels = [`构建 ${MINI_PROGRAM_BUILD_ID}`];
+  // #ifdef MP-WEIXIN
+  try {
+    const wxApi = (globalThis as typeof globalThis & { wx?: any }).wx;
+    const miniProgram = wxApi?.getAccountInfoSync?.()?.miniProgram;
+    if (miniProgram?.envVersion) labels.push(String(miniProgram.envVersion));
+    if (miniProgram?.version) labels.push(String(miniProgram.version));
+  } catch {
+    // 诊断信息不可用时仍保留本地构建编号，不影响实际请求。
+  }
+  // #endif
+  return labels.join(' / ');
+}
+
+function safeRequestUrl(requestUrl: string) {
+  return requestUrl.split(/[?#]/, 1)[0];
+}
+
 export function request<T>(url: string, options: RequestOptions = {}): Promise<T> {
   const token = getToken();
+  const requestUrl = `${API_BASE_URL}${url}`;
   return new Promise((resolve, reject) => {
     uni.request({
-      url: `${API_BASE_URL}${url}`,
+      url: requestUrl,
       method: options.method || 'GET',
       data: options.data as Record<string, unknown>,
       timeout: options.timeout,
@@ -82,7 +103,16 @@ export function request<T>(url: string, options: RequestOptions = {}): Promise<T
       },
       fail: (error) => {
         const errMsg = typeof error?.errMsg === 'string' ? error.errMsg : '';
-        const message = errMsg.toLowerCase().includes('timeout')
+        const normalizedErrMsg = errMsg.toLowerCase();
+        const runtimeLabel = getMiniProgramRuntimeLabel();
+        console.error('小程序请求失败', {
+          requestUrl: safeRequestUrl(requestUrl),
+          errMsg,
+          runtime: runtimeLabel
+        });
+        const message = normalizedErrMsg.includes('url not in domain')
+          ? `微信未授权请求地址：${safeRequestUrl(requestUrl)}\n运行版本：${runtimeLabel}`
+          : normalizedErrMsg.includes('timeout')
           ? '请求超时，请检查网络后重试'
           : errMsg
           ? `无法连接后端服务：${errMsg}`

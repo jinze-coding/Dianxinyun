@@ -109,4 +109,15 @@ public interface SysUserProjectMapper extends BaseMapper<SysUserProject> {
             ORDER BY p.id
             """)
     List<UserProjectRoleVO> selectUserProjectRolesForManagement(@Param("userId") Long userId);
+
+    @Select("""
+            SELECT *
+            FROM sys_user_project
+            WHERE project_id = #{projectId}
+              AND user_id = #{userId}
+            LIMIT 1
+            FOR UPDATE
+            """)
+    SysUserProject selectByProjectAndUserForUpdate(@Param("projectId") Long projectId,
+                                                    @Param("userId") Long userId);
 }

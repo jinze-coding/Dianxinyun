@@ -16,6 +16,7 @@
   "include": [
     "src/constants/dicts.js",
     "src/constants/themes.js",
+    "src/utils/inspectionExport.js",
     "src/utils/permissions.js",
     "src/utils/projectList.js"
   ]
