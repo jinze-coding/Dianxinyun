@@ -45,7 +45,7 @@ class ProjectServiceDeletionTest {
         ProjectInfo project = new ProjectInfo();
         project.setId(7L);
         when(permissionService.isPlatformAdmin(9L)).thenReturn(true);
-        when(projectMapper.selectById(7L)).thenReturn(project);
+        when(projectMapper.selectByIdForUpdate(7L)).thenReturn(project);
         when(jdbcTemplate.queryForObject(anyString(), eq(Long.class), eq(7L))).thenReturn(0L, 1L);
 
         BusinessException error = assertThrows(
@@ -61,7 +61,7 @@ class ProjectServiceDeletionTest {
         ProjectInfo project = new ProjectInfo();
         project.setId(7L);
         when(permissionService.isPlatformAdmin(9L)).thenReturn(true);
-        when(projectMapper.selectById(7L)).thenReturn(project);
+        when(projectMapper.selectByIdForUpdate(7L)).thenReturn(project);
         when(jdbcTemplate.queryForObject(anyString(), eq(Long.class), eq(7L))).thenReturn(0L);
         when(projectMapper.deleteById(7L)).thenReturn(1);
 
@@ -79,7 +79,7 @@ class ProjectServiceDeletionTest {
                 () -> service.deleteProject(7L, platformAdmin));
 
         assertEquals(403, error.getCode());
-        verify(projectMapper, never()).selectById(7L);
+        verify(projectMapper, never()).selectByIdForUpdate(7L);
         verify(jdbcTemplate, never()).queryForObject(anyString(), eq(Long.class), eq(7L));
     }
 }

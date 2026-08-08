@@ -72,6 +72,8 @@ DB_PASSWORD=<database-secret> \
 REDIS_HOST=<redis-host> \
 REDIS_PASSWORD=<redis-secret> \
 JWT_SECRET=<至少32字节且仅属于该环境的随机密钥> \
+VISITOR_DATA_ENCRYPTION_KEY=<独立且至少32字节的外访数据随机密钥> \
+SEAL_SCENE_ENCRYPTION_KEY=<另一把独立且至少32字节的用印二维码随机密钥> \
 WECHAT_MINI_PROGRAM_APP_ID=正式AppID \
 WECHAT_MINI_PROGRAM_APP_SECRET=<wechat-app-secret> \
 WECHAT_MINI_PROGRAM_PRODUCTION=true \
@@ -85,6 +87,8 @@ java -jar target/site-platform-1.0.0.jar
 
 `local/dev/test` Profile 可使用仓库内仅供联调的开发 JWT 密钥。其他环境若未配置
 `JWT_SECRET`、仍使用开发默认值，或密钥不足 32 字节，后端会在监听端口前直接拒绝启动。
+外访手机号、身份证号和邀请令牌使用独立 AES-GCM 密钥；非开发环境缺少至少 32 字节的
+`VISITOR_DATA_ENCRYPTION_KEY` 或 `SEAL_SCENE_ENCRYPTION_KEY` 时同样拒绝启动；两把密钥还必须彼此独立，且不能与 JWT、数据库或微信密钥共用。
 生产还必须通过受信 Nginx 设置 `X-Forwarded-For` 和 `X-Forwarded-Proto`，并配置
 `FORWARD_HEADERS_STRATEGY=NATIVE`；否则后端拒绝启动，避免所有用户共享代理 IP 限流。
 
@@ -137,6 +141,12 @@ mvn spring-boot:run
 - `/api/v1/document-folders` - 工程资料目录
 - `/api/v1/project-documents` - 分页、上传、版本、归档和回收站
 
+### 场内管理接口
+- `/api/v1/site-access/invitations` - 项目外访邀请分页、详情、创建与修改
+- `/api/v1/site-access/invitations/{id}/void|mini-code` - 作废邀请、生成专属小程序码
+- `/api/v1/site-access/visitors/export` - 按计划到场日期范围导出逐人 Excel
+- `/api/v1/public/site-access/invitations/resolve|submit` - 小程序免登录解析及一次性提交；邀请令牌只放请求体
+
 ## 项目结构
 
 ```
@@ -145,6 +155,7 @@ src/main/java/com/example/siteplatform/
 ├── registration/   # Web/小程序统一注册申请
 ├── system/         # 菜单、操作权限、角色和系统管理
 ├── project/        # 项目、成员、项目角色和数据范围
+├── siteaccess/     # 场内外访邀请、实名人员、加密审计和导出
 ├── document/       # 工程资料目录、版本和回收站
 ├── electricbox/    # 电箱台账与二维码
 ├── inspection/     # 巡检记录与月表

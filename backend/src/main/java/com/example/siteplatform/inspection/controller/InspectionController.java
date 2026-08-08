@@ -4,12 +4,17 @@ import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.auth.service.AuthService;
 import com.example.siteplatform.common.Result;
 import com.example.siteplatform.inspection.dto.InspectionRecordRequest;
+import com.example.siteplatform.inspection.dto.RectificationAssignRequest;
+import com.example.siteplatform.inspection.dto.RectificationCompleteRequest;
+import com.example.siteplatform.inspection.dto.RectificationReviewRequest;
 import com.example.siteplatform.inspection.dto.ProjectInspectionSettingRequest;
 import com.example.siteplatform.inspection.entity.InspectionTemplate;
 import com.example.siteplatform.inspection.service.InspectionService;
 import com.example.siteplatform.inspection.service.ProjectInspectionSettingService;
 import com.example.siteplatform.inspection.vo.InspectionMonthSummaryVO;
 import com.example.siteplatform.inspection.vo.InspectionRecordVO;
+import com.example.siteplatform.inspection.vo.InspectionRectificationVO;
+import com.example.siteplatform.inspection.vo.InspectionAssigneeVO;
 import com.example.siteplatform.inspection.vo.InspectionTodoVO;
 import com.example.siteplatform.inspection.vo.ProjectInspectionSettingVO;
 import io.swagger.v3.oas.annotations.Operation;
@@ -112,6 +117,74 @@ public class InspectionController {
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
         return Result.success(inspectionService.createRecord(request, currentUser));
+    }
+
+    @Operation(summary = "查询当前项目可指派的巡检整改电工")
+    @GetMapping("/rectification-assignees")
+    public Result<List<InspectionAssigneeVO>> listRectificationAssignees(
+            @RequestParam Long projectId,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(inspectionService.listRectificationAssignees(projectId, currentUser));
+    }
+
+    @Operation(summary = "获取巡检整改任务")
+    @GetMapping("/rectifications")
+    public Result<List<InspectionRectificationVO>> listRectifications(
+            @RequestParam(required = false) Long projectId,
+            @RequestParam(required = false) String status,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(inspectionService.listRectifications(projectId, status, currentUser));
+    }
+
+    @Operation(summary = "获取巡检整改详情")
+    @GetMapping("/rectifications/{id}")
+    public Result<InspectionRectificationVO> getRectification(
+            @PathVariable Long id,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(inspectionService.getRectification(id, currentUser));
+    }
+
+    @Operation(summary = "提交巡检整改")
+    @PostMapping("/rectifications/{id}/complete")
+    public Result<InspectionRectificationVO> completeRectification(
+            @PathVariable Long id,
+            @RequestBody RectificationCompleteRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(inspectionService.completeRectification(id, request, currentUser));
+    }
+
+    @Operation(summary = "改派巡检整改人或调整期限")
+    @PostMapping("/rectifications/{id}/assign")
+    public Result<InspectionRectificationVO> assignRectification(
+            @PathVariable Long id,
+            @RequestBody RectificationAssignRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(inspectionService.assignRectification(id, request, currentUser));
+    }
+
+    @Operation(summary = "复查关闭巡检整改")
+    @PostMapping("/rectifications/{id}/close")
+    public Result<InspectionRectificationVO> closeRectification(
+            @PathVariable Long id,
+            @RequestBody(required = false) RectificationReviewRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(inspectionService.closeRectification(id, request, currentUser));
+    }
+
+    @Operation(summary = "复查退回巡检整改")
+    @PostMapping("/rectifications/{id}/reject")
+    public Result<InspectionRectificationVO> rejectRectification(
+            @PathVariable Long id,
+            @RequestBody RectificationReviewRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(inspectionService.rejectRectification(id, request, currentUser));
     }
 
     @Operation(summary = "兼容旧客户端提交检查记录")

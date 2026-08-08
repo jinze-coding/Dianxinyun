@@ -1,11 +1,21 @@
 export const BUSINESS_MENU_DEFINITIONS = [
   {
+    moduleCode: 'SITE_ACCESS',
+    label: '场内管理',
+    description: '只控制 Web 内部管理；小程序公开填报不纳入角色',
+    backingMenuCodes: ['WEB_SITE_ACCESS'],
+    pages: [
+      { menuCode: 'SITE_VISITOR', label: '外访管理' },
+    ],
+  },
+  {
     moduleCode: 'DOCUMENT',
     label: '资料管理',
     description: 'Web 与小程序共用模块开关',
     backingMenuCodes: ['WEB_DOCUMENT', 'MINI_DOCUMENT'],
     pages: [
       { menuCode: 'DOCUMENT_LIBRARY', label: '资料库' },
+      { menuCode: 'DOCUMENT_SEAL', label: '用印申请' },
       { menuCode: 'DOCUMENT_RECYCLE', label: '回收站' },
     ],
   },
@@ -17,6 +27,7 @@ export const BUSINESS_MENU_DEFINITIONS = [
     pages: [
       { menuCode: 'INSPECTION_LEDGER', label: '电箱台账' },
       { menuCode: 'INSPECTION_RECORDS', label: '巡检记录' },
+      { menuCode: 'INSPECTION_RECTIFICATIONS', label: '整改闭环' },
     ],
   },
   {
@@ -36,15 +47,25 @@ const SYSTEM_MENU_ORDER = [
   'SYSTEM_USER',
   'SYSTEM_ROLE',
   'SYSTEM_MENU',
-  'SYSTEM_PROJECT',
   'SYSTEM_WECHAT',
   'SYSTEM_AUDIT',
+  'SYSTEM_APPROVAL',
 ];
 
 const ACTION_DEFINITIONS = [
+  { key: 'site_access.view', label: '查看完整外访信息', group: '场内管理 · 外访管理', menuCodes: ['SITE_VISITOR'], primaryCodes: ['site_access.view'], codes: ['site_access.view'] },
+  { key: 'site_access.manage', label: '创建、修改、作废及生成小程序码', group: '场内管理 · 外访管理', menuCodes: ['SITE_VISITOR'], primaryCodes: ['site_access.manage'], codes: ['site_access.manage', 'site_access.view'], requiresActions: ['site_access.view'] },
+  { key: 'site_access.export', label: '导出完整外访人员信息', group: '场内管理 · 外访管理', menuCodes: ['SITE_VISITOR'], primaryCodes: ['site_access.export'], codes: ['site_access.export', 'site_access.view'], requiresActions: ['site_access.view'] },
+
   { key: 'document.view', label: '查看资料', group: '资料管理 · 通用操作', menuCodes: ['DOCUMENT_LIBRARY', 'DOCUMENT_RECYCLE'], primaryCodes: ['document.view'], codes: ['document.view'] },
   { key: 'document.upload', label: '上传资料及新版本', group: '资料管理 · 通用操作', menuCodes: ['DOCUMENT_LIBRARY'], primaryCodes: ['document.upload'], codes: ['document.upload', 'document.view'], requiresActions: ['document.view'] },
   { key: 'document.manage', label: '管理目录、归档和回收站', group: '资料管理 · 通用操作', menuCodes: ['DOCUMENT_LIBRARY', 'DOCUMENT_RECYCLE'], primaryCodes: ['document.manage'], codes: ['document.manage', 'document.view'], requiresActions: ['document.view'] },
+  { key: 'seal.view', label: '查看项目全部用印申请', group: '资料管理 · 用印申请', menuCodes: ['DOCUMENT_SEAL'], primaryCodes: ['seal.view'], codes: ['seal.view'] },
+  { key: 'seal.manage', label: '管理项目用印与盖章件', group: '资料管理 · 用印申请', menuCodes: ['DOCUMENT_SEAL'], primaryCodes: ['seal.manage'], codes: ['seal.manage', 'seal.view'], requiresActions: ['seal.view'] },
+  { key: 'seal.export', label: '导出项目用印台账', group: '资料管理 · 用印申请', menuCodes: ['DOCUMENT_SEAL'], primaryCodes: ['seal.export'], codes: ['seal.export', 'seal.view'], requiresActions: ['seal.view'] },
+
+  { key: 'system.approval.view', label: '查看印章与审批配置', group: '系统管理 · 用印审批', menuCodes: ['SYSTEM_APPROVAL'], primaryCodes: ['system.approval.view'], codes: ['system.approval.view'] },
+  { key: 'system.approval.manage', label: '维护印章、审批配置与二维码', group: '系统管理 · 用印审批', menuCodes: ['SYSTEM_APPROVAL'], primaryCodes: ['system.approval.manage'], codes: ['system.approval.manage'] },
 
   { key: 'inspection.ledger.view', label: '查看电箱台账', group: '巡检管理 · 电箱台账', menuCodes: ['INSPECTION_LEDGER'], primaryCodes: ['BOX_VIEW'], codes: ['BOX_VIEW', 'inspection.view'] },
   { key: 'inspection.ledger.manage', label: '新增、编辑、停用和导入电箱', group: '巡检管理 · 电箱台账', menuCodes: ['INSPECTION_LEDGER'], primaryCodes: ['BOX_MANAGE'], codes: ['BOX_MANAGE', 'BOX_VIEW', 'inspection.manage', 'inspection.view'], requiresActions: ['inspection.ledger.view'] },
@@ -54,6 +75,8 @@ const ACTION_DEFINITIONS = [
   { key: 'inspection.records.view', label: '查看巡检记录', group: '巡检管理 · 巡检记录', menuCodes: ['INSPECTION_RECORDS'], primaryCodes: ['INSPECTION_RECORD_VIEW'], codes: ['INSPECTION_RECORD_VIEW', 'inspection.view'] },
   { key: 'inspection.summary.view', label: '查看巡检汇总', group: '巡检管理 · 巡检记录', menuCodes: ['INSPECTION_RECORDS'], primaryCodes: ['SUMMARY_VIEW'], codes: ['SUMMARY_VIEW', 'inspection.view'] },
   { key: 'inspection.summary.export', label: '导出巡检汇总', group: '巡检管理 · 巡检记录', menuCodes: ['INSPECTION_RECORDS'], primaryCodes: ['SUMMARY_EXPORT'], codes: ['SUMMARY_EXPORT', 'SUMMARY_VIEW', 'inspection.export', 'inspection.view'], requiresActions: ['inspection.summary.view'] },
+  { key: 'inspection.rectify', label: '提交分配给自己的巡检整改', group: '巡检管理 · 整改闭环', menuCodes: ['INSPECTION_RECTIFICATIONS'], primaryCodes: ['inspection.rectify'], codes: ['inspection.rectify', 'inspection.view'] },
+  { key: 'inspection.review', label: '复查、退回和改派巡检整改', group: '巡检管理 · 整改闭环', menuCodes: ['INSPECTION_RECTIFICATIONS'], primaryCodes: ['inspection.review'], codes: ['inspection.review', 'inspection.view'] },
 
   { key: 'quality.view', label: '查看质量问题和质量资料', group: '质量管理 · 通用操作', menuCodes: ['QUALITY_ISSUES', 'QUALITY_DOCUMENTS'], primaryCodes: ['quality.view'], codes: ['quality.view'] },
   { key: 'quality.manage', label: '发起、改派及管理质量资料', group: '质量管理 · 通用操作', menuCodes: ['QUALITY_ISSUES', 'QUALITY_DOCUMENTS'], primaryCodes: ['quality.manage'], codes: ['quality.manage', 'quality.view'], requiresActions: ['quality.view'] },
@@ -65,6 +88,19 @@ const normalize = (value) => String(value || '').trim().toUpperCase();
 const itemId = (item) => item?.id ?? item?.menuId ?? item?.permissionId;
 const menuCode = (menu) => normalize(menu?.menuCode || menu?.code);
 const permissionCode = (permission) => String(permission?.permissionCode || permission?.code || '').trim();
+
+const comparableRoleName = (value) => String(value || '').trim().toLocaleLowerCase();
+
+export function isDuplicateRoleName(candidate, roles = [], currentRole = null) {
+  const normalizedCandidate = comparableRoleName(candidate);
+  if (!normalizedCandidate) return false;
+  const currentRoleId = currentRole?.id ?? currentRole?.roleId;
+  return roles.some((role) => {
+    const roleId = role?.id ?? role?.roleId;
+    if (currentRoleId != null && String(roleId) === String(currentRoleId)) return false;
+    return comparableRoleName(role?.roleName || role?.name) === normalizedCandidate;
+  });
+}
 
 export function buildRoleDefinitionRequest(form, role = null) {
   return {
@@ -78,8 +114,6 @@ export function buildRoleDefinitionRequest(form, role = null) {
 export function buildRoleMenuTree(menus = [], role = null) {
   const byCode = new Map(menus.map((menu) => [menuCode(menu), menu]));
   const projectRole = normalize(role?.scopeType || role?.scope) === 'PROJECT';
-  const projectManager = Number(role?.projectManagerRole || 0) === 1;
-  const platformAdmin = normalize(role?.roleCode || role?.code) === 'PLATFORM_ADMIN';
   const businessNodes = BUSINESS_MENU_DEFINITIONS.map((definition) => {
     const backingMenus = definition.backingMenuCodes.map((code) => byCode.get(code)).filter(Boolean);
     const pages = definition.pages.map((page) => {
@@ -106,7 +140,6 @@ export function buildRoleMenuTree(menus = [], role = null) {
 
   const systemRoot = byCode.get('WEB_SYSTEM');
   const systemChildren = SYSTEM_MENU_ORDER.map((code) => byCode.get(code)).filter(Boolean)
-    .filter((menu) => !projectRole || (projectManager && menuCode(menu) === 'SYSTEM_PROJECT'))
     .map((menu) => ({
       key: `menu:${menuCode(menu)}`,
       type: 'PAGE',
@@ -114,7 +147,7 @@ export function buildRoleMenuTree(menus = [], role = null) {
       menuCode: menuCode(menu),
       menuId: itemId(menu),
     }));
-  if ((!projectRole || projectManager || platformAdmin) && systemRoot && systemChildren.length) {
+  if (!projectRole && systemRoot && systemChildren.length) {
     businessNodes.push({
       key: 'system:WEB_SYSTEM',
       type: 'SYSTEM_ROOT',

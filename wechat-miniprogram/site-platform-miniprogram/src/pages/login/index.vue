@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import { onShow } from '@dcloudio/uni-app';
 import { useAuthStore } from '@/stores/auth';
 import { miniWechatLogin } from '@/api/auth';
+import { getToken } from '@/api/request';
 import { showToast } from '@/utils/navigation';
 import { getFreshWechatCode } from '@/utils/wechat';
 
@@ -10,6 +12,21 @@ const username = ref('');
 const password = ref('');
 const loading = ref(false);
 const wechatLoading = ref(false);
+const restoringSession = ref(false);
+
+onShow(async () => {
+  if (!getToken() || restoringSession.value) return;
+  restoringSession.value = true;
+  try {
+    await auth.loadUser();
+    auth.navigateAfterLogin();
+  } catch {
+    // 401 会由请求层清除 token；网络瞬断时保留会话，避免误登出。
+    if (!getToken()) auth.clearLocalSession();
+  } finally {
+    restoringSession.value = false;
+  }
+});
 
 async function submit() {
   if (!username.value.trim() || !password.value) {

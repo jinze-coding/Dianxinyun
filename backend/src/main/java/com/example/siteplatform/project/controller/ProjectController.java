@@ -10,6 +10,10 @@ import com.example.siteplatform.project.dto.ProjectMapPointVO;
 import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.service.ProjectService;
 import com.example.siteplatform.project.service.MiniProgramWorkspaceService;
+import com.example.siteplatform.system.dto.AdministrativeDeletionExecuteRequest;
+import com.example.siteplatform.system.service.AdministrativeDeletionService;
+import com.example.siteplatform.system.service.SystemPermissionService;
+import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +34,12 @@ public class ProjectController {
 
     @Autowired
     private MiniProgramWorkspaceService miniProgramWorkspaceService;
+
+    @Autowired
+    private AdministrativeDeletionService administrativeDeletionService;
+
+    @Autowired
+    private SystemPermissionService systemPermissionService;
 
     @Operation(summary = "获取项目列表")
     @GetMapping
@@ -120,9 +130,13 @@ public class ProjectController {
     @DeleteMapping("/{projectId}")
     public Result<Void> deleteProject(
             @PathVariable Long projectId,
+            @Valid @RequestBody AdministrativeDeletionExecuteRequest confirmation,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
-        projectService.deleteProject(projectId, currentUser);
+        systemPermissionService.requirePlatformAdmin(currentUser);
+        confirmation.setTargetType("PROJECT");
+        confirmation.setTargetId(projectId);
+        administrativeDeletionService.execute(confirmation, currentUser);
         return Result.success();
     }
 

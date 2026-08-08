@@ -10,6 +10,7 @@ import {
 import {
   cancelRegistrationApplication,
   queryRegistrationApplicationStatus,
+  searchRegistrationProjects,
   submitRegistrationApplication,
 } from '../../services/registration';
 import './index.css';
@@ -30,13 +31,16 @@ const APPLICATION_STATUS_TEXT = {
   CANCELLED: '已取消',
 };
 
+const MAX_REGISTRATION_PROJECTS = 50;
+const REGISTRATION_PROJECT_LISTBOX_ID = 'registration-project-options';
+
 const createEmptyRegistration = () => ({
   password: '',
   confirmPassword: '',
   realName: '',
   phone: '',
   email: '',
-  desiredProjectName: '',
+  desiredProjects: [],
   applicationReason: '',
   captchaId: '',
   captchaCode: '',
@@ -77,8 +81,21 @@ export default function LoginPage({ onLogin, theme }) {
   const [qrStatus, setQrStatus] = useState('WAITING');
   const [qrBusy, setQrBusy] = useState(false);
   const qrRequestIdRef = useRef(0);
+  const projectSearchRequestRef = useRef(0);
+  const projectPickerRef = useRef(null);
   const qrPollTimerRef = useRef(null);
   const qrExchangeStartedRef = useRef(false);
+  const [projectKeyword, setProjectKeyword] = useState('');
+  const [projectOptions, setProjectOptions] = useState([]);
+  const [projectSearchBusy, setProjectSearchBusy] = useState(false);
+  const [projectSearchError, setProjectSearchError] = useState('');
+  const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
+  const [activeProjectIndex, setActiveProjectIndex] = useState(-1);
+  const availableProjectOptions = useMemo(() => projectOptions.filter((item) =>
+    !registration.desiredProjects.some((selected) =>
+      Number(selected.projectId) === Number(item.projectId))), [projectOptions, registration.desiredProjects]);
+  const projectSelectionAtLimit = registration.desiredProjects.length >= MAX_REGISTRATION_PROJECTS;
+  const activeProjectOption = availableProjectOptions[activeProjectIndex];
 
   const updateRegistration = (field, value) => {
     setRegistration((current) => ({ ...current, [field]: value }));
@@ -129,6 +146,106 @@ export default function LoginPage({ onLogin, theme }) {
   useEffect(() => {
     if (mode === 'REGISTER' && !captcha) loadCaptcha();
   }, [captcha, loadCaptcha, mode]);
+
+  useEffect(() => {
+    const keyword = projectKeyword.trim();
+    if (mode !== 'REGISTER') {
+      projectSearchRequestRef.current += 1;
+      setProjectOptions([]);
+      setProjectSearchBusy(false);
+      setProjectSearchError('');
+      setProjectDropdownOpen(false);
+      setActiveProjectIndex(-1);
+      return undefined;
+    }
+    const requestKeyword = keyword.length >= 2 ? keyword : '';
+    const requestId = ++projectSearchRequestRef.current;
+    setProjectSearchBusy(true);
+    setProjectSearchError('');
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await searchRegistrationProjects(requestKeyword);
+        if (requestId !== projectSearchRequestRef.current) return;
+        if (res.code !== 200) throw new Error(res.message || '项目列表加载失败');
+        setProjectOptions(res.data || []);
+      } catch (err) {
+        if (requestId === projectSearchRequestRef.current) {
+          setProjectOptions([]);
+          setProjectSearchError(err.message || '项目列表加载失败');
+        }
+      } finally {
+        if (requestId === projectSearchRequestRef.current) setProjectSearchBusy(false);
+      }
+    }, keyword ? 250 : 0);
+    return () => window.clearTimeout(timer);
+  }, [mode, projectKeyword]);
+
+  useEffect(() => {
+    if (!projectDropdownOpen || projectSearchBusy || projectSearchError || !availableProjectOptions.length) {
+      setActiveProjectIndex(-1);
+      return;
+    }
+    setActiveProjectIndex((current) => Math.min(current < 0 ? 0 : current, availableProjectOptions.length - 1));
+  }, [availableProjectOptions, projectDropdownOpen, projectSearchBusy, projectSearchError]);
+
+  useEffect(() => {
+    if (!projectDropdownOpen) return undefined;
+    const closeWhenOutside = (event) => {
+      if (!projectPickerRef.current?.contains(event.target)) {
+        setProjectDropdownOpen(false);
+        setActiveProjectIndex(-1);
+      }
+    };
+    document.addEventListener('pointerdown', closeWhenOutside, true);
+    document.addEventListener('focusin', closeWhenOutside, true);
+    return () => {
+      document.removeEventListener('pointerdown', closeWhenOutside, true);
+      document.removeEventListener('focusin', closeWhenOutside, true);
+    };
+  }, [projectDropdownOpen]);
+
+  const selectRegistrationProject = (project) => {
+    if (projectSelectionAtLimit) return;
+    setRegistration((current) => current.desiredProjects.some((item) => Number(item.projectId) === Number(project.projectId))
+      ? current
+      : { ...current, desiredProjects: [...current.desiredProjects, project] });
+    setProjectKeyword('');
+    setProjectDropdownOpen(true);
+    setActiveProjectIndex(-1);
+  };
+
+  const removeRegistrationProject = (projectId) => {
+    setRegistration((current) => ({
+      ...current,
+      desiredProjects: current.desiredProjects.filter((item) => Number(item.projectId) !== Number(projectId)),
+    }));
+  };
+
+  const handleProjectInputKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setProjectDropdownOpen(false);
+      setActiveProjectIndex(-1);
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      setProjectDropdownOpen(true);
+      if (!availableProjectOptions.length) return;
+      setActiveProjectIndex((current) => {
+        if (event.key === 'ArrowDown') return current < availableProjectOptions.length - 1 ? current + 1 : 0;
+        return current > 0 ? current - 1 : availableProjectOptions.length - 1;
+      });
+      return;
+    }
+    if (event.key === 'Enter' && projectDropdownOpen && activeProjectIndex >= 0) {
+      const project = availableProjectOptions[activeProjectIndex];
+      if (project) {
+        event.preventDefault();
+        selectRegistrationProject(project);
+      }
+    }
+  };
 
   useEffect(() => {
     if (mode !== 'QR') {
@@ -252,18 +369,27 @@ export default function LoginPage({ onLogin, theme }) {
       setError('请输入验证码');
       return;
     }
+    if (!registration.desiredProjects.length) {
+      setError('请至少选择一个申请项目');
+      return;
+    }
 
     setLoading(true);
     try {
       const payload = { ...registration, username: registration.phone.trim() };
       delete payload.confirmPassword;
-      payload.desiredProjectText = registration.desiredProjectName.trim() || undefined;
+      delete payload.desiredProjects;
+      payload.desiredProjectIds = registration.desiredProjects.map((project) => Number(project.projectId));
       payload.applicationReason = registration.applicationReason.trim() || undefined;
       const res = await submitRegistrationApplication(payload);
       if (res.code !== 200 || !res.data) throw new Error(res.message || '注册申请提交失败');
       const token = res.data.statusToken || res.data.queryToken || res.data.statusQueryToken || '';
       setQueryToken(token);
-      setApplicationStatus({ ...res.data, status: res.data.status || 'PENDING' });
+      setApplicationStatus({
+        ...res.data,
+        status: res.data.status || 'PENDING',
+        desiredProjects: registration.desiredProjects,
+      });
       setNotice('申请已提交，请妥善保存查询凭证并等待管理员审核。');
       setMode('STATUS');
       setRegistration(createEmptyRegistration());
@@ -403,7 +529,80 @@ export default function LoginPage({ onLogin, theme }) {
               <Field label="确认密码" required><input type="password" autoComplete="new-password" value={registration.confirmPassword} onChange={(event) => updateRegistration('confirmPassword', event.target.value)} /></Field>
               <Field label="邮箱"><input type="email" value={registration.email} onChange={(event) => updateRegistration('email', event.target.value)} /></Field>
             </div>
-            <Field label="期望项目/项目意向"><input value={registration.desiredProjectName} onChange={(event) => updateRegistration('desiredProjectName', event.target.value)} placeholder="选填，例如：智慧工地综合演示项目" /></Field>
+            <Field label="申请项目" required>
+              <div
+                ref={projectPickerRef}
+                className={`registration-project-picker${projectDropdownOpen ? ' open' : ''}`}
+              >
+                {!!registration.desiredProjects.length && (
+                  <div className="registration-project-tags">
+                    {registration.desiredProjects.map((project) => (
+                      <span key={project.projectId}>
+                        {project.projectName}
+                        <button type="button" aria-label={`移除${project.projectName}`} onClick={() => removeRegistrationProject(project.projectId)}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <input
+                  value={projectKeyword}
+                  onChange={(event) => {
+                    setProjectKeyword(event.target.value);
+                    setProjectDropdownOpen(true);
+                    setActiveProjectIndex(-1);
+                  }}
+                  onFocus={() => setProjectDropdownOpen(true)}
+                  onClick={() => setProjectDropdownOpen(true)}
+                  onKeyDown={handleProjectInputKeyDown}
+                  placeholder="输入项目全称或简称筛选"
+                  autoComplete="off"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={projectDropdownOpen}
+                  aria-controls={REGISTRATION_PROJECT_LISTBOX_ID}
+                  aria-activedescendant={projectDropdownOpen && activeProjectOption
+                    ? `registration-project-option-${activeProjectOption.projectId}`
+                    : undefined}
+                />
+                {projectDropdownOpen && (
+                  <div
+                    id={REGISTRATION_PROJECT_LISTBOX_ID}
+                    className="registration-project-results"
+                    role="listbox"
+                    aria-label="可申请项目"
+                    aria-multiselectable="true"
+                  >
+                    {projectKeyword.trim().length === 1 && <p className="hint">再输入 1 个字符可搜索；下方仍显示现有可申请项目</p>}
+                    {projectSelectionAtLimit && <p className="limit">已达到 50 个项目的选择上限，移除已选项目后可继续选择。</p>}
+                    {projectSearchBusy && <p>正在加载项目…</p>}
+                    {!projectSearchBusy && projectSearchError && <p className="error">{projectSearchError}</p>}
+                    {!projectSearchBusy && !projectSearchError && !availableProjectOptions.length && (
+                      <p>{projectKeyword.trim().length >= 2
+                        ? '没有匹配的可申请项目'
+                        : registration.desiredProjects.length ? '可申请项目已全部选择' : '暂无可申请项目'}</p>
+                    )}
+                    {!projectSearchBusy && availableProjectOptions.map((project, index) => (
+                      <button
+                        type="button"
+                        id={`registration-project-option-${project.projectId}`}
+                        key={project.projectId}
+                        className={index === activeProjectIndex ? 'active' : ''}
+                        role="option"
+                        aria-selected="false"
+                        disabled={projectSelectionAtLimit}
+                        tabIndex={-1}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onMouseEnter={() => setActiveProjectIndex(index)}
+                        onClick={() => selectRegistrationProject(project)}
+                      >
+                        <strong>{project.projectName}</strong>
+                        <span>{[project.shortName, project.area].filter(Boolean).join(' · ') || '可申请项目'}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Field>
             <Field label="申请说明"><textarea rows="3" value={registration.applicationReason} onChange={(event) => updateRegistration('applicationReason', event.target.value)} placeholder="请简要说明所属项目和使用需求" /></Field>
             <Field label="验证码" required>
               <div className="login-captcha-row">
@@ -429,6 +628,9 @@ export default function LoginPage({ onLogin, theme }) {
                   <strong>{APPLICATION_STATUS_TEXT[applicationStatus.status] || applicationStatus.status}</strong>
                 </div>
                 <p>{applicationStatus.reviewComment || applicationStatus.message || (applicationStatus.status === 'PENDING' ? '管理员审核后才能登录系统。' : '')}</p>
+                {!!applicationStatus.desiredProjects?.length && (
+                  <p>申请项目：{applicationStatus.desiredProjects.map((project) => project.projectName).join('、')}</p>
+                )}
                 {applicationStatus.status === 'PENDING' && (
                   <button type="button" className="application-cancel-button" disabled={loading} onClick={handleRegistrationCancel}>
                     取消申请

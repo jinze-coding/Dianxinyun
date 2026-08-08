@@ -83,7 +83,12 @@ class BusinessModulePermissionInterceptorTest {
                 Arguments.of("POST", "/api/v1/quality/issues", SystemPermissionCodes.QUALITY_MANAGE),
                 Arguments.of("POST", "/api/v1/quality/issues/3/assign", SystemPermissionCodes.QUALITY_MANAGE),
                 Arguments.of("POST", "/api/v1/quality/issues/3/rectify", SystemPermissionCodes.QUALITY_RECTIFY),
-                Arguments.of("POST", "/api/v1/quality/issues/3/review", SystemPermissionCodes.QUALITY_REVIEW)
+                Arguments.of("POST", "/api/v1/quality/issues/3/review", SystemPermissionCodes.QUALITY_REVIEW),
+                Arguments.of("GET", "/api/v1/site-access/invitations", SystemPermissionCodes.SITE_ACCESS_VIEW),
+                Arguments.of("HEAD", "/api/v1/site-access/invitations/8", SystemPermissionCodes.SITE_ACCESS_VIEW),
+                Arguments.of("POST", "/api/v1/site-access/invitations", SystemPermissionCodes.SITE_ACCESS_MANAGE),
+                Arguments.of("PUT", "/api/v1/site-access/invitations/8", SystemPermissionCodes.SITE_ACCESS_MANAGE),
+                Arguments.of("GET", "/api/v1/site-access/visitors/export", SystemPermissionCodes.SITE_ACCESS_EXPORT)
         );
     }
 
@@ -174,6 +179,7 @@ class BusinessModulePermissionInterceptorTest {
         assertThat(interceptor.resolveStaticPermission("POST", "/api/v1/auth/login")).isNull();
         assertThat(interceptor.resolveStaticPermission("POST", "/api/v1/registration-applications")).isNull();
         assertThat(interceptor.resolveStaticPermission("POST", "/api/v1/auth/web-qr/challenges")).isNull();
+        assertThat(interceptor.resolveStaticPermission("POST", "/api/v1/public/site-access/invitations/submit")).isNull();
     }
 
     @RestController

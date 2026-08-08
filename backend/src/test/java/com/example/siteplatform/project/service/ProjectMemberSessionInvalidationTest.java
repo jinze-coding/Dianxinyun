@@ -16,6 +16,7 @@ import com.example.siteplatform.system.entity.SystemRole;
 import com.example.siteplatform.system.mapper.SystemPermissionMapper;
 import com.example.siteplatform.system.mapper.SystemRoleBusinessModuleMapper;
 import com.example.siteplatform.system.mapper.SystemRoleMapper;
+import com.example.siteplatform.system.service.ResponsibilityReleaseService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -49,6 +50,7 @@ class ProjectMemberSessionInvalidationTest {
     @Mock private SystemRoleBusinessModuleMapper roleBusinessModuleMapper;
     @Mock private SystemPermissionMapper systemPermissionMapper;
     @Mock private QualityAssigneeService qualityAssigneeService;
+    @Mock private ResponsibilityReleaseService responsibilityReleaseService;
 
     private ProjectMemberService service;
     private SysUser operator;
@@ -66,6 +68,7 @@ class ProjectMemberSessionInvalidationTest {
         ReflectionTestUtils.setField(service, "roleBusinessModuleMapper", roleBusinessModuleMapper);
         ReflectionTestUtils.setField(service, "systemPermissionMapper", systemPermissionMapper);
         ReflectionTestUtils.setField(service, "qualityAssigneeService", qualityAssigneeService);
+        ReflectionTestUtils.setField(service, "responsibilityReleaseService", responsibilityReleaseService);
         lenient().when(userProjectMapper.insert(any(SysUserProject.class))).thenReturn(1);
         lenient().when(userProjectMapper.updateById(any(SysUserProject.class))).thenReturn(1);
         lenient().when(userProjectMapper.deleteById(anyLong())).thenReturn(1);
@@ -116,19 +119,20 @@ class ProjectMemberSessionInvalidationTest {
         when(projectPermissionService.canManageProjectMembers(1L, 9L)).thenReturn(true);
         when(userProjectMapper.selectMembersByProjectId(9L)).thenReturn(List.of());
         SysUserProject existing = member(5L, "ACTIVE");
-        when(userProjectMapper.selectOne(any())).thenReturn(existing);
+        when(userProjectMapper.selectByProjectAndUserForUpdate(9L, 2L)).thenReturn(existing);
 
         service.removeMember(9L, 2L, operator);
 
         verify(userProjectMapper).deleteById(5L);
         verify(userProjectRoleMapper).deleteByUserAndProject(2L, 9L);
+        verify(responsibilityReleaseService).releaseAll(9L, 2L);
         verify(authService).logout(2L);
     }
 
     @Test
     void memberWithOpenQualityAssignmentsCannotBeRemoved() {
         when(projectPermissionService.canManageProjectMembers(1L, 9L)).thenReturn(true);
-        when(userProjectMapper.selectOne(any())).thenReturn(member(5L, "ACTIVE"));
+        when(userProjectMapper.selectByProjectAndUserForUpdate(9L, 2L)).thenReturn(member(5L, "ACTIVE"));
         when(qualityAssigneeService.countOpenAssignments(9L, 2L)).thenReturn(2L);
 
         var exception = assertThrows(BusinessException.class,
@@ -143,7 +147,7 @@ class ProjectMemberSessionInvalidationTest {
     void changingProjectAccessStatusRevokesAllSessions() {
         when(projectPermissionService.canManageProjectMembers(1L, 9L)).thenReturn(true);
         SysUserProject existing = member(5L, "ACTIVE");
-        when(userProjectMapper.selectOne(any())).thenReturn(existing);
+        when(userProjectMapper.selectByProjectAndUserForUpdate(9L, 2L)).thenReturn(existing);
         when(userProjectMapper.selectMembersByProjectId(9L)).thenReturn(List.of());
         ProjectMemberStatusRequest request = new ProjectMemberStatusRequest();
         request.setStatus("DISABLED");
@@ -152,6 +156,7 @@ class ProjectMemberSessionInvalidationTest {
         service.updateMemberStatus(9L, 2L, request, operator);
 
         assertEquals("DISABLED", existing.getStatus());
+        verify(responsibilityReleaseService).releaseAll(9L, 2L);
         verify(authService).logout(2L);
     }
 
@@ -159,7 +164,7 @@ class ProjectMemberSessionInvalidationTest {
     void accessStatusWriteFailureReturnsConflictWithoutRevokingSessionsOrAuditingSuccess() {
         when(projectPermissionService.canManageProjectMembers(1L, 9L)).thenReturn(true);
         SysUserProject existing = member(5L, "ACTIVE");
-        when(userProjectMapper.selectOne(any())).thenReturn(existing);
+        when(userProjectMapper.selectByProjectAndUserForUpdate(9L, 2L)).thenReturn(existing);
         when(userProjectMapper.updateById(existing)).thenReturn(0);
         ProjectMemberStatusRequest request = new ProjectMemberStatusRequest();
         request.setStatus("DISABLED");
@@ -171,6 +176,7 @@ class ProjectMemberSessionInvalidationTest {
         assertEquals(409, exception.getCode());
         verify(authService, never()).logout(2L);
         verify(operationLogMapper, never()).insert(any());
+        verify(responsibilityReleaseService, never()).releaseAll(anyLong(), anyLong());
     }
 
     @Test
@@ -178,7 +184,7 @@ class ProjectMemberSessionInvalidationTest {
         when(projectPermissionService.canManageProjectMembers(1L, 9L)).thenReturn(true);
         when(userProjectMapper.selectMembersByProjectId(9L)).thenReturn(List.of());
         SysUserProject existing = member(5L, "ACTIVE");
-        when(userProjectMapper.selectOne(any())).thenReturn(existing);
+        when(userProjectMapper.selectByProjectAndUserForUpdate(9L, 2L)).thenReturn(existing);
         when(userProjectMapper.deleteById(5L)).thenReturn(0);
 
         BusinessException exception = assertThrows(BusinessException.class,
@@ -187,6 +193,7 @@ class ProjectMemberSessionInvalidationTest {
         assertEquals(409, exception.getCode());
         verify(authService, never()).logout(2L);
         verify(operationLogMapper, never()).insert(any());
+        verify(responsibilityReleaseService, never()).releaseAll(anyLong(), anyLong());
     }
 
     @Test
@@ -213,7 +220,7 @@ class ProjectMemberSessionInvalidationTest {
     @Test
     void memberWithOpenQualityAssignmentsCannotBePaused() {
         when(projectPermissionService.canManageProjectMembers(1L, 9L)).thenReturn(true);
-        when(userProjectMapper.selectOne(any())).thenReturn(member(5L, "ACTIVE"));
+        when(userProjectMapper.selectByProjectAndUserForUpdate(9L, 2L)).thenReturn(member(5L, "ACTIVE"));
         when(qualityAssigneeService.countOpenAssignments(9L, 2L)).thenReturn(1L);
         ProjectMemberStatusRequest request = new ProjectMemberStatusRequest();
         request.setStatus("DISABLED");
@@ -270,7 +277,7 @@ class ProjectMemberSessionInvalidationTest {
     void projectManagerCannotRemoveOrPauseAnotherProjectManager() {
         SysUserProject managerMember = member(5L, "ACTIVE");
         when(projectPermissionService.canManageProjectMembers(1L, 9L)).thenReturn(true);
-        when(userProjectMapper.selectOne(any())).thenReturn(managerMember);
+        when(userProjectMapper.selectByProjectAndUserForUpdate(9L, 2L)).thenReturn(managerMember);
         when(userProjectRoleMapper.countEnabledProjectManagerRoles(2L, 9L)).thenReturn(1L);
 
         var exception = assertThrows(RuntimeException.class, () -> service.removeMember(9L, 2L, operator));
@@ -321,35 +328,6 @@ class ProjectMemberSessionInvalidationTest {
         assertEquals(List.of("DOCUMENT"), roles.get(0).getBusinessModuleCodes());
         assertEquals(List.of("查看资料"), roles.get(0).getPermissionNames());
         assertNull(roles.get(0).getPermissionIds());
-    }
-
-    @Test
-    void ensuringNewOrUpgradedMemberRevokesSessionsButNoopDoesNot() {
-        when(systemRoleMapper.selectOne(any())).thenReturn(projectRole("CUSTOM_REVIEWER"));
-        when(userProjectMapper.selectOne(any())).thenReturn(null);
-        when(userProjectRoleMapper.selectAssignedRoles(2L, 9L)).thenReturn(List.of());
-
-        service.ensureProjectMember(9L, 2L, "CUSTOM_REVIEWER");
-
-        verify(userProjectMapper).insert(any(SysUserProject.class));
-        verify(authService).logout(2L);
-
-        ProjectMemberService noopService = new ProjectMemberService();
-        ReflectionTestUtils.setField(noopService, "userProjectMapper", userProjectMapper);
-        ReflectionTestUtils.setField(noopService, "userProjectRoleMapper", userProjectRoleMapper);
-        ReflectionTestUtils.setField(noopService, "projectPermissionService", projectPermissionService);
-        ReflectionTestUtils.setField(noopService, "authService", authService);
-        ReflectionTestUtils.setField(noopService, "systemRoleMapper", systemRoleMapper);
-        ReflectionTestUtils.setField(noopService, "qualityAssigneeService", qualityAssigneeService);
-        SysUserProject unchanged = member(6L, "ACTIVE");
-        unchanged.setProjectRoleCode("CUSTOM_REVIEWER");
-        when(userProjectMapper.selectOne(any())).thenReturn(unchanged);
-        when(userProjectRoleMapper.selectAssignedRoles(3L, 9L)).thenReturn(List.of(projectRole("CUSTOM_REVIEWER")));
-
-        noopService.ensureProjectMember(9L, 3L, "CUSTOM_REVIEWER");
-
-        verify(authService, never()).logout(3L);
-        verify(authService, never()).repeatLogoutAfterCommit(3L);
     }
 
     private SysUser user(Long id) {

@@ -4,7 +4,7 @@ import { requireProjectList } from './projectList.js';
 
 describe('requireProjectList', () => {
   it('returns a successful project list including an empty list', () => {
-    const projects = [{ id: 1, name: '演示作业区域' }];
+    const projects = [{ id: 1, name: '演示项目' }];
 
     assert.equal(requireProjectList({ code: 200, data: projects }), projects);
     assert.deepEqual(requireProjectList({ code: 200, data: [] }), []);
@@ -20,7 +20,7 @@ describe('requireProjectList', () => {
   it('rejects a malformed data payload', () => {
     assert.throws(
       () => requireProjectList({ code: 200, data: null }),
-      /作业区域接口返回格式不正确/,
+      /项目列表接口返回格式不正确/,
     );
   });
 });

@@ -19,6 +19,14 @@ export interface RegistrationApplicationPayload {
   phoneCode?: string;
 }
 
+export interface RegistrationProjectOption {
+  projectId: number;
+  projectName: string;
+  shortName?: string;
+  area?: string;
+  available?: boolean;
+}
+
 export interface RegistrationApplicationResult {
   applicationId?: number;
   applicationNo?: string;
@@ -39,6 +47,8 @@ export interface RegistrationApplicationStatus {
   createTime?: string;
   reviewTime?: string;
   message?: string;
+  desiredProjectIds?: number[];
+  desiredProjects?: RegistrationProjectOption[];
 }
 
 export interface RegistrationCaptcha {
@@ -49,6 +59,13 @@ export interface RegistrationCaptcha {
 
 export function getRegistrationCaptcha() {
   return request<RegistrationCaptcha>('/auth/captcha', { skipAuthRedirect: true });
+}
+
+export function searchRegistrationProjects(keyword = '') {
+  return request<RegistrationProjectOption[]>(
+    `/registration-applications/project-options?keyword=${encodeURIComponent(keyword.trim())}`,
+    { skipAuthRedirect: true }
+  );
 }
 
 export function submitRegistrationApplication(payload: RegistrationApplicationPayload) {

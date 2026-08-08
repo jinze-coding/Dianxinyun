@@ -13,7 +13,6 @@ import com.example.siteplatform.electricbox.vo.ElectricBoxScopeVO;
 import com.example.siteplatform.inspection.mapper.InspectionRecordMapper;
 import com.example.siteplatform.inspection.mapper.InspectionRectificationMapper;
 import com.example.siteplatform.project.constant.InspectionPermissionCodes;
-import com.example.siteplatform.project.service.ProjectMemberService;
 import com.example.siteplatform.project.service.ProjectPermissionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,7 +40,6 @@ class ElectricBoxServiceWriteIntegrityTest {
     @Mock private ElectricBoxMapper electricBoxMapper;
     @Mock private ElectricBoxQrLogMapper qrLogMapper;
     @Mock private ProjectPermissionService permissionService;
-    @Mock private ProjectMemberService projectMemberService;
     @Mock private InspectionRecordMapper inspectionRecordMapper;
     @Mock private InspectionRectificationMapper inspectionRectificationMapper;
     @Mock private SysUserMapper sysUserMapper;
@@ -57,13 +55,13 @@ class ElectricBoxServiceWriteIntegrityTest {
         ReflectionTestUtils.setField(service, "electricBoxMapper", electricBoxMapper);
         ReflectionTestUtils.setField(service, "qrLogMapper", qrLogMapper);
         ReflectionTestUtils.setField(service, "projectPermissionService", permissionService);
-        ReflectionTestUtils.setField(service, "projectMemberService", projectMemberService);
         ReflectionTestUtils.setField(service, "inspectionRecordMapper", inspectionRecordMapper);
         ReflectionTestUtils.setField(service, "inspectionRectificationMapper", inspectionRectificationMapper);
         ReflectionTestUtils.setField(service, "sysUserMapper", sysUserMapper);
         ReflectionTestUtils.setField(service, "inspectionScopeService", inspectionScopeService);
         ReflectionTestUtils.setField(service, "wechatPlatformClient", wechatPlatformClient);
         lenient().when(permissionService.hasInspectionPermission(anyLong(), anyLong(), anyString())).thenReturn(true);
+        lenient().when(permissionService.hasProjectPermission(anyLong(), anyLong())).thenReturn(true);
         lenient().when(qrLogMapper.insert(any())).thenReturn(1);
         lenient().when(inspectionScopeService.getCurrentForBox(any())).thenAnswer(invocation -> {
             ElectricBoxScopeVO scope = new ElectricBoxScopeVO();
@@ -95,7 +93,7 @@ class ElectricBoxServiceWriteIntegrityTest {
         assertEquals("ACTIVE", inserted.getStatus());
         assertEquals("BOUND", inserted.getQrStatus());
         assertEquals("真实电工", inserted.getResponsibleElectricianName());
-        verify(projectMemberService).ensureProjectMember(1L, 9L, ProjectPermissionService.ROLE_USER);
+        verify(permissionService).hasProjectPermission(9L, 1L);
     }
 
     @Test
@@ -109,7 +107,7 @@ class ElectricBoxServiceWriteIntegrityTest {
 
         assertTrue(error.getMessage().contains("有效系统账号"));
         verify(electricBoxMapper, never()).insert(any());
-        verify(projectMemberService, never()).ensureProjectMember(anyLong(), anyLong(), anyString());
+        verify(permissionService, never()).hasProjectPermission(999L, 1L);
     }
 
     @Test
@@ -249,7 +247,6 @@ class ElectricBoxServiceWriteIntegrityTest {
                 () -> service.update(12L, request(), operator));
 
         assertEquals(409, error.getCode());
-        verify(projectMemberService, never()).ensureProjectMember(anyLong(), anyLong(), anyString());
     }
 
     private ElectricBoxRequest request() {

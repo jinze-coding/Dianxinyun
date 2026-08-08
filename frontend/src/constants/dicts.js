@@ -91,14 +91,20 @@ export const PAGE_IDS = {
   OVERVIEW: 'overview',
   PERSONNEL: 'personnel',
   PERSON_MANAGEMENT: 'person_management',
+  SITE_ACCESS: 'site_access',
   QUALITY_MANAGEMENT: 'quality_management',
   DOCUMENT_MANAGEMENT: 'document_management',
   ELECTRIC_INSPECTION: 'electric_inspection',
+  PERSONAL_INBOX: 'personal_inbox',
   SYSTEM_MANAGEMENT: 'system_management',
 };
 
+// 账号密码、微信扫码登录以及已登录会话恢复后的统一首页。
+export const AUTHENTICATED_LANDING_PAGE = PAGE_IDS.PERSONAL_INBOX;
+
 // 导航菜单
 export const NAV_ITEMS = [
+  { id: PAGE_IDS.SITE_ACCESS, label: '场内管理' },
   { id: PAGE_IDS.DOCUMENT_MANAGEMENT, label: '资料管理' },
   { id: PAGE_IDS.ELECTRIC_INSPECTION, label: '巡检管理' },
   { id: PAGE_IDS.QUALITY_MANAGEMENT, label: '质量管理' },

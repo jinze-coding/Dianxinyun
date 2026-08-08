@@ -37,6 +37,10 @@
       "style": { "navigationStyle": "custom", "disableScroll": true }
     },
     {
+      "path": "pages/todo/index",
+      "style": { "navigationStyle": "custom", "disableScroll": true }
+    },
+    {
       "path": "pages/profile/index",
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "我的" }
     },
@@ -81,8 +85,36 @@
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "巡检详情" }
     },
     {
+      "path": "pages/rectification/index",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "整改闭环" }
+    },
+    {
+      "path": "pages/rectification/detail",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "整改详情" }
+    },
+    {
+      "path": "pages/seal/entry",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "扫码用印" }
+    },
+    {
+      "path": "pages/seal/apply",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "用印申请" }
+    },
+    {
+      "path": "pages/seal/list",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "用印申请" }
+    },
+    {
+      "path": "pages/seal/detail",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "用印详情" }
+    },
+    {
       "path": "pages/public/box-monthly",
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "电箱月度检查表" }
+    },
+    {
+      "path": "pages/public/visitor-invite",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "外访登记" }
     }
   ],
   "subPackages": [],
@@ -93,6 +125,12 @@
     "backgroundColor": "#FFFFFF",
     "borderStyle": "white",
     "list": [
+      {
+        "pagePath": "pages/todo/index",
+        "text": "待办",
+        "iconPath": "static/tabbar/todo.png",
+        "selectedIconPath": "static/tabbar/todo-active.png"
+      },
       {
         "pagePath": "pages/documents/index",
         "text": "资料",

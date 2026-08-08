@@ -2,6 +2,9 @@ package com.example.siteplatform.system.service;
 
 import com.example.siteplatform.auth.mapper.SysUserMapper;
 import com.example.siteplatform.project.service.ProjectPermissionService;
+import com.example.siteplatform.system.constant.BusinessModuleCodes;
+import com.example.siteplatform.system.entity.SystemMenu;
+import com.example.siteplatform.system.entity.SystemPermission;
 import com.example.siteplatform.system.mapper.SystemMenuMapper;
 import com.example.siteplatform.system.mapper.SystemPermissionMapper;
 import com.example.siteplatform.system.mapper.SystemRoleBusinessModuleMapper;
@@ -11,6 +14,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -30,6 +34,35 @@ class SystemPermissionServiceTest {
 
         assertThat(service.hasPermission(12L, "document.manage")).isTrue();
         verify(permissionMapper, never()).selectCodesByUserId(12L);
+    }
+
+    @Test
+    void platformAdministratorReceivesAllEnabledCatalogsWithoutRoleAssignments() {
+        SystemMenuMapper menuMapper = mock(SystemMenuMapper.class);
+        SystemPermissionMapper permissionMapper = mock(SystemPermissionMapper.class);
+        SysUserMapper userMapper = mock(SysUserMapper.class);
+        SystemRoleBusinessModuleMapper moduleMapper = mock(SystemRoleBusinessModuleMapper.class);
+        SystemPermissionService service = new SystemPermissionService(menuMapper, permissionMapper, userMapper, moduleMapper);
+        when(userMapper.selectRoleCodesByUserId(12L))
+                .thenReturn(List.of(ProjectPermissionService.ROLE_PLATFORM_ADMIN));
+        SystemPermission document = new SystemPermission();
+        document.setPermissionCode("document.manage");
+        SystemPermission quality = new SystemPermission();
+        quality.setPermissionCode("quality.review");
+        when(permissionMapper.selectList(any())).thenReturn(List.of(document, quality));
+        SystemMenu root = new SystemMenu();
+        root.setId(1L);
+        root.setMenuCode("WEB_DOCUMENT");
+        root.setMenuName("资料管理");
+        when(menuMapper.selectList(any())).thenReturn(List.of(root));
+
+        assertThat(service.permissionCodes(12L)).containsExactly("document.manage", "quality.review");
+        assertThat(service.projectPermissionCodes(12L, 999L))
+                .containsExactly("document.manage", "quality.review");
+        assertThat(service.projectMenuCodes(12L, 999L)).containsExactly("WEB_DOCUMENT");
+        assertThat(service.menuTree(12L)).extracting("menuCode").containsExactly("WEB_DOCUMENT");
+        assertThat(service.businessModuleCodes(12L, 999L)).containsExactlyInAnyOrderElementsOf(BusinessModuleCodes.ALL);
+        verify(moduleMapper, never()).selectModuleCodesByUserIdAndProject(12L, 999L);
     }
 
     @Test

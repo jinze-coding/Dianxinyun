@@ -51,6 +51,10 @@ public class SystemAdministrationService {
             "BOX_VIEW", "BOX_MANAGE", "BOX_QR_MANAGE", "BOX_PUBLIC_ACCESS");
     private static final Set<String> INSPECTION_RECORD_PERMISSION_CODES = Set.of(
             "INSPECTION_DAILY_SUBMIT", "INSPECTION_RECORD_VIEW", "SUMMARY_VIEW", "SUMMARY_EXPORT");
+    private static final Set<String> INSPECTION_RECTIFICATION_PERMISSION_CODES = Set.of(
+            "INSPECTION.RECTIFY", "INSPECTION.REVIEW");
+    private static final String RETIRED_PROJECT_MEMBER_MENU = "SYSTEM_PROJECT";
+    private static final String RETIRED_PROJECT_MEMBER_PERMISSION = "project.member.manage";
     private static final String GENERATED_ROLE_CODE_PREFIX = "ROLE_";
     private static final int GENERATED_ROLE_CODE_ATTEMPTS = 10;
     private static final Pattern ROLE_CODE_PATTERN = Pattern.compile("^[A-Z][A-Z0-9_-]{1,49}$");
@@ -63,6 +67,7 @@ public class SystemAdministrationService {
     private final OperationLogMapper operationLogMapper;
     private final InspectionPermissionTemplateService inspectionTemplateService;
     private final ProjectPermissionService projectPermissionService;
+    private final ResponsibilityReleaseService responsibilityReleaseService;
     private final AuthService authService;
     private final PasswordCredentialService passwordCredentialService;
 
@@ -76,7 +81,9 @@ public class SystemAdministrationService {
                                        SystemRoleMapper roleMapper, SystemMenuMapper menuMapper,
                                        SystemPermissionMapper permissionMapper, OperationLogMapper operationLogMapper,
                                        InspectionPermissionTemplateService inspectionTemplateService,
-                                       ProjectPermissionService projectPermissionService, AuthService authService,
+                                       ProjectPermissionService projectPermissionService,
+                                       ResponsibilityReleaseService responsibilityReleaseService,
+                                       AuthService authService,
                                        PasswordCredentialService passwordCredentialService) {
         this.userMapper = userMapper;
         this.userProjectMapper = userProjectMapper;
@@ -86,6 +93,7 @@ public class SystemAdministrationService {
         this.operationLogMapper = operationLogMapper;
         this.inspectionTemplateService = inspectionTemplateService;
         this.projectPermissionService = projectPermissionService;
+        this.responsibilityReleaseService = responsibilityReleaseService;
         this.authService = authService;
         this.passwordCredentialService = passwordCredentialService;
     }
@@ -113,7 +121,7 @@ public class SystemAdministrationService {
         Integer status = normalizeUserStatus(rawStatus);
         if (Objects.equals(userId, operator.getId()) && status == 0) throw new BusinessException("不能停用自己的账号");
         if (status == 0) lockPlatformAdministratorMutex();
-        SysUser user = requireUser(userId);
+        SysUser user = requireUserForUpdate(userId);
         if (status == 0 && isEffectivePlatformAdministrator(user)
                 && activePlatformAdministratorCount() <= 1) {
             throw new BusinessException("不能停用最后一个可用的平台管理员");
@@ -121,6 +129,19 @@ public class SystemAdministrationService {
         user.setStatus(status);
         user.setUpdateTime(LocalDateTime.now());
         requireSingleWrite(userMapper.updateById(user), "账号状态已变化，请刷新后重试");
+        if (status == 0) {
+            // Account disablement invalidates every project-scoped responsibility,
+            // including direct-user approval configuration and pending seal tasks.
+            // The release remains in this transaction, so a failure also rolls the
+            // status write back instead of leaving a half-disabled account.
+            List<SysUserProject> memberships = userProjectMapper.selectList(
+                    new LambdaQueryWrapper<SysUserProject>().eq(SysUserProject::getUserId, userId));
+            if (memberships != null) {
+                memberships.stream().map(SysUserProject::getProjectId)
+                        .filter(Objects::nonNull).distinct()
+                        .forEach(projectId -> responsibilityReleaseService.releaseAll(projectId, userId));
+            }
+        }
         authService.logout(userId);
         authService.repeatLogoutAfterCommit(userId);
         record(operator, status == 1 ? "ENABLE_USER" : "DISABLE_USER", "SYS_USER", userId,
@@ -137,40 +158,8 @@ public class SystemAdministrationService {
 
     @Transactional
     public void assignAccess(Long userId, RegistrationReviewRequest request, SysUser operator) {
-        lockPlatformAdministratorMutex();
-        SysUser targetUser = requireUser(userId);
-        if (Objects.equals(userId, operator.getId())) {
-            throw new BusinessException("不能通过此接口修改自己的角色和项目权限");
-        }
-        boolean removingPlatformAdmin = isPlatformAdministrator(userId)
-                && !containsPlatformAdministratorRole(request == null ? null : request.getRoleIds());
-        if (removingPlatformAdmin && isEffectivePlatformAdministrator(targetUser)
-                && activePlatformAdministratorCount() <= 1) {
-            throw new BusinessException("不能移除最后一个可用平台管理员的角色");
-        }
-        userMapper.deleteUserRoles(userId);
-        if (request != null && request.getRoleIds() != null) {
-            for (Long roleId : request.getRoleIds().stream().distinct().toList()) {
-                SystemRole role = roleMapper.selectById(roleId);
-                if (role == null || !"PLATFORM".equalsIgnoreCase(role.getScopeType())
-                        || !ProjectPermissionService.ROLE_PLATFORM_ADMIN.equals(role.getRoleCode())
-                        || Integer.valueOf(0).equals(role.getEnabled())) {
-                    throw new BusinessException("仅可分配系统管理员平台角色：" + roleId);
-                }
-                userMapper.insertUserRole(userId, roleId);
-            }
-        }
-        userProjectRoleMapper.deleteByUserId(userId);
-        userProjectMapper.delete(new LambdaQueryWrapper<SysUserProject>().eq(SysUserProject::getUserId, userId));
-        if (request != null && request.getProjectAssignments() != null) {
-            for (RegistrationReviewRequest.ProjectAssignment assignment : request.getProjectAssignments()) {
-                insertProjectAssignment(userId, assignment);
-            }
-        }
-        projectPermissionService.clearUserProjectsCache(userId);
-        authService.logout(userId);
-        authService.repeatLogoutAfterCommit(userId);
-        record(operator, "ASSIGN_USER_ACCESS", "SYS_USER", userId, "更新用户角色和项目授权");
+        throw BusinessException.of(410,
+                "旧版整包授权接口已停用，请使用平台角色接口和项目角色分配接口，并先完成责任影响预览");
     }
 
     public List<SystemRole> roles() {
@@ -189,8 +178,21 @@ public class SystemAdministrationService {
 
     @Transactional
     public SystemRole saveRole(Long id, RoleSaveRequest request, SysUser operator) {
+        String normalizedRoleName = trim(request.getRoleName());
+        if (!StringUtils.hasText(normalizedRoleName)) {
+            throw new BusinessException("角色名称不能为空");
+        }
+        // Serialize role definition writes across application instances so the
+        // following name check cannot be bypassed by concurrent create requests.
+        lockPlatformAdministratorMutex();
         SystemRole role = id == null ? new SystemRole() : roleMapper.selectByIdForUpdate(id);
         if (id != null && role == null) throw BusinessException.notFound("角色不存在");
+        Long duplicateName = roleMapper.selectCount(new LambdaQueryWrapper<SystemRole>()
+                .apply("LOWER(TRIM(role_name)) = LOWER({0})", normalizedRoleName)
+                .ne(id != null, SystemRole::getId, id));
+        if (duplicateName != null && duplicateName > 0) {
+            throw BusinessException.of(409, "角色名称已存在，请使用其他名称");
+        }
         String previousRoleCode = role.getRoleCode();
         String previousScopeType = role.getScopeType();
         String scopeType = id == null ? "PROJECT" : role.getScopeType();
@@ -232,6 +234,10 @@ public class SystemAdministrationService {
         if (isProtectedProjectManagerRole(role) && enabled != 1) {
             throw new BusinessException("项目经理角色不能停用");
         }
+        if (Set.of(ProjectPermissionService.ROLE_ELECTRICIAN,
+                ProjectPermissionService.ROLE_SAFETY_OFFICER).contains(code) && enabled != 1) {
+            throw new BusinessException("巡检闭环业务角色不能停用");
+        }
         if (!"PLATFORM".equals(scopeType) && !"PROJECT".equals(scopeType)) {
             throw new BusinessException("角色范围只支持 PLATFORM 或 PROJECT");
         }
@@ -261,13 +267,13 @@ public class SystemAdministrationService {
                 ? normalizeRolePermissionIds(request.getPermissionIds())
                 : safeList(roleMapper.selectPermissionIds(role.getId()));
         if (authorizationSupplied || id == null) {
-            validateRolePermissions(scopeType, normalizedPermissionIds, projectManagerRole);
-            validateRoleMenus(scopeType, normalizedMenuIds, projectManagerRole);
+            validateRolePermissions(scopeType, normalizedPermissionIds);
+            validateRoleMenus(scopeType, normalizedMenuIds);
             validateMenuHierarchy(normalizedMenuIds, false);
             validatePermissionsMatchMenus(normalizedPermissionIds, normalizedMenuIds,
                     businessModuleCodes, false);
         }
-        role.setRoleName(request.getRoleName().trim());
+        role.setRoleName(normalizedRoleName);
         role.setRoleCode(code);
         role.setDescription(trim(request.getDescription()));
         role.setScopeType(scopeType);
@@ -303,9 +309,6 @@ public class SystemAdministrationService {
         if (isProtectedPlatformAdministratorRole(role)) {
             throw new BusinessException("内置平台管理员角色不能删除");
         }
-        if (Integer.valueOf(1).equals(role.getBuiltin())) {
-            throw new BusinessException("内置角色不能删除");
-        }
         List<Long> assignedUserIds = userMapper.selectUserIdsByRoleId(roleId);
         List<Long> projectUserIds = "PROJECT".equalsIgnoreCase(role.getScopeType())
                 ? userProjectRoleMapper.selectUserIdsByRoleId(role.getId()) : List.of();
@@ -332,8 +335,8 @@ public class SystemAdministrationService {
         Set<String> businessModuleCodes = resolveBusinessModuleCodes(role, requestedBusinessModuleCodes, menuIds);
         List<Long> normalizedMenuIds = normalizeRoleMenuIds(menuIds, businessModuleCodes);
         List<Long> normalizedPermissionIds = normalizeRolePermissionIds(permissionIds);
-        validateRolePermissions(role.getScopeType(), normalizedPermissionIds, isProtectedProjectManagerRole(role));
-        validateRoleMenus(role.getScopeType(), normalizedMenuIds, isProtectedProjectManagerRole(role));
+        validateRolePermissions(role.getScopeType(), normalizedPermissionIds);
+        validateRoleMenus(role.getScopeType(), normalizedMenuIds);
         validateMenuHierarchy(normalizedMenuIds, false);
         validatePermissionsMatchMenus(normalizedPermissionIds, normalizedMenuIds, businessModuleCodes, false);
         replaceRolePermissions(roleId, normalizedPermissionIds);
@@ -350,7 +353,7 @@ public class SystemAdministrationService {
         requireRoleAuthorizationEditable(role);
         Set<String> businessModuleCodes = resolveBusinessModuleCodes(role, requestedBusinessModuleCodes, menuIds);
         List<Long> normalizedMenuIds = normalizeRoleMenuIds(menuIds, businessModuleCodes);
-        validateRoleMenus(role.getScopeType(), normalizedMenuIds, isProtectedProjectManagerRole(role));
+        validateRoleMenus(role.getScopeType(), normalizedMenuIds);
         validateMenuHierarchy(normalizedMenuIds, true);
 
         List<Long> currentPermissionIds = normalizeRolePermissionIds(roleMapper.selectPermissionIds(roleId));
@@ -371,7 +374,7 @@ public class SystemAdministrationService {
         Set<String> businessModuleCodes = new LinkedHashSet<>(
                 safeList(roleBusinessModuleMapper.selectModuleCodesByRoleId(roleId)));
         List<Long> normalizedPermissionIds = normalizeRolePermissionIds(permissionIds);
-        validateRolePermissions(role.getScopeType(), normalizedPermissionIds, isProtectedProjectManagerRole(role));
+        validateRolePermissions(role.getScopeType(), normalizedPermissionIds);
         validatePermissionsMatchMenus(normalizedPermissionIds, menuIds, businessModuleCodes, true);
         replaceRolePermissions(roleId, normalizedPermissionIds);
         logoutUsers(affectedRoleUserIds(role.getId(), role.getScopeType(), role.getRoleCode()));
@@ -431,6 +434,7 @@ public class SystemAdministrationService {
     public SystemMenu updateMenuStatus(Long id, Object rawStatus, SysUser operator) {
         SystemMenu menu = menuMapper.selectById(id);
         if (menu == null) throw BusinessException.notFound("菜单不存在");
+        rejectRetiredMenu(menu.getMenuCode());
         List<Long> affectedRoleIds = roleMapper.selectRoleIdsByMenuId(id);
         int enabled = normalizeEnabled(rawStatus);
         menu.setEnabled(enabled);
@@ -454,6 +458,7 @@ public class SystemAdministrationService {
         if (!StringUtils.hasText(request.getMenuCode()) || !StringUtils.hasText(request.getMenuName())) {
             throw new BusinessException("菜单编码和名称不能为空");
         }
+        rejectRetiredMenu(request.getMenuCode());
         if (id != null && Integer.valueOf(1).equals(menu.getBuiltin())
                 && !menu.getMenuCode().equals(request.getMenuCode())) {
             throw new BusinessException("内置菜单编码不能修改");
@@ -489,6 +494,7 @@ public class SystemAdministrationService {
         if (!StringUtils.hasText(request.getPermissionCode()) || !StringUtils.hasText(request.getPermissionName())) {
             throw new BusinessException("权限编码和名称不能为空");
         }
+        rejectRetiredPermission(request.getPermissionCode());
         if (id != null && Integer.valueOf(1).equals(permission.getBuiltin())
                 && !permission.getPermissionCode().equals(request.getPermissionCode())) {
             throw new BusinessException("内置权限编码不能修改");
@@ -560,6 +566,12 @@ public class SystemAdministrationService {
 
     private SysUser requireUser(Long userId) {
         SysUser user = userMapper.selectById(userId);
+        if (user == null) throw BusinessException.notFound("用户不存在");
+        return user;
+    }
+
+    private SysUser requireUserForUpdate(Long userId) {
+        SysUser user = userId == null ? null : userMapper.selectByIdForUpdate(userId);
         if (user == null) throw BusinessException.notFound("用户不存在");
         return user;
     }
@@ -733,7 +745,7 @@ public class SystemAdministrationService {
     }
 
     /**
-     * 角色页面只传三个业务模块编码；底层仍同步两端菜单，以兼容现有 Web / 小程序路由。
+     * 角色页面只传正式业务模块编码；底层同步对应客户端菜单，以兼容现有 Web / 小程序路由。
      * 旧调用没有模块字段时不意外清空已有开关，新角色则从旧菜单数组推导一次。
      */
     private Set<String> resolveBusinessModuleCodes(SystemRole role, List<String> requestedCodes,
@@ -778,6 +790,7 @@ public class SystemAdministrationService {
         }
         List<SystemMenu> businessMenus = menuMapper.selectList(new LambdaQueryWrapper<SystemMenu>()
                 .in(SystemMenu::getMenuCode, List.of(
+                        "WEB_SITE_ACCESS",
                         "WEB_DOCUMENT", "MINI_DOCUMENT", "WEB_INSPECTION", "MINI_INSPECTION",
                         "WEB_QUALITY", "MINI_QUALITY")));
         for (SystemMenu menu : businessMenus) {
@@ -818,6 +831,9 @@ public class SystemAdministrationService {
                 requiredCodes.add("INSPECTION.VIEW");
             }
             if ("INSPECTION_DAILY_SUBMIT".equals(code)) requiredCodes.add("INSPECTION.SUBMIT");
+            if (Set.of("INSPECTION.RECTIFY", "INSPECTION.REVIEW").contains(code)) {
+                requiredCodes.add("INSPECTION.VIEW");
+            }
             if (Set.of("INSPECTION_RECORD_VIEW", "SUMMARY_VIEW").contains(code)) {
                 requiredCodes.add("INSPECTION.VIEW");
             }
@@ -829,8 +845,14 @@ public class SystemAdministrationService {
             if (Set.of("DOCUMENT.UPLOAD", "DOCUMENT.MANAGE").contains(code)) {
                 requiredCodes.add("DOCUMENT.VIEW");
             }
+            if (Set.of("SEAL.MANAGE", "SEAL.EXPORT").contains(code)) {
+                requiredCodes.add("SEAL.VIEW");
+            }
             if (Set.of("QUALITY.MANAGE", "QUALITY.RECTIFY", "QUALITY.REVIEW").contains(code)) {
                 requiredCodes.add("QUALITY.VIEW");
+            }
+            if (Set.of("SITE_ACCESS.MANAGE", "SITE_ACCESS.EXPORT").contains(code)) {
+                requiredCodes.add("SITE_ACCESS.VIEW");
             }
         }
         if (!requiredCodes.isEmpty()) {
@@ -872,11 +894,13 @@ public class SystemAdministrationService {
         }
         if (!strictTabs) return;
         requireSelectedPageWhenCatalogExists("WEB_DOCUMENT",
-                Set.of("DOCUMENT_LIBRARY", "DOCUMENT_RECYCLE"), selectedCodes, catalogCodes);
+                Set.of("DOCUMENT_LIBRARY", "DOCUMENT_SEAL", "DOCUMENT_RECYCLE"), selectedCodes, catalogCodes);
         requireSelectedPageWhenCatalogExists("WEB_INSPECTION",
-                Set.of("INSPECTION_LEDGER", "INSPECTION_RECORDS"), selectedCodes, catalogCodes);
+                Set.of("INSPECTION_LEDGER", "INSPECTION_RECORDS", "INSPECTION_RECTIFICATIONS"), selectedCodes, catalogCodes);
         requireSelectedPageWhenCatalogExists("WEB_QUALITY",
                 Set.of("QUALITY_ISSUES", "QUALITY_DOCUMENTS"), selectedCodes, catalogCodes);
+        requireSelectedPageWhenCatalogExists("WEB_SITE_ACCESS",
+                Set.of("SITE_VISITOR"), selectedCodes, catalogCodes);
         if (selectedCodes.contains("WEB_SYSTEM")
                 && catalogCodes.stream().anyMatch(code -> code.startsWith("SYSTEM_"))
                 && selectedCodes.stream().noneMatch(code -> code.startsWith("SYSTEM_"))) {
@@ -941,13 +965,18 @@ public class SystemAdministrationService {
         String code = normalizePermissionCode(permission.getPermissionCode());
         if ("WEB_DOCUMENT".equals(module)) {
             if (!businessModuleCodes.contains("DOCUMENT")) return false;
-            if (!strictTabs || !catalogHasAny(catalogMenuCodes, "DOCUMENT_LIBRARY", "DOCUMENT_RECYCLE")) return true;
+            if (!strictTabs || !catalogHasAny(catalogMenuCodes,
+                    "DOCUMENT_LIBRARY", "DOCUMENT_SEAL", "DOCUMENT_RECYCLE")) return true;
+            if (Set.of("SEAL.VIEW", "SEAL.MANAGE", "SEAL.EXPORT").contains(code)) {
+                return selectedMenuCodes.contains("DOCUMENT_SEAL");
+            }
             if ("DOCUMENT.UPLOAD".equals(code)) return selectedMenuCodes.contains("DOCUMENT_LIBRARY");
             return selectedMenuCodes.contains("DOCUMENT_LIBRARY") || selectedMenuCodes.contains("DOCUMENT_RECYCLE");
         }
         if ("WEB_INSPECTION".equals(module)) {
             if (!businessModuleCodes.contains("INSPECTION")) return false;
-            if (!strictTabs || !catalogHasAny(catalogMenuCodes, "INSPECTION_LEDGER", "INSPECTION_RECORDS")) return true;
+            if (!strictTabs || !catalogHasAny(catalogMenuCodes,
+                    "INSPECTION_LEDGER", "INSPECTION_RECORDS", "INSPECTION_RECTIFICATIONS")) return true;
             if (INSPECTION_LEDGER_PERMISSION_CODES.contains(code) || "INSPECTION.MANAGE".equals(code)) {
                 return selectedMenuCodes.contains("INSPECTION_LEDGER");
             }
@@ -955,8 +984,12 @@ public class SystemAdministrationService {
                     || Set.of("INSPECTION.SUBMIT", "INSPECTION.EXPORT").contains(code)) {
                 return selectedMenuCodes.contains("INSPECTION_RECORDS");
             }
+            if (INSPECTION_RECTIFICATION_PERMISSION_CODES.contains(code)) {
+                return selectedMenuCodes.contains("INSPECTION_RECTIFICATIONS");
+            }
             return selectedMenuCodes.contains("INSPECTION_LEDGER")
-                    || selectedMenuCodes.contains("INSPECTION_RECORDS");
+                    || selectedMenuCodes.contains("INSPECTION_RECORDS")
+                    || selectedMenuCodes.contains("INSPECTION_RECTIFICATIONS");
         }
         if ("WEB_QUALITY".equals(module)) {
             if (!businessModuleCodes.contains("QUALITY")) return false;
@@ -965,6 +998,11 @@ public class SystemAdministrationService {
                 return selectedMenuCodes.contains("QUALITY_ISSUES");
             }
             return selectedMenuCodes.contains("QUALITY_ISSUES") || selectedMenuCodes.contains("QUALITY_DOCUMENTS");
+        }
+        if ("WEB_SITE_ACCESS".equals(module)) {
+            if (!businessModuleCodes.contains("SITE_ACCESS")) return false;
+            if (!strictTabs || !catalogHasAny(catalogMenuCodes, "SITE_VISITOR")) return true;
+            return selectedMenuCodes.contains("SITE_VISITOR");
         }
         if (StringUtils.hasText(module)) {
             return selectedMenuCodes.contains(module);
@@ -1037,7 +1075,7 @@ public class SystemAdministrationService {
         }
     }
 
-    private void validateRolePermissions(String scopeType, List<Long> permissionIds, boolean projectManagerRole) {
+    private void validateRolePermissions(String scopeType, List<Long> permissionIds) {
         if (permissionIds == null || permissionIds.isEmpty()) return;
         for (Long permissionId : permissionIds.stream().filter(Objects::nonNull).distinct().toList()) {
             SystemPermission permission = permissionMapper.selectById(permissionId);
@@ -1046,18 +1084,16 @@ public class SystemAdministrationService {
                 throw new BusinessException("操作权限不存在或已停用：" + permissionId);
             }
             String permissionCode = permission.getPermissionCode();
+            rejectRetiredPermission(permissionCode);
             if ("PROJECT".equalsIgnoreCase(scopeType) && StringUtils.hasText(permissionCode)) {
                 if (permissionCode.startsWith("system.")) {
                     throw BusinessException.of(400, "项目角色不能配置平台管理权限：" + permissionCode);
-                }
-                if (SystemPermissionCodes.PROJECT_MEMBER_MANAGE.equals(permissionCode) && !projectManagerRole) {
-                    throw BusinessException.of(400, "只有项目经理角色可以配置项目成员管理权限");
                 }
             }
         }
     }
 
-    private void validateRoleMenus(String scopeType, List<Long> menuIds, boolean projectManagerRole) {
+    private void validateRoleMenus(String scopeType, List<Long> menuIds) {
         if (menuIds == null || menuIds.isEmpty()) return;
         for (Long menuId : menuIds.stream().filter(Objects::nonNull).distinct().toList()) {
             SystemMenu menu = menuMapper.selectById(menuId);
@@ -1065,16 +1101,27 @@ public class SystemAdministrationService {
                     || Integer.valueOf(0).equals(menu.getEnabled())) {
                 throw new BusinessException("菜单不存在或已停用：" + menuId);
             }
-            if (!"PROJECT".equalsIgnoreCase(scopeType)) continue;
             String menuCode = menu.getMenuCode();
+            rejectRetiredMenu(menuCode);
+            if (!"PROJECT".equalsIgnoreCase(scopeType)) continue;
             if (StringUtils.hasText(menuCode) && menuCode.startsWith("SYSTEM_")) {
-                if (!projectManagerRole || !"SYSTEM_PROJECT".equals(menuCode)) {
-                    throw BusinessException.of(400, "项目角色不能配置平台管理菜单：" + menuCode);
-                }
+                throw BusinessException.of(400, "项目角色不能配置平台管理菜单：" + menuCode);
             }
-            if ("WEB_SYSTEM".equals(menuCode) && !projectManagerRole) {
-                throw BusinessException.of(400, "只有项目经理角色可以配置项目成员管理入口");
+            if ("WEB_SYSTEM".equals(menuCode)) {
+                throw BusinessException.of(400, "项目角色不能配置平台管理入口");
             }
+        }
+    }
+
+    private void rejectRetiredMenu(String menuCode) {
+        if (RETIRED_PROJECT_MEMBER_MENU.equalsIgnoreCase(trim(menuCode))) {
+            throw BusinessException.of(400, "项目成员与权限菜单已退役，请使用注册审核或用户管理分配项目与角色");
+        }
+    }
+
+    private void rejectRetiredPermission(String permissionCode) {
+        if (RETIRED_PROJECT_MEMBER_PERMISSION.equalsIgnoreCase(trim(permissionCode))) {
+            throw BusinessException.of(400, "项目成员管理权限已退役，请使用注册审核或用户管理分配项目与角色");
         }
     }
 

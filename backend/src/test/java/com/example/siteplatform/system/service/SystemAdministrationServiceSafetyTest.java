@@ -9,6 +9,7 @@ import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.common.PageResult;
 import com.example.siteplatform.log.mapper.OperationLogMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
+import com.example.siteplatform.project.entity.SysUserProject;
 import com.example.siteplatform.project.mapper.SysUserProjectRoleMapper;
 import com.example.siteplatform.project.service.InspectionPermissionTemplateService;
 import com.example.siteplatform.project.service.ProjectPermissionService;
@@ -57,6 +58,7 @@ class SystemAdministrationServiceSafetyTest {
     @Mock private OperationLogMapper operationLogMapper;
     @Mock private InspectionPermissionTemplateService inspectionTemplateService;
     @Mock private ProjectPermissionService projectPermissionService;
+    @Mock private ResponsibilityReleaseService responsibilityReleaseService;
     @Mock private AuthService authService;
     @Mock private PasswordCredentialService passwordCredentialService;
 
@@ -67,12 +69,13 @@ class SystemAdministrationServiceSafetyTest {
         service = new SystemAdministrationService(
                 userMapper, userProjectMapper, roleMapper, menuMapper, permissionMapper,
                 operationLogMapper, inspectionTemplateService, projectPermissionService,
-                authService, passwordCredentialService);
+                responsibilityReleaseService, authService, passwordCredentialService);
         ReflectionTestUtils.setField(service, "userProjectRoleMapper", userProjectRoleMapper);
         ReflectionTestUtils.setField(service, "roleBusinessModuleMapper", roleBusinessModuleMapper);
         lenient().when(userMapper.updateById(any(SysUser.class))).thenReturn(1);
         lenient().when(roleMapper.insert(any(SystemRole.class))).thenReturn(1);
         lenient().when(roleMapper.updateById(any(SystemRole.class))).thenReturn(1);
+        lenient().when(roleMapper.selectPlatformAdministratorForUpdate()).thenReturn(platformAdminRole());
         lenient().when(menuMapper.insert(any(SystemMenu.class))).thenReturn(1);
         lenient().when(menuMapper.updateById(any(SystemMenu.class))).thenReturn(1);
         lenient().when(permissionMapper.insert(any(SystemPermission.class))).thenReturn(1);
@@ -130,7 +133,7 @@ class SystemAdministrationServiceSafetyTest {
         SystemRole mutex = platformAdminRole();
         SysUser target = effectiveAdmin(2L);
         when(roleMapper.selectPlatformAdministratorForUpdate()).thenReturn(mutex);
-        when(userMapper.selectById(2L)).thenReturn(target);
+        when(userMapper.selectByIdForUpdate(2L)).thenReturn(target);
         when(passwordCredentialService.isBcrypt(target.getPassword())).thenReturn(true);
         when(userMapper.selectRoleCodesByUserId(2L)).thenReturn(List.of("PLATFORM_ADMIN"));
         when(userMapper.countActivePlatformAdministrators()).thenReturn(1L);
@@ -141,7 +144,7 @@ class SystemAdministrationServiceSafetyTest {
         assertTrue(exception.getMessage().contains("最后一个"));
         InOrder ordered = inOrder(roleMapper, userMapper);
         ordered.verify(roleMapper).selectPlatformAdministratorForUpdate();
-        ordered.verify(userMapper).selectById(2L);
+        ordered.verify(userMapper).selectByIdForUpdate(2L);
         ordered.verify(userMapper).selectRoleCodesByUserId(2L);
         ordered.verify(userMapper).countActivePlatformAdministrators();
         verify(userMapper, never()).updateById(any());
@@ -151,7 +154,7 @@ class SystemAdministrationServiceSafetyTest {
     @Test
     void accountStatusWriteFailureReturnsConflictWithoutRevokingSessionsOrAuditingSuccess() {
         SysUser target = ordinaryUser(2L);
-        when(userMapper.selectById(2L)).thenReturn(target);
+        when(userMapper.selectByIdForUpdate(2L)).thenReturn(target);
         when(userMapper.updateById(target)).thenReturn(0);
 
         BusinessException exception = assertThrows(BusinessException.class,
@@ -160,6 +163,35 @@ class SystemAdministrationServiceSafetyTest {
         assertEquals(409, exception.getCode());
         verify(authService, never()).logout(2L);
         verify(operationLogMapper, never()).insert(any());
+    }
+
+    @Test
+    void disablingAccountReleasesResponsibilitiesAcrossEveryMembership() {
+        SysUser target = ordinaryUser(2L);
+        SysUserProject first = new SysUserProject();
+        first.setProjectId(9L);
+        SysUserProject duplicate = new SysUserProject();
+        duplicate.setProjectId(9L);
+        SysUserProject second = new SysUserProject();
+        second.setProjectId(10L);
+        when(userMapper.selectByIdForUpdate(2L)).thenReturn(target);
+        when(userProjectMapper.selectList(any())).thenReturn(List.of(first, duplicate, second));
+
+        service.changeUserStatus(2L, 0, "离职", operator());
+
+        verify(responsibilityReleaseService).releaseAll(9L, 2L);
+        verify(responsibilityReleaseService).releaseAll(10L, 2L);
+        verify(authService).logout(2L);
+    }
+
+    @Test
+    void legacyWholeAccessReplacementIsFailClosed() {
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.assignAccess(2L, null, operator()));
+
+        assertEquals(410, exception.getCode());
+        verify(userMapper, never()).deleteUserRoles(2L);
+        verify(userProjectMapper, never()).delete(any());
     }
 
     @Test
@@ -280,6 +312,23 @@ class SystemAdministrationServiceSafetyTest {
     }
 
     @Test
+    void duplicateTrimmedRoleNameIsRejectedBeforeCreatingRole() {
+        when(roleMapper.selectCount(any())).thenReturn(1L);
+
+        RoleSaveRequest request = new RoleSaveRequest();
+        request.setRoleName("  电工  ");
+        request.setScopeType("PROJECT");
+        request.setEnabled(1);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.saveRole(null, request, operator()));
+
+        assertEquals(409, exception.getCode());
+        assertTrue(exception.getMessage().contains("角色名称已存在"));
+        verify(roleMapper, never()).insert(any(SystemRole.class));
+    }
+
+    @Test
     void menuUpdateRemovesPermissionsOutsideSelectedPages() {
         SystemRole projectRole = role(30L, "CUSTOM_REVIEWER", "PROJECT", 0, 1);
         SystemMenu webDocument = menu(200L, "WEB_DOCUMENT");
@@ -373,6 +422,64 @@ class SystemAdministrationServiceSafetyTest {
     }
 
     @Test
+    void sealManageAndExportPermissionsAddSealViewPrerequisite() {
+        SystemRole projectRole = role(30L, "CUSTOM_REVIEWER", "PROJECT", 0, 1);
+        SystemMenu webDocument = menu(200L, "WEB_DOCUMENT");
+        SystemMenu miniDocument = menu(201L, "MINI_DOCUMENT");
+        SystemMenu sealMenu = menu(202L, "DOCUMENT_SEAL");
+        sealMenu.setParentId(200L);
+        SystemPermission sealManage = permission(100L, "seal.manage");
+        SystemPermission sealExport = permission(101L, "seal.export");
+        SystemPermission sealView = permission(102L, "seal.view");
+        List<SystemPermission> permissions = List.of(sealManage, sealExport, sealView);
+        permissions.forEach(item -> item.setModuleCode("WEB_DOCUMENT"));
+        when(roleMapper.selectByIdForUpdate(30L)).thenReturn(projectRole);
+        when(roleMapper.selectMenuIds(30L)).thenReturn(List.of(200L, 201L, 202L));
+        when(roleBusinessModuleMapper.selectModuleCodesByRoleId(30L)).thenReturn(List.of("DOCUMENT"));
+        when(permissionMapper.selectById(100L)).thenReturn(sealManage);
+        when(permissionMapper.selectById(101L)).thenReturn(sealExport);
+        when(permissionMapper.selectById(102L)).thenReturn(sealView);
+        when(permissionMapper.selectList(any())).thenReturn(permissions);
+        when(menuMapper.selectList(any())).thenReturn(List.of(webDocument, miniDocument, sealMenu));
+        when(menuMapper.selectById(200L)).thenReturn(webDocument);
+        when(menuMapper.selectById(201L)).thenReturn(miniDocument);
+        when(menuMapper.selectById(202L)).thenReturn(sealMenu);
+
+        service.updateRoleOperationPermissions(30L, List.of(100L, 101L), operator());
+
+        verify(roleMapper).insertPermission(30L, 100L);
+        verify(roleMapper).insertPermission(30L, 101L);
+        verify(roleMapper).insertPermission(30L, 102L);
+    }
+
+    @Test
+    void sealPermissionRequiresSealPageInsteadOfAnyDocumentPage() {
+        SystemRole projectRole = role(30L, "CUSTOM_REVIEWER", "PROJECT", 0, 1);
+        SystemMenu webDocument = menu(200L, "WEB_DOCUMENT");
+        SystemMenu miniDocument = menu(201L, "MINI_DOCUMENT");
+        SystemMenu library = menu(202L, "DOCUMENT_LIBRARY");
+        library.setParentId(200L);
+        SystemMenu sealMenu = menu(203L, "DOCUMENT_SEAL");
+        sealMenu.setParentId(200L);
+        SystemPermission sealView = permission(100L, "seal.view");
+        sealView.setModuleCode("WEB_DOCUMENT");
+        when(roleMapper.selectByIdForUpdate(30L)).thenReturn(projectRole);
+        when(roleMapper.selectMenuIds(30L)).thenReturn(List.of(200L, 201L, 202L));
+        when(roleBusinessModuleMapper.selectModuleCodesByRoleId(30L)).thenReturn(List.of("DOCUMENT"));
+        when(permissionMapper.selectById(100L)).thenReturn(sealView);
+        when(menuMapper.selectList(any())).thenReturn(List.of(webDocument, miniDocument, library, sealMenu));
+        when(menuMapper.selectById(200L)).thenReturn(webDocument);
+        when(menuMapper.selectById(201L)).thenReturn(miniDocument);
+        when(menuMapper.selectById(202L)).thenReturn(library);
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.updateRoleOperationPermissions(30L, List.of(100L), operator()));
+
+        assertEquals(400, error.getCode());
+        verify(roleMapper, never()).deletePermissions(30L);
+    }
+
+    @Test
     void operationPermissionOutsideSelectedMenuIsRejected() {
         SystemRole projectRole = role(30L, "CUSTOM_REVIEWER", "PROJECT", 0, 1);
         SystemMenu webDocument = menu(200L, "WEB_DOCUMENT");
@@ -439,6 +546,36 @@ class SystemAdministrationServiceSafetyTest {
 
         assertEquals(400, exception.getCode());
         verify(roleMapper, never()).deleteMenus(30L);
+    }
+
+    @Test
+    void projectManagerCannotReceiveRetiredProjectMemberMenu() {
+        SystemRole projectManager = role(30L, "PROJECT_ADMIN", "PROJECT", 1, 1);
+        projectManager.setProjectManagerRole(1);
+        when(roleMapper.selectByIdForUpdate(30L)).thenReturn(projectManager);
+        when(menuMapper.selectById(200L)).thenReturn(menu(200L, "SYSTEM_PROJECT"));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.updateRolePermissions(30L, List.of(), List.of(200L), operator()));
+
+        assertEquals(400, exception.getCode());
+        assertTrue(exception.getMessage().contains("已退役"));
+        verify(roleMapper, never()).deleteMenus(30L);
+    }
+
+    @Test
+    void projectManagerCannotReceiveRetiredProjectMemberPermission() {
+        SystemRole projectManager = role(30L, "PROJECT_ADMIN", "PROJECT", 1, 1);
+        projectManager.setProjectManagerRole(1);
+        when(roleMapper.selectByIdForUpdate(30L)).thenReturn(projectManager);
+        when(permissionMapper.selectById(100L)).thenReturn(permission(100L, "project.member.manage"));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.updateRolePermissions(30L, List.of(100L), List.of(), operator()));
+
+        assertEquals(400, exception.getCode());
+        assertTrue(exception.getMessage().contains("已退役"));
+        verify(roleMapper, never()).deletePermissions(30L);
     }
 
     @Test

@@ -7,6 +7,14 @@ BACKEND_DIR="$ROOT_DIR/backend"
 WEB_DIR="$ROOT_DIR/frontend"
 MINIPROGRAM_DIR="$ROOT_DIR/wechat-miniprogram/site-platform-miniprogram"
 LOG_DIR="$ROOT_DIR/logs/dev-services"
+BACKEND_LOCAL_ENV_FILE="$BACKEND_DIR/.env.local"
+
+if [ -f "$BACKEND_LOCAL_ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$BACKEND_LOCAL_ENV_FILE"
+  set +a
+fi
 
 BACKEND_SESSION="dianxinyun-backend"
 WEB_SESSION="dianxinyun-web"
@@ -20,6 +28,8 @@ MINIPROGRAM_APP_JSON="$MINIPROGRAM_DIR/dist/dev/mp-weixin/app.json"
 REDIS_HOST="127.0.0.1"
 REDIS_PORT="${DIANXINYUN_REDIS_PORT:-6380}"
 REDIS_CLI_BIN="${REDIS_CLI_BIN:-}"
+WECHAT_MOCK_ENABLED="${WECHAT_MINI_PROGRAM_MOCK_ENABLED:-true}"
+WECHAT_ENV_VERSION="${WECHAT_MINI_PROGRAM_ENV_VERSION:-release}"
 
 mkdir -p "$LOG_DIR"
 
@@ -139,6 +149,21 @@ check_dependencies() {
   if ! "$REDIS_CLI_BIN" -h "$REDIS_HOST" -p "$REDIS_PORT" ping >/dev/null 2>&1; then
     fail "Redis 未运行，请先启动本机 Redis（${REDIS_HOST}:${REDIS_PORT}）"
   fi
+
+  case "$WECHAT_MOCK_ENABLED" in
+    true|false) ;;
+    *) fail "WECHAT_MINI_PROGRAM_MOCK_ENABLED 只能是 true 或 false" ;;
+  esac
+
+  case "$WECHAT_ENV_VERSION" in
+    develop|trial|release) ;;
+    *) fail "WECHAT_MINI_PROGRAM_ENV_VERSION 只能是 develop、trial 或 release" ;;
+  esac
+
+  if [ "$WECHAT_MOCK_ENABLED" = "false" ]; then
+    [ -n "${WECHAT_MINI_PROGRAM_APP_ID:-}" ] || fail "真实微信模式缺少 WECHAT_MINI_PROGRAM_APP_ID"
+    [ -n "${WECHAT_MINI_PROGRAM_APP_SECRET:-}" ] || fail "真实微信模式缺少 WECHAT_MINI_PROGRAM_APP_SECRET"
+  fi
 }
 
 start_backend() {
@@ -153,7 +178,7 @@ start_backend() {
 
   : > "$LOG_DIR/backend.log"
   screen -dmS "$BACKEND_SESSION" bash -lc \
-    "cd '$BACKEND_DIR' && exec env SPRING_PROFILES_ACTIVE='local' WECHAT_MINI_PROGRAM_MOCK_ENABLED='true' REDIS_HOST='$REDIS_HOST' REDIS_PORT='$REDIS_PORT' KNIFE4J_ENABLE='true' API_DOCS_ENABLED='true' SWAGGER_UI_ENABLED='true' mvn spring-boot:run >> '$LOG_DIR/backend.log' 2>&1"
+    "cd '$BACKEND_DIR' && exec env SPRING_PROFILES_ACTIVE='local' WECHAT_MINI_PROGRAM_MOCK_ENABLED='$WECHAT_MOCK_ENABLED' WECHAT_MINI_PROGRAM_ENV_VERSION='$WECHAT_ENV_VERSION' REDIS_HOST='$REDIS_HOST' REDIS_PORT='$REDIS_PORT' KNIFE4J_ENABLE='true' API_DOCS_ENABLED='true' SWAGGER_UI_ENABLED='true' mvn spring-boot:run >> '$LOG_DIR/backend.log' 2>&1"
   wait_for_http "共享后端" "$BACKEND_URL" 90
 }
 

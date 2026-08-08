@@ -52,6 +52,9 @@ public class FileResourceService {
         if (isProjectDocument(file.getBusinessType())) {
             throw BusinessException.forbidden("工程资料请通过资料管理接口访问");
         }
+        if (normalizeBusinessType(file.getBusinessType()).startsWith("SEAL_")) {
+            throw BusinessException.forbidden("用印附件请通过用印申请专属接口访问");
+        }
         if (file.getProjectId() == null) {
             if (!permissionService.isPlatformAdmin(currentUser.getId())) {
                 throw BusinessException.forbidden("无文件访问权限");
@@ -82,6 +85,27 @@ public class FileResourceService {
                 && permissionService.canManagePersonnel(currentUser.getId(), file.getProjectId())) return;
         if (permissionService.canManageProject(currentUser.getId(), file.getProjectId())) return;
         throw BusinessException.forbidden("无文件管理权限");
+    }
+
+    /**
+     * 通用删除接口只承担表单失败后未绑定暂存附件的自助清理。
+     * 正式资料及已绑定业务附件必须由平台管理员走带影响预览的一次性确认流程。
+     */
+    public void checkTemporaryDelete(SysUser currentUser, FileResource file) {
+        checkRead(currentUser, file);
+        String businessType = normalizeBusinessType(file.getBusinessType());
+        boolean temporary = file.getBusinessId() == null
+                && (businessType.endsWith("_PENDING")
+                || businessType.equals("INSPECTION_RECORD")
+                || businessType.equals("INSPECTION_RECTIFICATION"));
+        if (!temporary) {
+            throw BusinessException.forbidden("正式资料或已绑定业务附件只能由平台管理员确认影响后删除");
+        }
+        if (!permissionService.isPlatformAdmin(currentUser.getId())
+                && !Objects.equals(file.getUploaderId(), currentUser.getId())) {
+            throw BusinessException.forbidden("只能清理本人尚未绑定业务的暂存附件");
+        }
+        checkWrite(currentUser, file);
     }
 
     public List<Long> authorizedProjectIds(SysUser currentUser) {
@@ -130,6 +154,24 @@ public class FileResourceService {
         String normalized = normalizeBusinessType(businessType);
         if (BUSINESS_PROJECT_DOCUMENT.equals(normalized)) {
             throw BusinessException.forbidden("工程资料请通过资料管理模块上传");
+        }
+        if (normalized.startsWith("SEAL_")) {
+            throw BusinessException.forbidden("用印附件请通过用印申请专属接口上传");
+        }
+        if (normalized.startsWith("INSPECTION_")) {
+            if (!Set.of("INSPECTION_RECORD", "INSPECTION_RECTIFICATION").contains(normalized)) {
+                throw new BusinessException("不支持的巡检附件类型");
+            }
+            if (businessId != null) {
+                throw new BusinessException("巡检附件上传时不能直接指定业务记录");
+            }
+            permissionService.requireSystemPermission(currentUser.getId(), projectId,
+                    SystemPermissionCodes.INSPECTION_VIEW);
+            permissionService.requireSystemPermission(currentUser.getId(), projectId,
+                    "INSPECTION_RECTIFICATION".equals(normalized)
+                            ? SystemPermissionCodes.INSPECTION_RECTIFY
+                            : SystemPermissionCodes.INSPECTION_SUBMIT);
+            return normalized;
         }
         if (!normalized.startsWith("QUALITY_")) {
             return businessType;

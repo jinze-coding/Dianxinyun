@@ -4,7 +4,6 @@ import {
   batchProjectDocuments,
   createDocumentFolder,
   createProjectDocument,
-  deleteDocumentFolder,
   deleteProjectDocument,
   downloadProjectDocument,
   getDocumentFolders,
@@ -13,13 +12,13 @@ import {
   getProjectDocuments,
   getProjectDocumentSummary,
   previewProjectDocument,
-  purgeProjectDocument,
   restoreProjectDocument,
   unarchiveProjectDocument,
   updateDocumentFolder,
   updateProjectDocument,
   uploadProjectDocumentVersion,
 } from '../../services/document';
+import { confirmAdministrativeDeletion } from '../../services/administrativeDeletion';
 import { collectProjectMenuCodes, hasProjectPermission, isPlatformAdmin } from '../../utils/permissions';
 import { pageMenuAllowed } from '../../utils/roleAuthorization';
 import './index.css';
@@ -63,7 +62,7 @@ function Modal({ title, subtitle, children, footer, onClose, wide = false }) {
   );
 }
 
-function FolderTree({ folders, selectedId, onSelect, onCreate, onRename, onDelete, recycle, onRecycle, canManage, canAccessRecycle }) {
+function FolderTree({ folders, selectedId, onSelect, onCreate, onRename, onDelete, recycle, onRecycle, canManage, canDelete, canAccessRecycle }) {
   return (
     <aside className="dm-folders">
       <div className="dm-panel-heading">
@@ -85,9 +84,9 @@ function FolderTree({ folders, selectedId, onSelect, onCreate, onRename, onDelet
           <span>{folder.folderName}</span>
           <small>{folder.documentCount || 0}</small>
         </button>
-        {canManage && <div className="dm-folder-actions">
-          <button title="重命名" onClick={() => onRename(folder)}>✎</button>
-          <button title="删除目录" onClick={() => onDelete(folder)}>×</button>
+        {(canManage || canDelete) && <div className="dm-folder-actions">
+          {canManage && <button title="重命名" onClick={() => onRename(folder)}>✎</button>}
+          {canDelete && <button title="永久删除目录" onClick={() => onDelete(folder)}>×</button>}
         </div>}
           </div>
         ))}
@@ -124,11 +123,12 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
   const [submitting, setSubmitting] = useState(false);
   const [menuNotice, setMenuNotice] = useState('');
 
-  const projectName = projectList?.find((item) => item.id === projectId)?.projectName || '当前作业区域';
+  const projectName = projectList?.find((item) => item.id === projectId)?.projectName || '当前项目';
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const allSelected = documents.length > 0 && documents.every((item) => selectedIds.includes(item.id));
   const canManage = summary.canManage === true
     && (isPlatformAdmin(currentUser) || hasProjectPermission(currentUser, projectId, 'document.manage'));
+  const canDelete = isPlatformAdmin(currentUser);
   const canUpload = isPlatformAdmin(currentUser)
     || hasProjectPermission(currentUser, projectId, 'document.upload');
   const projectMenuCodes = collectProjectMenuCodes(currentUser, projectId);
@@ -245,6 +245,7 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
       if (successText) window.setTimeout(() => {}, 0);
       return true;
     } catch (error) {
+      if (error?.cancelled) return false;
       alert(errorMessage(error, successText || '操作失败'));
       return false;
     } finally {
@@ -265,8 +266,10 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
   };
 
   const removeFolder = async (folder) => {
-    if (!window.confirm(`确认删除空目录“${folder.folderName}”？`)) return;
-    await runAction(async () => responseData(await deleteDocumentFolder(folder.id), '目录删除失败'), '目录删除失败');
+    await runAction(async () => {
+      const deleted = await confirmAdministrativeDeletion('DOCUMENT_FOLDER', folder.id);
+      if (!deleted) throw Object.assign(new Error('已取消删除'), { cancelled: true });
+    }, '目录永久删除失败');
   };
 
   const submitUpload = async () => {
@@ -310,10 +313,14 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
 
   const handleRecycleAction = async (document, purge) => {
     const label = purge ? '永久删除' : '恢复';
-    if (purge && !window.confirm(`永久删除《${document.title}》及全部版本文件？此操作不可恢复。`)) return;
-    await runAction(async () => responseData(
-      purge ? await purgeProjectDocument(document.id) : await restoreProjectDocument(document.id), `${label}失败`,
-    ), `${label}失败`);
+    if (purge) {
+      await runAction(async () => {
+        const deleted = await confirmAdministrativeDeletion('PROJECT_DOCUMENT', document.id);
+        if (!deleted) throw Object.assign(new Error('已取消删除'), { cancelled: true });
+      }, `${label}失败`);
+      return;
+    }
+    await runAction(async () => responseData(await restoreProjectDocument(document.id), `${label}失败`), `${label}失败`);
   };
 
   const submitBatch = async (action, folderId) => {
@@ -394,6 +401,7 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
           selectedId={selectedFolder}
           recycle={recycle}
           canManage={canManage}
+          canDelete={canDelete}
           canAccessRecycle={canViewRecycle}
           onSelect={(id) => { if (canViewLibrary) { setSelectedFolder(id); setRecycle(false); setMenuNotice(''); setPageNo(1); } }}
           onCreate={() => setFolderState({ name: '' })}
@@ -425,7 +433,7 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
               <span>已选 {selectedIds.length} 项</span>
               <button onClick={() => setMoveState({ folderId: 0 })}>移动</button>
               <button onClick={() => submitBatch('ARCHIVE')}>归档</button>
-              <button className="is-danger" onClick={() => window.confirm('将所选资料移入回收站？') && submitBatch('DELETE')}>删除</button>
+              {canDelete && <button className="is-danger" onClick={() => window.confirm('将所选资料移入回收站？') && submitBatch('DELETE')}>删除</button>}
               <button onClick={() => setSelectedIds([])}>取消选择</button>
             </div>
           )}
@@ -456,7 +464,7 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
                       <td><div className="dm-row-actions">
                         {recycle ? <>
                           <button onClick={() => handleRecycleAction(document, false)}>恢复</button>
-                          <button className="is-danger" onClick={() => handleRecycleAction(document, true)}>永久删除</button>
+                          {canDelete && <button className="is-danger" onClick={() => handleRecycleAction(document, true)}>永久删除</button>}
                         </> : <>
                           <button onClick={() => openPreview(document)}>预览</button>
                           <button onClick={() => download(document)}>下载</button>
@@ -492,7 +500,7 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
                 {detail.document.canEdit && canUpload && detail.document.status === 'ACTIVE' && <button onClick={() => setVersionState({ document: detail.document, file: null, changeNote: '' })}>上传新版本</button>}
                 {detail.document.canEdit && <button onClick={() => setEditState({ document: detail.document, form: { folderId: detail.document.folderId, documentNo: detail.document.documentNo || '', title: detail.document.title, remark: detail.document.remark || '' } })}>编辑属性</button>}
                 {detail.document.canEdit && <button onClick={() => handleArchive(detail.document)}>{detail.document.status === 'ARCHIVED' ? '恢复归档' : '归档'}</button>}
-                {detail.document.canEdit && <button className="is-danger" onClick={() => handleDelete(detail.document)}>删除</button>}
+                {canDelete && <button className="is-danger" onClick={() => handleDelete(detail.document)}>删除</button>}
               </div>
               <div className="dm-drawer-scroll">
                 <section className="dm-detail-section"><h3>资料属性</h3><dl>

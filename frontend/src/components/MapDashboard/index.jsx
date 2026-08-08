@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addProject,
-  deleteProject,
   getProjectMapPoints,
   updateProjectLocation,
 } from '../../services/project';
+import { confirmAdministrativeDeletion } from '../../services/administrativeDeletion';
 import { loadBaiduMap } from '../../utils/loadBaiduMap';
 
 const STATUS_COLORS = {
@@ -79,7 +79,13 @@ function buildInfoWindowContent(project, onNavigate) {
   return container;
 }
 
-export default function MapDashboard({ theme: T, onNavigate, projectList = [], onRefreshProjects }) {
+export default function MapDashboard({
+  theme: T,
+  onNavigate,
+  projectList = [],
+  onRefreshProjects,
+  canManageProjects = false,
+}) {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -449,20 +455,15 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
 
   const handleDeleteProject = async (project, event) => {
     event.stopPropagation();
-    if (!window.confirm(`仅空项目可以删除。确认删除项目“${project.projectName}”？`)) return;
-
     try {
-      const res = await deleteProject(project.id);
-      if (res.code !== 200) {
-        window.alert(res.message || '删除失败');
-        return;
-      }
+      const deleted = await confirmAdministrativeDeletion('PROJECT', project.id);
+      if (!deleted) return;
       setProjects((prev) => prev.filter((item) => item.id !== project.id));
       if (activeProjectId === project.id) setActiveProjectId(null);
       await syncAfterProjectChanged();
     } catch (e) {
       console.error('删除项目失败', e);
-      window.alert(e?.response?.data?.message || '删除失败，请确认后端服务正常');
+      window.alert(e?.message || '删除失败，请确认后端服务正常');
     }
   };
 
@@ -541,24 +542,26 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
             <div style={{ fontSize: 18, fontWeight: 800, color: T.textPrimary, letterSpacing: 0.5 }}>
               项目列表
             </div>
-            <button
-              onClick={() => setShowProjectManage((value) => !value)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                border: `1px solid ${T.accent}`,
-                background: showProjectManage ? T.accent : T.activeItemBg,
-                color: showProjectManage ? '#fff' : T.accent,
-                borderRadius: 7,
-                padding: '6px 11px',
-                fontSize: 12,
-                cursor: 'pointer',
-                fontWeight: 700,
-              }}
-            >
-              项目管理
-            </button>
+            {canManageProjects && (
+              <button
+                onClick={() => setShowProjectManage((value) => !value)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  border: `1px solid ${T.accent}`,
+                  background: showProjectManage ? T.accent : T.activeItemBg,
+                  color: showProjectManage ? '#fff' : T.accent,
+                  borderRadius: 7,
+                  padding: '6px 11px',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                }}
+              >
+                项目管理
+              </button>
+            )}
           </div>
           <div style={{ fontSize: 12, color: T.textMuted, marginTop: 6 }}>
             共 {projects.length} 个项目
@@ -585,7 +588,7 @@ export default function MapDashboard({ theme: T, onNavigate, projectList = [], o
           />
         </div>
 
-        {showProjectManage && (
+        {canManageProjects && showProjectManage && (
           <div style={{ borderBottom: `1px solid ${T.borderColor}`, padding: 12, background: T.surface2 }}>
             <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
               <input

@@ -52,6 +52,8 @@ public class ProjectPermissionService {
     public static final String ROLE_PROJECT_ADMIN = "PROJECT_ADMIN";
     public static final String ROLE_SAFETY_ADMIN = "SAFETY_ADMIN";
     public static final String ROLE_USER = "USER";
+    public static final String ROLE_ELECTRICIAN = "ELECTRICIAN";
+    public static final String ROLE_SAFETY_OFFICER = "SAFETY_OFFICER";
 
     public boolean isPlatformAdmin(Long userId) {
         return hasRole(userId, ROLE_PLATFORM_ADMIN);
@@ -243,6 +245,11 @@ public class ProjectPermissionService {
     }
 
     public List<ProjectInfo> getUserProjects(Long userId) {
+        if (isPlatformAdmin(userId)) {
+            return projectMapper.selectList(new LambdaQueryWrapper<ProjectInfo>()
+                    .eq(ProjectInfo::getDeleted, 0)
+                    .orderByAsc(ProjectInfo::getId));
+        }
         String cacheKey = USER_PROJECTS_CACHE_PREFIX + userId;
 
         Object cachedProjectIds = redisTemplate.opsForValue().get(cacheKey);

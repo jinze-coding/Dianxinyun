@@ -1,4 +1,8 @@
-import { post } from './api';
+import { get, post } from './api';
+
+export function searchRegistrationProjects(keyword = '') {
+  return get('/registration-applications/project-options', { keyword });
+}
 
 export function submitRegistrationApplication(data) {
   return post('/registration-applications', data);

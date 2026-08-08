@@ -7,6 +7,7 @@ import { USE_MOCK } from '@/api/request';
 const USER_CACHE_KEY = 'site_platform_current_user';
 const RESUME_URL_KEY = 'site_platform_auth_resume_url';
 const CURRENT_PROJECT_KEY = 'site_platform_current_project_id';
+const PERSONAL_TODO_PAGE = '/pages/todo/index';
 
 const state = reactive<{
   user: User | null;
@@ -17,6 +18,11 @@ const state = reactive<{
 });
 
 const ROOT_PAGE_RULES = [
+  {
+    path: PERSONAL_TODO_PAGE,
+    miniMenuCodes: [],
+    legacyMenuCodes: []
+  },
   {
     path: '/pages/documents/index',
     miniMenuCodes: ['MINI_DOCUMENT'],
@@ -133,6 +139,9 @@ function canAccessRoot(path: string, user: User | null = state.user): boolean {
   const rule = ROOT_PAGE_RULES.find((item) => item.path === path);
   if (!rule || rule.path === '/pages/profile/index') return true;
   if (!user) return false;
+  // 个人待办是所有已登录用户的基础工作台，不依赖项目业务菜单。
+  if (rule.path === PERSONAL_TODO_PAGE) return true;
+  if (user.roles?.includes('PLATFORM_ADMIN')) return true;
   const projectIds = activeProjectIds(user);
   const projectMenus = projectIds.flatMap((projectId) => collectProjectMenuCodes(user, projectId));
   const menus = flattenMenus(user);
@@ -285,6 +294,7 @@ export function useAuthStore() {
     requiresInitialPasswordSetup,
     navigateAfterLogin,
     rememberResumeUrl,
+    takeResumeUrl,
     ensureRootAccess,
     ensurePageAccess,
     hasProjectPermission: (projectId: number, ...permissionCodes: string[]) =>

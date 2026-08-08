@@ -13,13 +13,16 @@ import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.common.PageResult;
 import com.example.siteplatform.log.entity.OperationLog;
 import com.example.siteplatform.log.mapper.OperationLogMapper;
+import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.entity.SysUserProject;
 import com.example.siteplatform.project.entity.SysUserProjectRole;
+import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectRoleMapper;
 import com.example.siteplatform.project.service.InspectionPermissionTemplateService;
 import com.example.siteplatform.project.service.ProjectPermissionService;
 import com.example.siteplatform.registration.dto.RegistrationApplicationVO;
+import com.example.siteplatform.registration.dto.RegistrationProjectOptionVO;
 import com.example.siteplatform.registration.dto.RegistrationReviewRequest;
 import com.example.siteplatform.registration.dto.RegistrationSubmitRequest;
 import com.example.siteplatform.registration.dto.RegistrationSubmitResponse;
@@ -39,8 +42,12 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Base64;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 
 @Service
 public class RegistrationApplicationService {
@@ -58,6 +65,7 @@ public class RegistrationApplicationService {
     private final WechatAuthService wechatAuthService;
     private final OperationLogMapper operationLogMapper;
     private final ObjectMapper objectMapper;
+    private final ProjectInfoMapper projectInfoMapper;
     private final SecureRandom secureRandom = new SecureRandom();
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -71,7 +79,7 @@ public class RegistrationApplicationService {
                                           InspectionPermissionTemplateService inspectionTemplateService,
                                           AuthService authService, CaptchaService captchaService,
                                           WechatAuthService wechatAuthService, OperationLogMapper operationLogMapper,
-                                          ObjectMapper objectMapper) {
+                                          ObjectMapper objectMapper, ProjectInfoMapper projectInfoMapper) {
         this.applicationMapper = applicationMapper;
         this.userMapper = userMapper;
         this.roleMapper = roleMapper;
@@ -82,6 +90,37 @@ public class RegistrationApplicationService {
         this.wechatAuthService = wechatAuthService;
         this.operationLogMapper = operationLogMapper;
         this.objectMapper = objectMapper;
+        this.projectInfoMapper = projectInfoMapper;
+    }
+
+    public List<RegistrationProjectOptionVO> searchProjectOptions(String keyword) {
+        String normalized = trimToNull(keyword);
+        if (normalized != null && normalized.length() < 2) {
+            throw new BusinessException("请至少输入2个字符搜索项目");
+        }
+        if (normalized != null && normalized.length() > 50) {
+            throw new BusinessException("项目搜索关键词不能超过50个字符");
+        }
+        LambdaQueryWrapper<ProjectInfo> query = new LambdaQueryWrapper<>();
+        if (normalized != null) {
+            query.and(wrapper -> wrapper.like(ProjectInfo::getProjectName, normalized)
+                    .or().like(ProjectInfo::getShortName, normalized));
+        }
+        query.and(wrapper -> wrapper.isNull(ProjectInfo::getProjectStatus)
+                        .or().ne(ProjectInfo::getProjectStatus, "stopped"))
+                .last("LIMIT 100");
+        String lowered = normalized == null ? null : normalized.toLowerCase(Locale.ROOT);
+        Comparator<ProjectInfo> comparator = normalized == null
+                ? Comparator.comparing(ProjectInfo::getId)
+                : Comparator.comparingInt((ProjectInfo project) -> matchPriority(project, lowered))
+                        .thenComparing(project -> Objects.toString(project.getProjectName(), ""))
+                        .thenComparing(ProjectInfo::getId);
+        return projectInfoMapper.selectList(query)
+                .stream()
+                .sorted(comparator)
+                .limit(20)
+                .map(project -> toProjectOption(project, true))
+                .toList();
     }
 
     @Transactional
@@ -93,6 +132,8 @@ public class RegistrationApplicationService {
                 ? request.getSourceType() : request.getSource());
         String registrationMode = normalizeRegistrationMode(request.getRegistrationMode(), source);
         boolean wechatQuick = REGISTRATION_MODE_WECHAT_QUICK.equals(registrationMode);
+        // 项目选择校验不产生验证码或微信 code 消费副作用，必须最先完成。
+        List<Long> desiredProjects = normalizeAndValidateDesiredProjects(request);
         if (wechatQuick && (!StringUtils.hasText(request.getWechatCode()) || !StringUtils.hasText(request.getPhoneCode()))) {
             throw new BusinessException("微信快捷注册需要重新授权微信身份和手机号");
         }
@@ -143,10 +184,6 @@ public class RegistrationApplicationService {
         application.setEmail(trimToNull(request.getEmail()));
         application.setApplicationReason(trimToNull(StringUtils.hasText(request.getApplicationReason())
                 ? request.getApplicationReason() : request.getReason()));
-        List<Long> desiredProjects = request.getDesiredProjectIds();
-        if ((desiredProjects == null || desiredProjects.isEmpty()) && request.getRequestedProjectId() != null) {
-            desiredProjects = List.of(request.getRequestedProjectId());
-        }
         application.setDesiredProjectIds(writeProjectIds(desiredProjects));
         application.setDesiredProjectText(trimToNull(StringUtils.hasText(request.getDesiredProjectText())
                 ? request.getDesiredProjectText() : request.getDesiredProjectName()));
@@ -237,6 +274,9 @@ public class RegistrationApplicationService {
         if (request == null || !StringUtils.hasText(request.getReviewComment())) {
             throw new BusinessException("审批意见不能为空");
         }
+        if (request.getProjectAssignments() == null || request.getProjectAssignments().isEmpty()) {
+            throw new BusinessException("请至少为一个项目分配角色");
+        }
         // 注册审核只创建普通系统账号和项目成员关系；平台全局身份不属于业务授权，
         // 只能由系统初始化或受保护运维流程维护。必须在建账号前校验，避免出现可回滚范围外的副作用。
         if (request.getRoleIds() != null && !request.getRoleIds().isEmpty()) {
@@ -278,7 +318,7 @@ public class RegistrationApplicationService {
         if (finishApplication(application) != 1) {
             throw conflict("注册申请状态已变化，请刷新后重试");
         }
-        record(application, reviewer, "APPROVE_REGISTRATION");
+        record(application, reviewer, "APPROVE_REGISTRATION", approvalAuditDetail(application, request));
         return toVO(application);
     }
 
@@ -291,12 +331,13 @@ public class RegistrationApplicationService {
         if (finishApplication(application) != 1) {
             throw conflict("注册申请状态已变化，请刷新后重试");
         }
-        record(application, reviewer, "REJECT_REGISTRATION");
+        record(application, reviewer, "REJECT_REGISTRATION", null);
         return toVO(application);
     }
 
     private void createProjectAssignment(Long userId, RegistrationReviewRequest.ProjectAssignment assignment) {
         if (assignment == null || assignment.getProjectId() == null) throw new BusinessException("项目授权不能为空");
+        requireAvailableProject(assignment.getProjectId());
         if (assignment.getRoleIds() == null || assignment.getRoleIds().isEmpty()) {
             throw new BusinessException("项目至少需要分配一个项目角色");
         }
@@ -403,12 +444,15 @@ public class RegistrationApplicationService {
                         .set("update_time", application.getUpdateTime()));
     }
 
-    private void record(RegistrationApplication application, SysUser reviewer, String operationType) {
+    private void record(RegistrationApplication application, SysUser reviewer,
+                        String operationType, String detail) {
         OperationLog log = new OperationLog();
         log.setUserId(reviewer.getId());
         log.setUsername(reviewer.getUsername());
         log.setOperationType(operationType);
-        log.setOperationDesc(operationType + "：" + application.getUsername());
+        String description = operationType + "：" + application.getUsername()
+                + (StringUtils.hasText(detail) ? "；" + detail : "");
+        log.setOperationDesc(description.length() > 500 ? description.substring(0, 500) : description);
         log.setBusinessType("REGISTRATION_APPLICATION");
         log.setBusinessId(application.getId());
         log.setCreateTime(LocalDateTime.now());
@@ -423,7 +467,9 @@ public class RegistrationApplicationService {
         vo.setPhone(application.getPhone());
         vo.setEmail(application.getEmail());
         vo.setApplicationReason(application.getApplicationReason());
-        vo.setDesiredProjectIds(readProjectIds(application.getDesiredProjectIds()));
+        List<Long> desiredProjectIds = readProjectIds(application.getDesiredProjectIds());
+        vo.setDesiredProjectIds(desiredProjectIds);
+        vo.setDesiredProjects(resolveProjectOptions(desiredProjectIds));
         vo.setDesiredProjectText(application.getDesiredProjectText());
         vo.setSourceType(application.getSourceType());
         vo.setRegistrationMode(application.getRegistrationMode());
@@ -464,6 +510,87 @@ public class RegistrationApplicationService {
     private String normalizePhoneVerification(String type) {
         String value = StringUtils.hasText(type) ? type.trim().toUpperCase(Locale.ROOT) : "MANUAL";
         return "WECHAT".equals(value) ? "WECHAT" : "MANUAL";
+    }
+
+    private List<Long> normalizeAndValidateDesiredProjects(RegistrationSubmitRequest request) {
+        List<Long> submitted = request.getDesiredProjectIds();
+        if ((submitted == null || submitted.isEmpty()) && request.getRequestedProjectId() != null) {
+            submitted = List.of(request.getRequestedProjectId());
+        }
+        if (submitted == null || submitted.isEmpty()) {
+            throw new BusinessException("请至少选择一个申请项目");
+        }
+        if (submitted.size() > 50) {
+            throw new BusinessException("意向项目最多选择50个");
+        }
+        LinkedHashMap<Long, Boolean> unique = new LinkedHashMap<>();
+        for (Long projectId : submitted) {
+            if (projectId == null || projectId <= 0) {
+                throw new BusinessException("项目ID必须为正数");
+            }
+            unique.put(projectId, Boolean.TRUE);
+        }
+        List<Long> projectIds = List.copyOf(unique.keySet());
+        Map<Long, ProjectInfo> projectsById = projectInfoMapper.selectBatchIds(projectIds).stream()
+                .collect(java.util.stream.Collectors.toMap(ProjectInfo::getId, project -> project));
+        for (Long projectId : projectIds) {
+            ProjectInfo project = projectsById.get(projectId);
+            if (!isAvailableProject(project)) {
+                throw new BusinessException("所选项目不存在或当前不可申请：" + projectId);
+            }
+        }
+        return projectIds;
+    }
+
+    private ProjectInfo requireAvailableProject(Long projectId) {
+        ProjectInfo project = projectInfoMapper.selectById(projectId);
+        if (!isAvailableProject(project)) {
+            throw new BusinessException("项目不存在或当前不可授权：" + projectId);
+        }
+        return project;
+    }
+
+    private boolean isAvailableProject(ProjectInfo project) {
+        return project != null && !"stopped".equalsIgnoreCase(project.getProjectStatus());
+    }
+
+    private int matchPriority(ProjectInfo project, String loweredKeyword) {
+        String projectName = Objects.toString(project.getProjectName(), "").toLowerCase(Locale.ROOT);
+        String shortName = Objects.toString(project.getShortName(), "").toLowerCase(Locale.ROOT);
+        if (projectName.equals(loweredKeyword) || shortName.equals(loweredKeyword)) return 0;
+        if (projectName.startsWith(loweredKeyword) || shortName.startsWith(loweredKeyword)) return 1;
+        return 2;
+    }
+
+    private RegistrationProjectOptionVO toProjectOption(ProjectInfo project, boolean available) {
+        return new RegistrationProjectOptionVO(project.getId(), project.getProjectName(),
+                project.getShortName(), project.getArea(), available);
+    }
+
+    private List<RegistrationProjectOptionVO> resolveProjectOptions(List<Long> projectIds) {
+        if (projectIds == null || projectIds.isEmpty()) return List.of();
+        Map<Long, ProjectInfo> projectsById = projectInfoMapper.selectBatchIds(projectIds).stream()
+                .collect(java.util.stream.Collectors.toMap(ProjectInfo::getId, project -> project));
+        List<RegistrationProjectOptionVO> result = new java.util.ArrayList<>();
+        for (Long projectId : projectIds) {
+            ProjectInfo project = projectsById.get(projectId);
+            if (project == null) {
+                result.add(new RegistrationProjectOptionVO(projectId,
+                        "项目 " + projectId + "（已不可用）", null, null, false));
+            } else {
+                result.add(toProjectOption(project, isAvailableProject(project)));
+            }
+        }
+        return result;
+    }
+
+    private String approvalAuditDetail(RegistrationApplication application, RegistrationReviewRequest request) {
+        String requested = readProjectIds(application.getDesiredProjectIds()).toString();
+        String approved = request.getProjectAssignments().stream()
+                .filter(Objects::nonNull)
+                .map(item -> item.getProjectId() + ":" + Objects.toString(item.getRoleIds(), "[]"))
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+        return "申请项目=" + requested + "；批准项目角色=" + approved;
     }
 
     private String writeProjectIds(List<Long> projectIds) {

@@ -4,7 +4,6 @@ import {
   createSystemMenu,
   createSystemPermission,
   createSystemRole,
-  deleteSystemRole,
   getSystemAuditLogs,
   getSystemMenus,
   getSystemPermissions,
@@ -21,24 +20,16 @@ import {
   updateSystemRole,
   updateSystemRoleMenus,
   updateSystemRoleOperationPermissions,
+  previewSystemUserProjectRoleAssignments,
   updateSystemUserProjectRoleAssignments,
   updateSystemUserStatus,
   updateSystemWechatBindingStatus,
 } from '../../services/systemManagement';
+import { confirmAdministrativeDeletion } from '../../services/administrativeDeletion';
 import {
-  getProjectMemberAssignmentOptions,
-  getAssignableProjectRoles,
-  getProjectUserOptions,
   updateProjectMemberStatus,
-  updateProjectRoleAssignments,
 } from '../../services/projectMembers';
 import {
-  approveWechatAccessApplication,
-  getWechatAccessApplications,
-  rejectWechatAccessApplication,
-} from '../../services/wechatAccess';
-import {
-  hasAssignedProjectMenu,
   hasPermission,
   hasProjectPermission,
   isPlatformAdmin,
@@ -50,6 +41,7 @@ import {
   buildRoleMenuTree,
   filterActionsByMenus,
   groupPermissionActions,
+  isDuplicateRoleName,
   menuNodeState,
   permissionIdsForActionKeys,
   selectedActionKeys,
@@ -61,13 +53,16 @@ import {
 import {
   assignmentChanges,
   assignmentChangeSummary,
-  assignmentNodeChanged,
+  assignmentRoleIdsForNode,
   buildUserProjectNodes,
-  defaultProjectMemberRoleId,
   filterAssignmentNodes,
-  mergeAssignmentDrafts,
 } from '../../utils/projectRoleAssignments';
+import {
+  passwordResetRequirements,
+  validatePasswordReset,
+} from '../../utils/passwordReset';
 import ProjectRoleAssignmentTree from './ProjectRoleAssignmentTree';
+import ApprovalManagementPage from '../ApprovalManagement';
 import './index.css';
 
 const STATUS_TEXT = {
@@ -81,12 +76,15 @@ const STATUS_TEXT = {
   UNBOUND: '已解绑',
 };
 
+const RETIRED_MENU_CODES = new Set(['SYSTEM_PROJECT']);
+const RETIRED_PERMISSION_CODES = new Set(['project.member.manage']);
+
 const TABS = [
   { id: 'registration', label: '注册审核', code: 'SYSTEM_REGISTRATION', permissions: ['system.registration.review'] },
   { id: 'users', label: '用户管理', code: 'SYSTEM_USER', permissions: ['system.user.view'] },
+  { id: 'approval', label: '用印审批', code: 'SYSTEM_APPROVAL', permissions: ['system.approval.view', 'system.approval.manage'] },
   { id: 'roles', label: '角色与权限', code: 'SYSTEM_ROLE', permissions: ['system.user.view', 'system.role.manage'] },
   { id: 'menus', label: '菜单与功能', code: 'SYSTEM_MENU', permissions: ['system.user.view', 'system.menu.manage'] },
-  { id: 'projects', label: '项目成员与权限', code: 'SYSTEM_PROJECT', permissions: ['project.member.manage'] },
   { id: 'wechat', label: '微信绑定', code: 'SYSTEM_WECHAT', permissions: ['system.wechat.manage'] },
   { id: 'audit', label: '操作日志', code: 'SYSTEM_AUDIT', permissions: ['system.audit.view'] },
 ];
@@ -107,6 +105,23 @@ function getId(item) {
   return item?.id ?? item?.userId ?? item?.roleId ?? item?.permissionId ?? item?.menuId;
 }
 
+const catalogMenuCode = (item) => String(item?.menuCode || item?.code || '').trim().toUpperCase();
+const catalogPermissionCode = (item) => String(item?.permissionCode || item?.code || '').trim();
+const isRetiredMenu = (item) => RETIRED_MENU_CODES.has(catalogMenuCode(item));
+const isRetiredPermission = (item) => RETIRED_PERMISSION_CODES.has(catalogPermissionCode(item));
+
+const withoutRetiredRoleAssignments = (role, retiredMenuIds, retiredPermissionIds) => ({
+  ...role,
+  menuIds: (role?.menuIds || []).filter((id) => !retiredMenuIds.has(Number(id))),
+  permissionIds: (role?.permissionIds || []).filter((id) => !retiredPermissionIds.has(Number(id))),
+  permissions: Array.isArray(role?.permissions)
+    ? role.permissions.filter((permission) => {
+      const id = typeof permission === 'object' ? getId(permission) : permission;
+      return !retiredPermissionIds.has(Number(id)) && (typeof permission !== 'object' || !isRetiredPermission(permission));
+    })
+    : role?.permissions,
+});
+
 const isEnabledValue = (value) => value === 1 || value === '1' || value === true
   || String(value || '').toUpperCase() === 'ACTIVE'
   || String(value || '').toUpperCase() === 'ENABLED';
@@ -125,10 +140,9 @@ const deriveRoleBusinessModuleCodes = (role, menuItems) => {
 
 const roleAssignablePermissions = (role, items) => {
   if (!isProjectRole(role)) return items;
-  const isManager = Number(role?.projectManagerRole || 0) === 1;
   return items.filter((permission) => {
     const code = String(permission.permissionCode || permission.code || '');
-    return !code.startsWith('system.') && (code !== 'project.member.manage' || isManager);
+    return !code.startsWith('system.') && code !== 'project.member.manage';
   });
 };
 
@@ -139,6 +153,22 @@ const rolePermissionIdsFor = (role) => (Array.isArray(role?.permissionIds)
 const roleCode = (role) => String(role?.roleCode || role?.code || '').trim();
 
 const roleName = (role) => role?.roleName || role?.name || '未命名角色';
+
+const ROLE_NAME_TONES = {
+  项目总指挥: 'commander',
+  项目经理: 'manager',
+  安全员: 'safety',
+  项目总工程师: 'chief-engineer',
+  质量员: 'quality',
+  施工员: 'construction',
+  资料员: 'document',
+  电工: 'electrician',
+};
+
+const roleNameTone = (role) => {
+  if (roleCode(role) === 'PLATFORM_ADMIN') return 'administrator';
+  return ROLE_NAME_TONES[roleName(role)] || 'default';
+};
 
 const projectAssignmentRoles = (assignment) => Array.isArray(assignment?.projectRoles)
   ? assignment.projectRoles : [];
@@ -306,7 +336,97 @@ function ModalFrame({ title, description, wide = false, onClose, children, foote
   );
 }
 
-function RoleDefinitionDialog({ role, onClose, onSave }) {
+function PasswordResetDialog({ user, onClose, onSubmit }) {
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [succeeded, setSucceeded] = useState(false);
+  const requirements = passwordResetRequirements(newPassword, confirmPassword);
+  const canSubmit = Object.values(requirements).every(Boolean);
+  const displayName = user?.realName || user?.username || '该用户';
+  const safeClose = () => {
+    if (!submitting) onClose();
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') safeClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
+
+  const submit = async (event) => {
+    event?.preventDefault();
+    const validationError = validatePasswordReset(newPassword, confirmPassword);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setSubmitting(true);
+    setError('');
+    try {
+      await onSubmit(newPassword);
+      setNewPassword('');
+      setConfirmPassword('');
+      setSucceeded(true);
+    } catch (err) {
+      setError(err.message || '密码重置失败');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ModalFrame
+      title="重置用户密码"
+      description="重置后该用户现有 Web 与小程序会话将立即失效。"
+      onClose={safeClose}
+      footer={succeeded
+        ? <button className="primary" onClick={safeClose}>完成</button>
+        : <><button className="plain" disabled={submitting} onClick={safeClose}>取消</button><button className="primary" disabled={submitting || !canSubmit} onClick={submit}>{submitting ? '重置中…' : '确认重置'}</button></>}
+    >
+      <div className="system-password-target">
+        <span>重置账号</span>
+        <strong>{displayName}</strong>
+        <small>{user?.username || '-'}</small>
+      </div>
+      {succeeded ? (
+        <div className="system-password-success" role="status">
+          <strong>密码已重置</strong>
+          <span>用户的既有会话已经失效，请通知用户使用新密码重新登录。</span>
+        </div>
+      ) : (
+        <form className="system-password-form" onSubmit={submit}>
+          <label className="system-form-field">
+            <span>新密码 *</span>
+            <div className="system-password-input">
+              <input autoFocus type={showPassword ? 'text' : 'password'} autoComplete="new-password" maxLength="72" value={newPassword} onChange={(event) => { setNewPassword(event.target.value); setError(''); }} />
+              <button type="button" onClick={() => setShowPassword((visible) => !visible)}>{showPassword ? '隐藏' : '显示'}</button>
+            </div>
+          </label>
+          <label className="system-form-field">
+            <span>确认新密码 *</span>
+            <div className="system-password-input">
+              <input type={showPassword ? 'text' : 'password'} autoComplete="new-password" maxLength="72" value={confirmPassword} onChange={(event) => { setConfirmPassword(event.target.value); setError(''); }} />
+            </div>
+          </label>
+          <div className="system-password-rules" aria-label="密码要求">
+            <span className={requirements.validLength ? 'met' : ''}>8–72 位</span>
+            <span className={requirements.hasLetter ? 'met' : ''}>包含字母</span>
+            <span className={requirements.hasNumber ? 'met' : ''}>包含数字</span>
+            <span className={requirements.matches ? 'met' : ''}>两次输入一致</span>
+          </div>
+          {error && <div className="system-form-error" role="alert">{error}</div>}
+        </form>
+      )}
+    </ModalFrame>
+  );
+}
+
+function RoleDefinitionDialog({ role, roles, onClose, onSave }) {
   const existing = Boolean(role);
   const protectedRole = roleCode(role) === 'PLATFORM_ADMIN';
   const protectedManager = Number(role?.projectManagerRole || 0) === 1;
@@ -317,8 +437,10 @@ function RoleDefinitionDialog({ role, onClose, onSave }) {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const duplicateRoleName = isDuplicateRoleName(form.roleName, roles, existing ? role : null);
   const submit = async () => {
     if (!form.roleName.trim()) return setError('请填写角色名称');
+    if (duplicateRoleName) return setError('角色名称已存在，请使用其他名称');
     setSubmitting(true);
     setError('');
     try {
@@ -335,11 +457,11 @@ function RoleDefinitionDialog({ role, onClose, onSave }) {
       title={existing ? `编辑角色 - ${roleName(role)}` : '新建角色'}
       description="角色只定义职责；菜单和操作权限保存后再分别配置。"
       onClose={onClose}
-      footer={<><button className="plain" onClick={onClose}>取消</button><button className="primary" disabled={submitting || protectedRole} onClick={submit}>{submitting ? '保存中…' : '保存'}</button></>}
+      footer={<><button className="plain" onClick={onClose}>取消</button><button className="primary" disabled={submitting || protectedRole || duplicateRoleName} onClick={submit}>{submitting ? '保存中…' : '保存'}</button></>}
     >
       {protectedRole && <div className="system-inline-notice">平台管理员是系统保护角色，不能在业务界面修改。</div>}
       <div className="system-role-form-grid">
-        <label className="system-form-field"><span>角色名称 *</span><input maxLength="50" disabled={protectedRole} value={form.roleName} onChange={(event) => setForm({ ...form, roleName: event.target.value })} /></label>
+        <label className="system-form-field"><span>角色名称 *</span><input maxLength="50" disabled={protectedRole} aria-invalid={duplicateRoleName} value={form.roleName} onChange={(event) => { setForm({ ...form, roleName: event.target.value }); setError(''); }} />{duplicateRoleName && <small className="system-field-error" role="alert">角色名称已存在，请使用其他名称</small>}</label>
         <label className="system-form-field"><span>角色类型</span><input disabled value={existing && !isProjectRole(role) ? '平台保护角色' : '项目角色'} /></label>
         <label className="system-form-field"><span>状态</span><select disabled={protectedRole || protectedManager} value={form.enabled} onChange={(event) => setForm({ ...form, enabled: Number(event.target.value) })}><option value={1}>启用</option><option value={0}>停用</option></select></label>
         <label className="system-form-field full"><span>角色说明</span><textarea maxLength="200" rows="4" disabled={protectedRole} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
@@ -501,10 +623,30 @@ function SearchBar({ value, onChange, placeholder = '输入关键字查询', onS
 }
 
 function ReviewDialog({ application, roles, permissions, projectList, onClose, onApproved }) {
-  const [projectAssignments, setProjectAssignments] = useState({});
+  const projectRoles = roles.filter((role) => isProjectRole(role) && isEnabledValue(role.enabled ?? 1));
+  const desiredProjectIds = (application.desiredProjects?.length
+    ? application.desiredProjects.map((project) => project.projectId)
+    : application.desiredProjectIds || []).map(Number);
+  const desiredProjectIdSet = new Set(desiredProjectIds);
+  const availableProjectList = projectList.filter((project) => String(project.projectStatus || '').toLowerCase() !== 'stopped');
+  const [projectAssignments, setProjectAssignments] = useState(() => Object.fromEntries(
+    availableProjectList
+      .filter((project) => desiredProjectIdSet.has(Number(project.id)))
+      .map((project) => [project.id, []]),
+  ));
   const [reviewComment, setReviewComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const projectRoles = roles.filter((role) => isProjectRole(role) && isEnabledValue(role.enabled ?? 1));
+  const unavailableDesiredProjects = desiredProjectIds
+    .filter((projectId) => !availableProjectList.some((item) => Number(item.id) === projectId))
+    .map((projectId) => application.desiredProjects?.find(
+      (project) => Number(project.projectId) === projectId,
+    ) || { projectId, projectName: `项目 ${projectId}`, available: false });
+  const orderedProjects = [...availableProjectList].sort((left, right) => {
+    const desiredDifference = Number(desiredProjectIdSet.has(Number(right.id)))
+      - Number(desiredProjectIdSet.has(Number(left.id)));
+    if (desiredDifference) return desiredDifference;
+    return String(left.projectName || '').localeCompare(String(right.projectName || ''), 'zh-CN');
+  });
 
   const updateProjectRoles = (projectId, roleIds) => setProjectAssignments((current) => ({
     ...current,
@@ -553,13 +695,18 @@ function ReviewDialog({ application, roles, permissions, projectList, onClose, o
           <fieldset>
             <legend>项目角色（可多选、可分配到多个项目）</legend>
             <div className="system-desired-projects">
-              申请意向：{(application.desiredProjectIds || []).length
-                ? application.desiredProjectIds.map((id) => projectList.find((project) => Number(project.id) === Number(id))?.projectName || `项目 ${id}`).join('、')
+              申请意向：{desiredProjectIds.length
+                ? desiredProjectIds.map((id) => application.desiredProjects?.find((project) => Number(project.projectId) === id)?.projectName
+                  || projectList.find((project) => Number(project.id) === id)?.projectName || `项目 ${id}`).join('、')
                 : '未指定项目'}
             </div>
+            {!!unavailableDesiredProjects.length && (
+              <div className="system-warning">部分申请项目已停止或不可用，请移除并重新选择可授权项目后再批准。</div>
+            )}
+            <div className="system-inline-notice">请为需要授权的项目明确勾选至少一个实际角色，系统不再自动补默认角色。</div>
             <div className="system-project-assignment-list">
-              {projectList.map((project) => (
-                <div key={project.id} className={(application.desiredProjectIds || []).map(Number).includes(Number(project.id)) ? 'desired' : ''}>
+              {orderedProjects.map((project) => (
+                <div key={project.id} className={desiredProjectIdSet.has(Number(project.id)) ? 'desired' : ''}>
                   <strong>{project.projectName || project.shortName || `项目 ${project.id}`}</strong>
                   <RoleSelector
                     roles={projectRoles}
@@ -587,145 +734,13 @@ function ReviewDialog({ application, roles, permissions, projectList, onClose, o
   );
 }
 
-function ProjectAuthorizationDialog({
-  mode,
-  projectName,
-  subject,
-  userOptions,
-  projectRoles,
-  permissions,
-  onSearchUsers,
-  onClose,
-  onSubmit,
-}) {
-  const initialUserId = subject?.userId
-    || subject?.matchedUserId
-    || userOptions[0]?.userId
-    || userOptions[0]?.id
-    || '';
-  const [userId, setUserId] = useState(String(initialUserId));
-  const [roleIds, setRoleIds] = useState(() => (subject?.projectRoles || subject?.roles || [])
-    .map((role) => Number(getId(role))).filter(Number.isFinite));
-  const [comment, setComment] = useState(mode === 'approve' ? '同意加入当前项目' : '');
-  const [userKeyword, setUserKeyword] = useState('');
-  const [candidateUsers, setCandidateUsers] = useState(userOptions);
-  const [searchingUsers, setSearchingUsers] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => setCandidateUsers(userOptions), [userOptions]);
-
-  const searchUsers = async () => {
-    if (!onSearchUsers) return;
-    setSearchingUsers(true);
-    try {
-      setCandidateUsers(await onSearchUsers(userKeyword));
-    } catch (err) {
-      alert(err.message || '查询系统用户失败');
-    } finally {
-      setSearchingUsers(false);
-    }
-  };
-
-  const save = async () => {
-    if (!userId) {
-      alert('请选择系统用户');
-      return;
-    }
-    if (!roleIds.length) {
-      alert('请至少选择一个项目角色');
-      return;
-    }
-    if (mode === 'approve' && !comment.trim()) {
-      alert('请填写审批意见');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await onSubmit({
-        userId: Number(userId),
-        roleIds,
-        comment: comment.trim(),
-      });
-      onClose();
-    } catch (err) {
-      alert(err.message || '项目授权保存失败');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const title = mode === 'add' ? '新增项目成员' : mode === 'approve' ? '批准项目访问申请' : '调整项目授权';
-  const description = mode === 'approve'
-    ? '确认账号后，为申请人分配当前项目的一个或多个角色。'
-    : '一个成员可拥有多个项目角色，菜单与操作权限按并集合并。';
-  const subjectName = subject?.realName
-    || subject?.applicantName
-    || subject?.matchedUsername
-    || subject?.username
-    || '当前用户';
-
-  return (
-    <div className="system-modal-overlay" onClick={onClose}>
-      <div className="system-modal system-project-auth-modal" onClick={(event) => event.stopPropagation()}>
-        <PageBar title={title} description={`${projectName || '当前项目'} · ${description}`}>
-          <button className="plain" onClick={onClose}>关闭</button>
-        </PageBar>
-        <div className="system-modal-body">
-          {mode === 'add' ? (
-            <>
-              <div className="system-user-search">
-                <input value={userKeyword} onChange={(event) => setUserKeyword(event.target.value)} placeholder="按姓名或账号搜索已启用系统用户" onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); searchUsers(); } }} />
-                <button type="button" onClick={searchUsers} disabled={searchingUsers}>{searchingUsers ? '查询中…' : '查询'}</button>
-              </div>
-              <label className="system-form-field">
-                <span>系统用户 *</span>
-                <select value={userId} onChange={(event) => setUserId(event.target.value)}>
-                  <option value="">请选择系统用户</option>
-                  {candidateUsers.map((user) => (
-                    <option key={user.userId || user.id} value={user.userId || user.id}>
-                      {user.realName || user.username}（{user.username || '-'}）
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </>
-          ) : (
-            <div className="system-project-auth-summary">
-              <strong>{subjectName}</strong>
-              <span>{subject?.matchedUsername || subject?.username || `用户 ${userId}`}</span>
-            </div>
-          )}
-          <fieldset className="system-project-role-selector">
-            <legend>项目角色 *</legend>
-            <RoleSelector roles={projectRoles} selectedRoleIds={roleIds} onChange={setRoleIds} permissions={permissions} emptyText="暂无可分配项目角色" />
-          </fieldset>
-          <div className="system-project-auth-help">
-            角色中的资料、巡检、质量菜单和操作权限会自动合并；不再单独分配巡检权限模板。
-          </div>
-          {mode === 'approve' && (
-            <label className="system-form-field">
-              <span>审批意见 *</span>
-              <textarea rows="3" value={comment} onChange={(event) => setComment(event.target.value)} />
-            </label>
-          )}
-        </div>
-        <div className="system-modal-footer">
-          <button className="plain" disabled={submitting} onClick={onClose}>取消</button>
-          <button className="primary" disabled={submitting || !projectRoles.length} onClick={save}>
-            {submitting ? '处理中…' : mode === 'approve' ? '批准并授权' : '保存授权'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function UserProjectAccessDialog({
   user,
   projectList,
   projectRoles,
   onClose,
   onSave,
+  onPreview,
   onStatusChange,
   onChanged,
 }) {
@@ -733,7 +748,6 @@ function UserProjectAccessDialog({
   const [projectKeyword, setProjectKeyword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const defaultRoleId = defaultProjectMemberRoleId(projectRoles);
   const changes = useMemo(() => assignmentChanges(nodes, 'projectId'), [nodes]);
   const summary = useMemo(() => assignmentChangeSummary(nodes), [nodes]);
   const visibleNodes = useMemo(() => filterAssignmentNodes(nodes, projectKeyword), [nodes, projectKeyword]);
@@ -750,11 +764,31 @@ function UserProjectAccessDialog({
 
   const save = async () => {
     if (!changes.length) return;
-    if (summary.removed > 0 && !window.confirm(`本次将移出 ${summary.removed} 个项目，相关项目角色会一并移除。确认继续吗？`)) return;
+    const incomplete = nodes.filter((node) => node.assigned && assignmentRoleIdsForNode(node).length === 0);
+    if (incomplete.length) {
+      setError(`请为已勾选的项目选择至少一个角色：${incomplete.map((node) => node.label).join('、')}`);
+      return;
+    }
     setSubmitting(true);
     setError('');
     try {
-      await onSave({ changes });
+      const impacts = await onPreview({ changes });
+      const responsibilityTotal = impacts.reduce((total, impact) => total + Number(impact.totalCount || 0), 0);
+      if (responsibilityTotal > 0) {
+        const lines = impacts.map((impact) => {
+          const detail = [
+            ['负责电箱', impact.responsibleElectricBoxCount],
+            ['安全负责人', impact.safetyManagedElectricBoxCount],
+            ['待复核', impact.pendingInspectionReviewCount],
+            ['整改任务', impact.openRectificationCount],
+            ['质量整改', impact.openQualityIssueCount],
+          ].filter(([, count]) => Number(count || 0) > 0).map(([label, count]) => `${label}${count}项`).join('、');
+          return `${impact.projectName || `项目 ${impact.projectId}`}：${detail}`;
+        }).join('\n');
+        if (!window.confirm(`撤权后以下责任人将被清空，任务保留并转为待重新分配：\n${lines}\n\n确认继续吗？`)) return;
+      } else if (summary.removed > 0
+        && !window.confirm(`本次将移出 ${summary.removed} 个项目，相关项目角色会一并移除。确认继续吗？`)) return;
+      await onSave({ changes, confirmResponsibilityRelease: responsibilityTotal > 0 });
       await onChanged?.();
       onClose();
     } catch (error) {
@@ -806,14 +840,11 @@ function UserProjectAccessDialog({
             <input value={projectKeyword} onChange={(event) => setProjectKeyword(event.target.value)} placeholder="搜索项目名称或已选角色" />
             <span className="system-hint">显示 {visibleNodes.length} / {nodes.length} 个项目</span>
           </div>
-          {defaultRoleId === null && <div className="system-inline-notice warning">内置 USER（项目成员）角色缺失或已停用，项目快捷勾选暂不可用；请先恢复该基础角色。</div>}
           <ProjectRoleAssignmentTree
             nodes={visibleNodes}
             roles={projectRoles}
-            defaultRoleId={defaultRoleId}
             onNodeChange={updateNode}
             onStatusChange={toggleAccess}
-            onError={setError}
             busy={submitting}
             emptyText={projectKeyword ? '没有匹配的项目或角色' : '暂无可分配项目'}
           />
@@ -833,24 +864,19 @@ function UserProjectAccessDialog({
 }
 
 export default function SystemManagementPage({ currentUser, currentProject, projectList = [], onBack }) {
-  const availableTabs = useMemo(
-    () => TABS.filter((tab) => {
-      if (isPlatformAdmin(currentUser)) return true;
-      if (!hasAssignedProjectMenu(currentUser, currentProject, tab.code)) return false;
-      if (tab.id === 'projects') {
-        return hasProjectPermission(currentUser, currentProject, ...(tab.permissions || []));
-      }
-      return hasPermission(currentUser, ...(tab.permissions || []));
-    }),
-    [currentProject, currentUser],
-  );
+  const canViewApproval = isPlatformAdmin(currentUser)
+    || hasPermission(currentUser, 'system.approval.view', 'system.approval.manage')
+    || projectList.some((project) => hasProjectPermission(currentUser, project.id, 'system.approval.view', 'system.approval.manage'));
+  const availableTabs = useMemo(() => (isPlatformAdmin(currentUser)
+    ? TABS
+    : TABS.filter((tab) => tab.id === 'approval' && canViewApproval)), [canViewApproval, currentUser]);
   const [activeTab, setActiveTab] = useState(availableTabs[0]?.id || '');
   const [keyword, setKeyword] = useState('');
   const [status, setStatus] = useState('');
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [pageNo, setPageNo] = useState(1);
-  const pageSize = activeTab === 'projects' ? 100 : 20;
+  const pageSize = 20;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [roles, setRoles] = useState([]);
@@ -861,20 +887,12 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
   const [roleMenuDialog, setRoleMenuDialog] = useState(null);
   const [rolePermissionDialog, setRolePermissionDialog] = useState(null);
   const [reviewing, setReviewing] = useState(null);
-  const [projectApplications, setProjectApplications] = useState([]);
-  const [projectMembershipFilter, setProjectMembershipFilter] = useState('ALL');
-  const [projectDraftNodes, setProjectDraftNodes] = useState([]);
-  const [projectSaving, setProjectSaving] = useState(false);
-  const [projectAssignmentError, setProjectAssignmentError] = useState('');
-  const [projectAuthorizationDialog, setProjectAuthorizationDialog] = useState(null);
+  const [passwordResetUser, setPasswordResetUser] = useState(null);
   const [userProjectAccessDialog, setUserProjectAccessDialog] = useState(null);
   const requestSequenceRef = useRef(0);
-  const projectAssignmentDraftsRef = useRef(new Map());
   const projectRoleOptions = useMemo(() => {
     return roles.filter((role) => isProjectRole(role) && isEnabledValue(role.enabled ?? 1));
   }, [roles]);
-  const projectDefaultRoleId = useMemo(() => defaultProjectMemberRoleId(projectRoleOptions), [projectRoleOptions]);
-  const projectChangeSummary = useMemo(() => assignmentChangeSummary(projectDraftNodes), [projectDraftNodes]);
 
   useEffect(() => {
     if (!availableTabs.some((tab) => tab.id === activeTab)) setActiveTab(availableTabs[0]?.id || '');
@@ -889,21 +907,32 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
     if (roleRes.code !== 200) throw new Error(roleRes.message || '角色加载失败');
     if (permissionRes.code !== 200) throw new Error(permissionRes.message || '权限加载失败');
     if (menuRes.code !== 200) throw new Error(menuRes.message || '菜单加载失败');
-    const roleList = extractList(roleRes.data);
+    const allMenus = extractList(menuRes.data);
+    const allPermissions = extractList(permissionRes.data);
+    const retiredMenuIds = new Set(allMenus.filter(isRetiredMenu).map(getId).map(Number));
+    const retiredPermissionIds = new Set(allPermissions.filter(isRetiredPermission).map(getId).map(Number));
+    const roleList = extractList(roleRes.data)
+      .map((role) => withoutRetiredRoleAssignments(role, retiredMenuIds, retiredPermissionIds));
     setRoles(roleList);
-    setPermissions(extractList(permissionRes.data));
-    setMenus(extractList(menuRes.data));
+    setPermissions(allPermissions.filter((permission) => !isRetiredPermission(permission)));
+    setMenus(allMenus.filter((menu) => !isRetiredMenu(menu)));
     return roleList;
   }, []);
 
   const loadData = useCallback(async (overrides = {}) => {
     if (!activeTab) return;
     const requestSequence = ++requestSequenceRef.current;
+    if (activeTab === 'approval') {
+      setRows([]);
+      setTotal(0);
+      setError('');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError('');
     try {
       let res;
-      let nextProjectApplications = null;
       const effectivePage = overrides.pageNo || pageNo;
       const params = {
         keyword: keyword || undefined,
@@ -915,8 +944,8 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
       if (activeTab === 'registration') res = await getSystemRegistrationApplications(params);
       if (activeTab === 'users') res = await getSystemUsers(params);
       if (activeTab === 'roles') {
-        await loadRolesAndPermissions();
-        res = await getSystemRoles(params);
+        const roleList = await loadRolesAndPermissions();
+        res = { code: 200, data: roleList };
       }
       if (activeTab === 'menus') {
         const [menuRes, permissionRes] = await Promise.all([
@@ -924,31 +953,8 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
           getSystemPermissions({ pageSize: 500 }),
         ]);
         if (permissionRes.code !== 200) throw new Error(permissionRes.message || '操作权限目录加载失败');
-        setPermissions(extractList(permissionRes.data));
+        setPermissions(extractList(permissionRes.data).filter((permission) => !isRetiredPermission(permission)));
         res = menuRes;
-      }
-      if (activeTab === 'projects') {
-        const [memberRes, applicationRes, roleRes, permissionRes] = await Promise.all([
-          getProjectMemberAssignmentOptions(currentProject, {
-            keyword: keyword || undefined,
-            membership: projectMembershipFilter,
-            pageNo: effectivePage,
-            pageSize,
-          }),
-          getWechatAccessApplications({ projectId: currentProject, status: 'PENDING', pageNo: 1, pageSize: 100 }),
-          isPlatformAdmin(currentUser) ? getSystemRoles({ pageSize: 200 }) : getAssignableProjectRoles(currentProject),
-          isPlatformAdmin(currentUser) ? getSystemPermissions({ pageSize: 500 }) : Promise.resolve(null),
-        ]);
-        if (applicationRes.code === 200) {
-          nextProjectApplications = extractList(applicationRes.data)
-            .filter((application) => application.applicationType === 'PROJECT_ACCESS');
-        }
-        if (roleRes?.code === 200) setRoles(extractList(roleRes.data));
-        if (permissionRes?.code !== 200 && permissionRes) {
-          throw new Error(permissionRes.message || '操作权限目录加载失败');
-        }
-        if (permissionRes?.code === 200) setPermissions(extractList(permissionRes.data));
-        res = memberRes;
       }
       if (activeTab === 'wechat') res = await getSystemWechatBindings({
         keyword: params.keyword,
@@ -959,17 +965,15 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
       if (activeTab === 'audit') res = await getSystemAuditLogs(params);
       if (!res || res.code !== 200) throw new Error(res?.message || '数据加载失败');
       if (requestSequence !== requestSequenceRef.current) return;
-      if (nextProjectApplications) setProjectApplications(nextProjectApplications);
       let list = extractList(res.data);
+      if (activeTab === 'menus') list = list.filter((menu) => !isRetiredMenu(menu));
       if (keyword && ['roles', 'menus'].includes(activeTab)) {
         const normalizedKeyword = keyword.trim().toLowerCase();
         list = list.filter((item) => JSON.stringify(item).toLowerCase().includes(normalizedKeyword));
       }
       const isClientPaged = ['roles', 'menus'].includes(activeTab);
       const visibleList = isClientPaged ? list.slice((effectivePage - 1) * pageSize, effectivePage * pageSize) : list;
-      setRows(activeTab === 'projects'
-        ? mergeAssignmentDrafts(visibleList, projectAssignmentDraftsRef.current)
-        : visibleList);
+      setRows(visibleList);
       setTotal(isClientPaged ? list.length : (res.data?.total ?? list.length));
       if (activeTab === 'roles') {
         setSelectedRole((current) => list.find((item) => getId(item) === getId(current)) || list[0] || null);
@@ -982,7 +986,7 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
     } finally {
       if (requestSequence === requestSequenceRef.current) setLoading(false);
     }
-  }, [activeTab, currentProject, currentUser, keyword, loadRolesAndPermissions, pageNo, pageSize, projectMembershipFilter, status]);
+  }, [activeTab, keyword, loadRolesAndPermissions, pageNo, pageSize, status]);
 
   useEffect(() => {
     setKeyword('');
@@ -991,26 +995,11 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
   }, [activeTab]);
 
   useEffect(() => {
-    projectAssignmentDraftsRef.current = new Map();
-    setProjectDraftNodes([]);
-    setProjectAssignmentError('');
-    setPageNo(1);
-  }, [currentProject]);
-
-  useEffect(() => {
     loadData();
-  }, [activeTab, currentProject, pageNo, pageSize, projectMembershipFilter]);
+  }, [activeTab, pageNo, pageSize]);
 
   const selectTab = (tabId) => {
     if (tabId === activeTab) return;
-    const hasProjectChanges = activeTab === 'projects'
-      && projectChangeSummary.added + projectChangeSummary.updated + projectChangeSummary.removed > 0;
-    if (hasProjectChanges && !window.confirm('当前项目成员与角色存在未保存修改，确定放弃并切换页面吗？')) return;
-    if (hasProjectChanges) {
-      projectAssignmentDraftsRef.current = new Map();
-      setProjectDraftNodes([]);
-      setProjectAssignmentError('');
-    }
     requestSequenceRef.current += 1;
     setRows([]);
     setTotal(0);
@@ -1054,19 +1043,19 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
     }
   };
 
-  const resetPassword = async (user) => {
-    const newPassword = window.prompt(`为 ${user.realName || user.username} 设置新密码（至少 8 位）`);
-    if (newPassword === null) return;
-    if (newPassword.length < 8) {
-      alert('新密码至少 8 位');
-      return;
-    }
+  const resetPassword = async (user, newPassword) => {
+    const res = await resetSystemUserPassword(getId(user), { newPassword });
+    if (res.code !== 200) throw new Error(res.message || '密码重置失败');
+  };
+
+  const removeUser = async (user) => {
     try {
-      const res = await resetSystemUserPassword(getId(user), { newPassword });
-      if (res.code !== 200) throw new Error(res.message || '密码重置失败');
-      alert('密码已重置，用户的既有会话已失效');
+      const deleted = await confirmAdministrativeDeletion('USER', getId(user));
+      if (!deleted) return;
+      if (getId(userProjectAccessDialog) === getId(user)) setUserProjectAccessDialog(null);
+      await loadData();
     } catch (err) {
-      alert(err.message || '密码重置失败');
+      alert(err.message || '用户删除失败');
     }
   };
 
@@ -1194,10 +1183,9 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
 
   const removeRoleDefinition = async (targetRole = selectedRole) => {
     if (!targetRole) return;
-    if (!window.confirm(`确认删除角色“${targetRole.roleName || targetRole.name}”？`)) return;
     try {
-      const res = await deleteSystemRole(getId(targetRole));
-      if (res.code !== 200) throw new Error(res.message || '角色删除失败');
+      const deleted = await confirmAdministrativeDeletion('ROLE', getId(targetRole));
+      if (!deleted) return;
       if (getId(selectedRole) === getId(targetRole)) setSelectedRole(null);
       await loadData();
     } catch (err) {
@@ -1205,80 +1193,14 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
     }
   };
 
-  const updateProjectAssignmentNode = (nextNode) => {
-    const drafts = projectAssignmentDraftsRef.current;
-    if (assignmentNodeChanged(nextNode)) drafts.set(Number(nextNode.id), nextNode);
-    else drafts.delete(Number(nextNode.id));
-    setProjectDraftNodes(Array.from(drafts.values()));
-    setRows((current) => current.map((node) => (node.id === nextNode.id ? nextNode : node)));
-    setProjectAssignmentError('');
-  };
-
-  const toggleProjectMember = async (member) => {
-    const active = String(member.accessStatus || 'ACTIVE').toUpperCase() !== 'DISABLED';
-    const reason = window.prompt(active ? '请输入暂停项目访问原因' : '请输入恢复说明', active ? '管理员暂停项目访问' : '');
-    if (reason === null || (active && !reason.trim())) return;
+  const removeRegistrationApplication = async (application) => {
     try {
-      const res = await updateProjectMemberStatus(currentProject, member.id, { status: active ? 'DISABLED' : 'ACTIVE', reason });
-      if (res.code !== 200) throw new Error(res.message || '项目授权更新失败');
-      const nextStatus = res.data?.accessStatus || (active ? 'DISABLED' : 'ACTIVE');
-      const nextReason = res.data?.statusReason ?? reason;
-      setRows((current) => current.map((node) => (node.id === member.id ? {
-        ...node,
-        accessStatus: nextStatus,
-        statusReason: nextReason,
-      } : node)));
-      const draft = projectAssignmentDraftsRef.current.get(Number(member.id));
-      if (draft) {
-        projectAssignmentDraftsRef.current.set(Number(member.id), {
-          ...draft,
-          accessStatus: nextStatus,
-          statusReason: nextReason,
-        });
-        setProjectDraftNodes(Array.from(projectAssignmentDraftsRef.current.values()));
-      }
+      const deleted = await confirmAdministrativeDeletion('REGISTRATION_APPLICATION', getId(application));
+      if (!deleted) return;
+      await loadData();
     } catch (err) {
-      setProjectAssignmentError(err.message || '项目授权更新失败');
+      alert(err.message || '注册申请删除失败');
     }
-  };
-
-  const saveProjectAssignments = async () => {
-    const changes = assignmentChanges(projectDraftNodes, 'userId');
-    const summary = assignmentChangeSummary(projectDraftNodes);
-    if (!changes.length) return;
-    if (summary.removed > 0 && !window.confirm(`本次将从当前项目移出 ${summary.removed} 名成员，确认继续吗？`)) return;
-    setProjectSaving(true);
-    setProjectAssignmentError('');
-    try {
-      const res = await updateProjectRoleAssignments(currentProject, { changes });
-      if (!res || res.code !== 200) throw new Error(res?.message || '项目成员批量保存失败');
-      projectAssignmentDraftsRef.current = new Map();
-      setProjectDraftNodes([]);
-      await loadData({ pageNo });
-    } catch (err) {
-      setProjectAssignmentError(err.message || '项目成员批量保存失败');
-    } finally {
-      setProjectSaving(false);
-    }
-  };
-
-  const submitProjectAuthorization = async (values) => {
-    if (!projectAuthorizationDialog) return;
-    const { mode, subject } = projectAuthorizationDialog;
-    let res;
-    if (mode === 'approve') {
-      res = await approveWechatAccessApplication(subject.id, {
-        accountMode: 'EXISTING',
-        userId: values.userId,
-        projectId: Number(subject.projectId || currentProject),
-        roleIds: values.roleIds,
-        comment: values.comment,
-      });
-    }
-    if (!res || res.code !== 200) {
-      throw new Error(res?.message || '项目访问申请审批失败');
-    }
-    await loadData();
   };
 
   const toggleWechat = async (user) => {
@@ -1313,39 +1235,18 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
     }
   };
 
-  const approveProjectApplication = (application) => {
-    if (!application.matchedUserId) {
-      alert('该申请尚未绑定系统账号，请先引导用户完成统一注册或账号绑定。');
-      return;
-    }
-    setProjectAuthorizationDialog({ mode: 'approve', subject: application, userOptions: [] });
-  };
-
-  const rejectProjectApplication = async (application) => {
-    const comment = window.prompt('请输入驳回原因');
-    if (comment === null || !comment.trim()) return;
-    try {
-      const res = await rejectWechatAccessApplication(application.id, { comment: comment.trim() });
-      if (res.code !== 200) throw new Error(res.message || '项目访问申请驳回失败');
-      await loadData();
-    } catch (err) {
-      alert(err.message || '项目访问申请驳回失败');
-    }
-  };
-
   const runSearch = () => {
     if (pageNo !== 1) setPageNo(1);
     else loadData({ pageNo: 1 });
   };
 
-  const currentProjectName = projectList.find((project) => Number(project.id) === Number(currentProject))?.projectName;
   const pendingCount = activeTab === 'registration' ? rows.filter((item) => item.status === 'PENDING').length : null;
 
   const renderRegistration = () => (
     <>
       <PageBar title="注册审核" description="审核 Web 与小程序提交的新账号申请，并在通过时分配角色和项目权限。">
         <select value={status} onChange={(event) => setStatus(event.target.value)}>
-          <option value="">全部状态</option><option value="PENDING">待审核</option><option value="APPROVED">已通过</option><option value="REJECTED">已驳回</option>
+          <option value="">全部状态</option><option value="PENDING">待审核</option><option value="APPROVED">已通过</option><option value="REJECTED">已驳回</option><option value="CANCELLED">已取消</option>
         </select>
         <SearchBar value={keyword} onChange={setKeyword} placeholder="姓名、账号或手机号" onSearch={runSearch} />
       </PageBar>
@@ -1359,9 +1260,14 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
           <tbody>{rows.map((item) => <tr key={item.id}>
             <td><strong>{item.realName || '-'}</strong><small>{item.applicationReason || item.reason || '未填写申请说明'}</small></td>
             <td>{item.username || '-'}</td><td>{item.phone || '-'}<small>{item.email || '-'}</small></td>
-            <td>{(item.desiredProjectIds || []).map((id) => projectList.find((project) => Number(project.id) === Number(id))?.projectName || `项目 ${id}`).join('、') || item.desiredProjectText || item.desiredProjectName || '未指定'}</td><td>{item.source || item.sourceType || '-'}</td>
+            <td>{(item.desiredProjects || []).map((project) => project.projectName).join('、')
+              || (item.desiredProjectIds || []).map((id) => projectList.find((project) => Number(project.id) === Number(id))?.projectName || `项目 ${id}`).join('、')
+              || item.desiredProjectText || item.desiredProjectName || '未指定'}</td><td>{item.source || item.sourceType || '-'}</td>
             <td>{formatDate(item.createdAt || item.applyTime)}</td><td><StatusTag status={item.status} /></td>
-            <td>{item.status === 'PENDING' ? <div className="system-row-actions"><button onClick={() => openReview(item)}>批准</button><button className="danger" onClick={() => rejectApplication(item)}>驳回</button></div> : <span className="system-hint">{item.reviewComment || '已处理'}</span>}</td>
+            <td><div className="system-row-actions">
+              {item.status === 'PENDING' ? <><button onClick={() => openReview(item)}>批准</button><button className="danger" onClick={() => rejectApplication(item)}>驳回</button></> : <span className="system-hint">{item.reviewComment || '已处理'}</span>}
+              {isPlatformAdmin(currentUser) && <button className="danger" title="只删除注册申请记录" onClick={() => removeRegistrationApplication(item)}>删除</button>}
+            </div></td>
           </tr>)}</tbody></table>
       </div>
     </>
@@ -1375,6 +1281,7 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
       <div className="system-table-wrap"><table><thead><tr><th>用户</th><th>联系方式</th><th>已分配项目与角色</th><th>登录方式</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead>
         <tbody>{rows.map((user) => {
           const assignments = Array.isArray(user.projectRoles) ? user.projectRoles : [];
+          const isCurrentAccount = Number(getId(user)) === Number(getId(currentUser));
           return <tr key={getId(user)}>
             <td><strong>{user.realName || '-'}</strong><small>{user.username}</small></td><td>{user.phone || '-'}<small>{user.email || '-'}</small></td>
             <td className="system-user-project-cell"><div className="system-user-project-summary">
@@ -1383,7 +1290,13 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
               <button type="button" onClick={() => openUserProjectAccess(user)}>{assignments.length ? '查看并调整' : '尚未分配，立即设置'}</button>
             </div></td>
             <td>{!isEnabledValue(user.passwordLoginEnabled) ? '仅微信' : user.wechatBound ? '密码 + 微信' : '账号密码'}</td><td><StatusTag status={user.status} /></td><td>{formatDate(user.lastLoginAt || user.createTime)}</td>
-            <td><div className="system-row-actions">{hasPermission(currentUser, 'system.user.manage') && <button className="primary" onClick={() => openUserProjectAccess(user)}>分配项目与角色</button>}{hasPermission(currentUser, 'system.user.reset_password') && <button onClick={() => resetPassword(user)}>重置密码</button>}{hasPermission(currentUser, 'system.user.status') && <button className={isEnabledValue(user.status) ? 'danger' : ''} onClick={() => toggleUserStatus(user)}>{isEnabledValue(user.status) ? '停用' : '启用'}</button>}{!hasPermission(currentUser, 'system.user.manage', 'system.user.reset_password', 'system.user.status') && <span className="system-hint">只读</span>}</div></td>
+            <td><div className="system-row-actions">
+              {hasPermission(currentUser, 'system.user.manage') && <button className="primary" onClick={() => openUserProjectAccess(user)}>分配项目与角色</button>}
+              {hasPermission(currentUser, 'system.user.reset_password') && <button onClick={() => setPasswordResetUser(user)}>重置密码</button>}
+              {hasPermission(currentUser, 'system.user.status') && <button className={isEnabledValue(user.status) ? 'danger' : ''} onClick={() => toggleUserStatus(user)}>{isEnabledValue(user.status) ? '停用' : '启用'}</button>}
+              {isPlatformAdmin(currentUser) && <button className="danger" disabled={isCurrentAccount} title={isCurrentAccount ? '不能删除当前登录账号' : '永久删除用户'} onClick={() => removeUser(user)}>删除</button>}
+              {!hasPermission(currentUser, 'system.user.manage', 'system.user.reset_password', 'system.user.status') && <span className="system-hint">只读</span>}
+            </div></td>
           </tr>;
         })}</tbody></table></div>
     </>
@@ -1398,7 +1311,7 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
       <div className="system-role-guide">
         <div><strong>1. 分配菜单</strong><span>决定角色能看到哪些模块和页面</span></div>
         <div><strong>2. 配置权限</strong><span>决定页面内可以执行哪些操作</span></div>
-        <div><strong>3. 分配用户</strong><span>在用户管理或项目成员中勾选角色</span></div>
+        <div><strong>3. 分配用户</strong><span>在注册审核或用户管理中分配角色</span></div>
       </div>
       <div className="system-table-wrap system-role-table"><table><thead><tr><th>角色</th><th>类型</th><th>业务模块</th><th>菜单</th><th>操作权限</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>{rows.map((role) => {
@@ -1408,7 +1321,7 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
           const rolePermissions = rolePermissionIdsFor(role);
           const moduleLabels = moduleCodes.map((code) => BUSINESS_MODULES.find((module) => module.code === code)?.label).filter(Boolean);
           return <tr key={getId(role)} className={getId(selectedRole) === getId(role) ? 'selected' : ''} onClick={() => setSelectedRole(role)}>
-            <td><strong>{roleName(role)}</strong><small>{roleCode(role)}{Number(role.builtin || 0) === 1 ? ' · 内置' : ''}</small></td>
+            <td><strong className={`system-role-name tone-${roleNameTone(role)}`}>{roleName(role)}</strong><small>{roleCode(role)}{Number(role.builtin || 0) === 1 ? ' · 内置' : ''}</small></td>
             <td>{isProjectRole(role) ? (Number(role.projectManagerRole || 0) === 1 ? '项目经理' : '项目角色') : '平台保护角色'}</td>
             <td><div className="system-role-tags">{moduleLabels.length ? moduleLabels.map((label) => <span key={label}>{label}</span>) : <em>未分配</em>}</div></td>
             <td>{roleMenus.length} 项</td><td>{rolePermissions.length} 项</td><td><StatusTag status={isEnabledValue(role.enabled) ? 'ENABLED' : 'DISABLED'} /></td>
@@ -1416,7 +1329,9 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
               <button disabled={protectedRole} onClick={() => { setSelectedRole(role); setRoleDefinitionDialog(role); }}>编辑</button>
               <button disabled={protectedRole} onClick={() => { setSelectedRole(role); setRoleMenuDialog(role); }}>分配菜单</button>
               <button className="primary" disabled={protectedRole} onClick={() => { setSelectedRole(role); setRolePermissionDialog(role); }}>权限配置</button>
-              <button className="danger" disabled={Number(role.builtin || 0) === 1} onClick={() => removeRoleDefinition(role)}>删除</button>
+              {isPlatformAdmin(currentUser) && (
+                <button className="danger" disabled={protectedRole} onClick={() => removeRoleDefinition(role)}>删除</button>
+              )}
             </div></td>
           </tr>;
         })}</tbody></table></div>
@@ -1435,38 +1350,6 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
       <div className="system-subsection-title"><strong>操作权限目录</strong><span>{permissions.length} 项</span></div>
       <div className="system-table-wrap"><table><thead><tr><th>权限名称</th><th>权限码</th><th>模块</th><th>说明</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>{permissions.map((permission) => <tr key={getId(permission)}><td><strong>{permission.permissionName || permission.name}</strong></td><td>{permission.permissionCode || permission.code}</td><td>{permission.moduleCode || '-'}</td><td>{permission.description || '-'}</td><td><StatusTag status={isEnabledValue(permission.enabled) ? 'ENABLED' : 'DISABLED'} /></td><td>{hasPermission(currentUser, 'system.menu.manage') ? <button onClick={() => editPermissionDefinition(permission)}>编辑</button> : <span className="system-hint">只读</span>}</td></tr>)}</tbody></table></div>
-    </>
-  );
-
-  const renderProjects = () => (
-    <>
-      <PageBar title="项目成员与权限" description={`当前作业区域：${currentProjectName || currentProject || '-'}。勾选用户建立成员关系，展开后配置一个或多个项目角色。`}>
-        <select value={projectMembershipFilter} onChange={(event) => { setProjectMembershipFilter(event.target.value); setPageNo(1); }}>
-          <option value="ALL">全部用户</option>
-          <option value="ASSIGNED">已加入</option>
-          <option value="UNASSIGNED">未加入</option>
-        </select>
-        <SearchBar value={keyword} onChange={setKeyword} placeholder="姓名、账号或角色" onSearch={runSearch} />
-      </PageBar>
-      {projectDefaultRoleId === null && <div className="system-inline-notice warning">内置 USER（项目成员）角色缺失或已停用，用户快捷勾选暂不可用；请先由平台管理员恢复该基础角色。</div>}
-      <ProjectRoleAssignmentTree
-        nodes={rows}
-        roles={projectRoleOptions}
-        defaultRoleId={projectDefaultRoleId}
-        onNodeChange={updateProjectAssignmentNode}
-        onStatusChange={toggleProjectMember}
-        onError={setProjectAssignmentError}
-        busy={projectSaving}
-        emptyText={keyword ? '没有匹配的用户或角色' : '当前筛选下暂无用户'}
-      />
-      {projectAssignmentError && <div className="system-form-error" role="alert">{projectAssignmentError}</div>}
-      <div className="system-assignment-savebar">
-        <span>新增 {projectChangeSummary.added} · 调整 {projectChangeSummary.updated} · 移出 {projectChangeSummary.removed}</span>
-        <button className="primary" disabled={projectSaving || !projectDraftNodes.length} onClick={saveProjectAssignments}>{projectSaving ? '保存中…' : '保存全部'}</button>
-      </div>
-      <div className="system-subsection-title"><strong>待审核项目访问申请</strong><span>{projectApplications.length} 条</span></div>
-      <div className="system-table-wrap"><table><thead><tr><th>申请人</th>{isPlatformAdmin(currentUser) && <th>手机号</th>}<th>目标项目</th><th>申请类型</th><th>申请时间</th><th>操作</th></tr></thead>
-        <tbody>{projectApplications.map((application) => <tr key={application.id}><td><strong>{application.realName || application.applicantName || '-'}</strong><small>{application.matchedUsername || (application.matchedUserId ? `用户 ${application.matchedUserId}` : '未绑定系统账号')}</small></td>{isPlatformAdmin(currentUser) && <td>{application.phone || '-'}</td>}<td>{application.projectName || currentProjectName || '-'}</td><td>{application.applicationType || application.type || 'PROJECT_ACCESS'}</td><td>{formatDate(application.createdAt || application.applyTime || application.createTime)}</td><td><div className="system-row-actions"><button onClick={() => approveProjectApplication(application)}>批准</button><button className="danger" onClick={() => rejectProjectApplication(application)}>驳回</button></div></td></tr>)}</tbody></table>{!projectApplications.length && <Empty text="暂无待审核项目访问申请" />}</div>
     </>
   );
 
@@ -1490,6 +1373,7 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
   );
 
   const renderContent = () => {
+    if (activeTab === 'approval') return <ApprovalManagementPage currentUser={currentUser} initialProjectId={currentProject} projectList={projectList} />;
     if (loading) return <Loading />;
     if (error) return <ErrorState text={error} onRetry={loadData} />;
     let content;
@@ -1497,11 +1381,10 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
     else if (activeTab === 'users') content = renderUsers();
     else if (activeTab === 'roles') content = renderRoles();
     else if (activeTab === 'menus') content = renderMenus();
-    else if (activeTab === 'projects') content = renderProjects();
     else if (activeTab === 'wechat') content = renderWechat();
     else if (activeTab === 'audit') content = renderAudit();
     else content = <Empty text="无可访问的系统管理模块" />;
-    return <>{content}{!rows.length && activeTab !== 'projects' && <Empty />}{<Pagination pageNo={pageNo} pageSize={pageSize} total={total} onPageChange={setPageNo} />}</>;
+    return <>{content}{!rows.length && <Empty />}{<Pagination pageNo={pageNo} pageSize={pageSize} total={total} onPageChange={setPageNo} />}</>;
   };
 
   return (
@@ -1512,7 +1395,8 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
       </aside>
       <section className="system-content">{availableTabs.length ? renderContent() : <ErrorState text="当前账号没有系统管理权限" onRetry={onBack} />}</section>
       {reviewing && <ReviewDialog application={reviewing} roles={roles} permissions={permissions} projectList={projectList} onClose={() => setReviewing(null)} onApproved={async () => { setReviewing(null); await loadData(); }} />}
-      {roleDefinitionDialog !== undefined && <RoleDefinitionDialog role={roleDefinitionDialog} onClose={() => setRoleDefinitionDialog(undefined)} onSave={saveRoleDefinition} />}
+      {passwordResetUser && <PasswordResetDialog user={passwordResetUser} onClose={() => setPasswordResetUser(null)} onSubmit={(newPassword) => resetPassword(passwordResetUser, newPassword)} />}
+      {roleDefinitionDialog !== undefined && <RoleDefinitionDialog role={roleDefinitionDialog} roles={roles} onClose={() => setRoleDefinitionDialog(undefined)} onSave={saveRoleDefinition} />}
       {roleMenuDialog && <MenuAssignmentDialog role={roleMenuDialog} menus={menus} selectedMenuIds={(roleMenuDialog.menuIds || []).filter((id) => id !== undefined)} businessModuleCodes={deriveRoleBusinessModuleCodes(roleMenuDialog, menus)} onClose={() => setRoleMenuDialog(null)} onSave={(values) => saveRoleMenus(roleMenuDialog, values)} />}
       {rolePermissionDialog && <PermissionAssignmentDialog role={rolePermissionDialog} menus={menus} permissions={roleAssignablePermissions(rolePermissionDialog, permissions)} selectedMenuIds={(rolePermissionDialog.menuIds || []).filter((id) => id !== undefined)} businessModuleCodes={deriveRoleBusinessModuleCodes(rolePermissionDialog, menus)} selectedPermissionIds={rolePermissionIdsFor(rolePermissionDialog)} onClose={() => setRolePermissionDialog(null)} onSave={(values) => saveRoleOperationPermissions(rolePermissionDialog, values)} />}
       {userProjectAccessDialog && (
@@ -1522,27 +1406,14 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
           projectList={projectList}
           projectRoles={projectRoleOptions}
           onClose={() => setUserProjectAccessDialog(null)}
+          onPreview={async (values) => {
+            const response = await previewSystemUserProjectRoleAssignments(getId(userProjectAccessDialog), values);
+            if (!response || response.code !== 200) throw new Error(response?.message || '撤权影响加载失败');
+            return response.data || [];
+          }}
           onSave={(values) => saveUserProjectAccess(userProjectAccessDialog, values)}
           onStatusChange={(projectId, values) => updateUserProjectAccessStatus(userProjectAccessDialog, projectId, values)}
           onChanged={loadData}
-        />
-      )}
-      {projectAuthorizationDialog && (
-        <ProjectAuthorizationDialog
-          key={`${projectAuthorizationDialog.mode}-${projectAuthorizationDialog.subject?.id || projectAuthorizationDialog.subject?.userId || 'new'}`}
-          mode={projectAuthorizationDialog.mode}
-          projectName={currentProjectName || currentProject}
-          subject={projectAuthorizationDialog.subject}
-          userOptions={projectAuthorizationDialog.userOptions}
-          projectRoles={projectRoleOptions}
-          permissions={permissions}
-          onSearchUsers={projectAuthorizationDialog.mode === 'add' ? async (searchKeyword) => {
-            const res = await getProjectUserOptions(currentProject, searchKeyword || undefined);
-            if (res.code !== 200) throw new Error(res.message || '可选用户加载失败');
-            return projectAuthorizationDialog.filterCandidates(extractList(res.data));
-          } : undefined}
-          onClose={() => setProjectAuthorizationDialog(null)}
-          onSubmit={submitProjectAuthorization}
         />
       )}
     </div>

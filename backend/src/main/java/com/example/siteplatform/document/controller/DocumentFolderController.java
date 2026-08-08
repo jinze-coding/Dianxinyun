@@ -6,6 +6,9 @@ import com.example.siteplatform.document.dto.DocumentFolderCreateRequest;
 import com.example.siteplatform.document.dto.DocumentFolderUpdateRequest;
 import com.example.siteplatform.document.service.DocumentFolderService;
 import com.example.siteplatform.document.vo.DocumentFolderVO;
+import com.example.siteplatform.system.dto.AdministrativeDeletionExecuteRequest;
+import com.example.siteplatform.system.service.AdministrativeDeletionService;
+import com.example.siteplatform.system.service.SystemPermissionService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,10 +28,16 @@ import java.util.List;
 public class DocumentFolderController {
     private final DocumentFolderService folderService;
     private final AuthService authService;
+    private final AdministrativeDeletionService administrativeDeletionService;
+    private final SystemPermissionService systemPermissionService;
 
-    public DocumentFolderController(DocumentFolderService folderService, AuthService authService) {
+    public DocumentFolderController(DocumentFolderService folderService, AuthService authService,
+                                    AdministrativeDeletionService administrativeDeletionService,
+                                    SystemPermissionService systemPermissionService) {
         this.folderService = folderService;
         this.authService = authService;
+        this.administrativeDeletionService = administrativeDeletionService;
+        this.systemPermissionService = systemPermissionService;
     }
 
     @GetMapping
@@ -51,8 +60,14 @@ public class DocumentFolderController {
     }
 
     @DeleteMapping("/{id}")
-    public Result<Void> delete(@PathVariable Long id, @RequestHeader("Authorization") String token) {
-        folderService.delete(id, authService.getCurrentUser(token));
+    public Result<Void> delete(@PathVariable Long id,
+                               @Valid @RequestBody AdministrativeDeletionExecuteRequest confirmation,
+                               @RequestHeader("Authorization") String token) {
+        var operator = authService.getCurrentUser(token);
+        systemPermissionService.requirePlatformAdmin(operator);
+        confirmation.setTargetType("DOCUMENT_FOLDER");
+        confirmation.setTargetId(id);
+        administrativeDeletionService.execute(confirmation, operator);
         return Result.success();
     }
 }

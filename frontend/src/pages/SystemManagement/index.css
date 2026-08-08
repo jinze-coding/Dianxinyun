@@ -1120,6 +1120,17 @@ button.danger {
   background: #f5f8fc;
 }
 
+.system-warning {
+  margin-bottom: 10px;
+  padding: 9px 11px;
+  border: 1px solid #fed7aa;
+  border-radius: 6px;
+  color: #9a4f12;
+  background: #fff7ed;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .system-project-auth-summary strong {
   color: #0f1a2e;
   font-size: 12px;
@@ -1349,6 +1360,77 @@ button.danger {
   background: rgba(22, 119, 255, 0.025);
 }
 
+.system-role-table .system-role-name {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.system-role-name.tone-administrator {
+  color: #315f86;
+  border-color: #cbdceb;
+  background: #eaf1f7;
+}
+
+.system-role-name.tone-commander {
+  color: #3f5063;
+  border-color: #d9e0e6;
+  background: #f4f6f8;
+}
+
+.system-role-name.tone-manager {
+  color: #a74444;
+  border-color: #f1cccc;
+  background: #fde5e4;
+}
+
+.system-role-name.tone-safety {
+  color: #3e6e9f;
+  border-color: #cbdcf2;
+  background: #e2edfb;
+}
+
+.system-role-name.tone-chief-engineer {
+  color: #287458;
+  border-color: #bfe5d0;
+  background: #dff4e8;
+}
+
+.system-role-name.tone-quality {
+  color: #80651a;
+  border-color: #f0dda3;
+  background: #fff4cb;
+}
+
+.system-role-name.tone-construction {
+  color: #955f2a;
+  border-color: #efd3b4;
+  background: #ffead5;
+}
+
+.system-role-name.tone-document {
+  color: #834b91;
+  border-color: #e8c9ee;
+  background: #f5ddf8;
+}
+
+.system-role-name.tone-electrician {
+  color: #287387;
+  border-color: #bfe1e8;
+  background: #dff2f6;
+}
+
+.system-role-name.tone-default {
+  color: #53657a;
+  border-color: #d9e1ea;
+  background: #eef2f6;
+}
+
 .system-role-tags {
   display: flex;
   flex-wrap: wrap;
@@ -1427,6 +1509,117 @@ button.danger {
 .system-role-form-grid small {
   color: #97a8bd;
   font-size: 9px;
+}
+
+.system-role-form-grid .system-field-error {
+  color: #c62828;
+  font-size: 10px;
+}
+
+.system-role-form-grid input[aria-invalid='true'] {
+  border-color: rgba(220, 38, 38, 0.55);
+}
+
+.system-password-target {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  padding: 12px 14px;
+  border: 1px solid #dce5f0;
+  border-radius: 7px;
+  background: #f8fafd;
+}
+
+.system-password-target span {
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: #8aa0bc;
+  font-size: 11px;
+}
+
+.system-password-target strong {
+  color: #223655;
+  font-size: 14px;
+}
+
+.system-password-target small {
+  color: #8aa0bc;
+  font-size: 10px;
+}
+
+.system-password-form {
+  margin-top: 2px;
+}
+
+.system-password-input {
+  position: relative;
+  display: flex;
+}
+
+.system-password-input input {
+  width: 100%;
+  padding-right: 58px;
+}
+
+.system-password-input button {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  padding: 2px 4px;
+  border: 0;
+  color: #1677ff;
+  background: transparent;
+  font-size: 10px;
+  transform: translateY(-50%);
+}
+
+.system-password-rules {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.system-password-rules span {
+  padding: 7px 9px;
+  border-radius: 6px;
+  color: #8aa0bc;
+  background: #f5f7fb;
+  font-size: 10px;
+}
+
+.system-password-rules span::before {
+  content: '○';
+  margin-right: 6px;
+}
+
+.system-password-rules span.met {
+  color: #15803d;
+  background: rgba(22, 163, 74, 0.08);
+}
+
+.system-password-rules span.met::before {
+  content: '✓';
+}
+
+.system-password-success {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  padding: 18px;
+  border: 1px solid rgba(22, 163, 74, 0.22);
+  border-radius: 8px;
+  color: #166534;
+  background: rgba(22, 163, 74, 0.06);
+}
+
+.system-password-success strong {
+  font-size: 15px;
+}
+
+.system-password-success span {
+  font-size: 11px;
+  line-height: 1.7;
 }
 
 .system-inline-notice,

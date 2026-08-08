@@ -1,5 +1,5 @@
 import { checkItems } from '@/mock/data';
-import type { CheckResult, InspectionItemResult, InspectionRecord } from '@/types';
+import type { CheckResult, InspectionAssignee, InspectionItemResult, InspectionRecord } from '@/types';
 import { API_BASE_URL, getToken, request, USE_MOCK } from './request';
 import { downloadFilePaths } from './file';
 import {
@@ -60,6 +60,13 @@ export async function getInspectionRecordDetail(id: number): Promise<InspectionR
   }
   const record = await request<InspectionRecord>(`/inspection/records/${id}`);
   return hydrateRecordPhotos(record);
+}
+
+export async function getInspectionRectificationAssignees(projectId: number): Promise<InspectionAssignee[]> {
+  if (USE_MOCK) {
+    return [{ userId: 3, username: 'electrician', realName: '示例电工', displayName: '示例电工' }];
+  }
+  return request<InspectionAssignee[]>(`/inspection/rectification-assignees?projectId=${encodeURIComponent(projectId)}`);
 }
 
 export async function submitInspectionRecord(payload: {

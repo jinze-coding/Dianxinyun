@@ -16,7 +16,9 @@ import com.example.siteplatform.project.dto.ProjectMemberBatchRequest;
 import com.example.siteplatform.project.dto.ProjectMemberStatusRequest;
 import com.example.siteplatform.project.dto.ProjectMemberVO;
 import com.example.siteplatform.project.dto.ProjectUserOptionVO;
+import com.example.siteplatform.project.dto.ResponsibilityImpactVO;
 import com.example.siteplatform.project.dto.UserProjectRoleBatchRequest;
+import com.example.siteplatform.project.constant.InspectionPermissionCodes;
 import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.entity.SysUserProject;
 import com.example.siteplatform.project.entity.SysUserProjectRole;
@@ -30,6 +32,7 @@ import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import com.example.siteplatform.system.mapper.SystemRoleBusinessModuleMapper;
 import com.example.siteplatform.system.mapper.SystemRoleMapper;
 import com.example.siteplatform.system.mapper.SystemPermissionMapper;
+import com.example.siteplatform.system.service.ResponsibilityReleaseService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -61,6 +64,7 @@ public class ProjectMemberService {
     @Autowired private SystemPermissionMapper systemPermissionMapper;
     @Autowired private QualityAssigneeService qualityAssigneeService;
     @Autowired private ProjectInfoMapper projectInfoMapper;
+    @Autowired private ResponsibilityReleaseService responsibilityReleaseService;
 
     private record PreparedChange(Long projectId, Long userId, String operation,
                                   List<SystemRole> roles, SysUserProject existing,
@@ -157,7 +161,7 @@ public class ProjectMemberService {
         for (ProjectMemberBatchRequest.Change change : changes.stream()
                 .sorted(Comparator.comparing(ProjectMemberBatchRequest.Change::getUserId)).toList()) {
             prepared.add(prepareChange(projectId, change.getUserId(), change.getOperation(),
-                    change.getRoleIds(), currentUser));
+                    change.getRoleIds(), currentUser, false));
         }
         applyPreparedChanges(prepared, currentUser);
         Set<Long> affectedUsers = prepared.stream()
@@ -187,15 +191,53 @@ public class ProjectMemberService {
         List<PreparedChange> prepared = new ArrayList<>();
         for (UserProjectRoleBatchRequest.Change change : sortedChanges) {
             prepared.add(prepareChange(change.getProjectId(), userId, change.getOperation(),
-                    change.getRoleIds(), currentUser));
+                    change.getRoleIds(), currentUser, true));
+        }
+        List<ResponsibilityImpactVO> impacts = prepared.stream()
+                .filter(change -> change.existing() != null)
+                .map(change -> responsibilityImpactForChange(change))
+                .filter(impact -> impact.getTotalCount() > 0)
+                .toList();
+        if (!impacts.isEmpty() && !request.isConfirmResponsibilityRelease()) {
+            throw BusinessException.of(409, "该用户仍有关联电箱或未完成任务，请预览影响并确认解除责任绑定");
         }
         applyPreparedChanges(prepared, currentUser);
+        for (PreparedChange change : prepared) {
+            if (change.existing() == null) continue;
+            if ("REMOVE".equals(change.operation())) {
+                responsibilityReleaseService.releaseAll(change.projectId(), change.userId());
+            } else {
+                responsibilityReleaseService.releaseForCapabilityLoss(change.projectId(), change.userId());
+            }
+        }
         if (prepared.stream().anyMatch(change -> change.existing() != null || "UPSERT".equals(change.operation()))) {
             invalidateUsers(Set.of(userId));
         }
         recordBatchOperation(currentUser, "BATCH_UPDATE_USER_PROJECT_ROLES", "SYS_USER",
                 userId, batchDescription(prepared));
         return userProjectAssignments(userId);
+    }
+
+    public List<ResponsibilityImpactVO> previewUserProjectAssignmentImpact(
+            Long userId, UserProjectRoleBatchRequest request, SysUser currentUser) {
+        requirePlatformAdministrator(currentUser);
+        List<UserProjectRoleBatchRequest.Change> changes = validateUserProjectBatch(request);
+        SysUser targetUser = userMapper.selectById(userId);
+        if (targetUser == null || Integer.valueOf(1).equals(targetUser.getDeleted())) {
+            throw BusinessException.notFound("用户不存在");
+        }
+        List<ResponsibilityImpactVO> impacts = new ArrayList<>();
+        for (UserProjectRoleBatchRequest.Change change : changes) {
+            if (findUserProject(change.getProjectId(), userId) == null) continue;
+            String operation = normalizeOperation(change.getOperation());
+            List<SystemRole> roles = "REMOVE".equals(operation)
+                    ? List.of() : requireEnabledProjectRoles(change.getRoleIds());
+            PreparedChange prepared = new PreparedChange(change.getProjectId(), userId, operation,
+                    roles, findUserProject(change.getProjectId(), userId), null);
+            ResponsibilityImpactVO impact = responsibilityImpactForChange(prepared);
+            if (impact.getTotalCount() > 0) impacts.add(impact);
+        }
+        return impacts;
     }
 
     public List<SystemRole> listAssignableRoles(Long projectId, SysUser currentUser) {
@@ -285,7 +327,7 @@ public class ProjectMemberService {
         if (userId == null) throw new BusinessException("用户ID不能为空");
         requireManageMembers(currentUser, projectId, "移除");
         if (Objects.equals(currentUser.getId(), userId)) throw new BusinessException("不能移除自己的项目授权");
-        SysUserProject existing = findUserProject(projectId, userId);
+        SysUserProject existing = userProjectMapper.selectByProjectAndUserForUpdate(projectId, userId);
         if (existing == null) return;
         assertProjectManagerCanChangeTarget(currentUser, projectId, userId);
         requireNoOpenQualityAssignments(projectId, userId, "移除");
@@ -296,6 +338,7 @@ public class ProjectMemberService {
         }
         userProjectRoleMapper.deleteByUserAndProject(userId, projectId);
         requireSingleWrite(userProjectMapper.deleteById(existing.getId()));
+        responsibilityReleaseService.releaseAll(projectId, userId);
         invalidateUserAccess(userId);
         recordMemberOperation(projectId, userId, currentUser, "REMOVE_PROJECT_MEMBER", "移出项目成员");
     }
@@ -316,7 +359,7 @@ public class ProjectMemberService {
         if (Objects.equals(currentUser.getId(), userId) && "DISABLED".equals(status)) {
             throw new BusinessException("不能暂停自己的项目访问权限");
         }
-        SysUserProject existing = findUserProject(projectId, userId);
+        SysUserProject existing = userProjectMapper.selectByProjectAndUserForUpdate(projectId, userId);
         if (existing == null) throw BusinessException.notFound("项目成员授权不存在");
         assertProjectManagerCanChangeTarget(currentUser, projectId, userId);
         if ("DISABLED".equals(status)) {
@@ -331,40 +374,14 @@ public class ProjectMemberService {
         existing.setStatusChangedTime(LocalDateTime.now());
         existing.setUpdateTime(LocalDateTime.now());
         requireSingleWrite(userProjectMapper.updateById(existing));
+        if ("DISABLED".equals(status)) {
+            responsibilityReleaseService.releaseAll(projectId, userId);
+        }
         invalidateUserAccess(userId);
         recordMemberOperation(projectId, userId, currentUser,
                 "ACTIVE".equals(status) ? "RESTORE_PROJECT_ACCESS" : "DISABLE_PROJECT_ACCESS",
                 "项目访问状态变更为" + status + reasonSuffix(request.getReason()));
         return findMember(projectId, userId);
-    }
-
-    /** 供电箱职责等既有业务自动补齐成员关系；只追加指定角色，不覆盖已有角色。 */
-    @Transactional
-    public void ensureProjectMember(Long projectId, Long userId, String roleCode) {
-        if (projectId == null || userId == null) return;
-        SystemRole role = requireEnabledProjectRoleByCode(roleCode);
-        SysUserProject existing = findUserProject(projectId, userId);
-        if (existing == null) {
-            existing = new SysUserProject();
-            existing.setProjectId(projectId);
-            existing.setUserId(userId);
-            existing.setProjectRoleCode(role.getRoleCode());
-            existing.setStatus("ACTIVE");
-            existing.setCreateTime(LocalDateTime.now());
-            existing.setUpdateTime(LocalDateTime.now());
-            requireSingleWrite(userProjectMapper.insert(existing));
-        }
-        boolean assigned = userProjectRoleMapper.selectAssignedRoles(userId, projectId).stream()
-                .anyMatch(item -> Objects.equals(item.getId(), role.getId()));
-        if (!assigned) {
-            SysUserProjectRole relation = new SysUserProjectRole();
-            relation.setProjectId(projectId);
-            relation.setUserId(userId);
-            relation.setRoleId(role.getId());
-            relation.setCreateTime(LocalDateTime.now());
-            requireSingleWrite(userProjectRoleMapper.insert(relation));
-            invalidateUserAccess(userId);
-        }
     }
 
     private void replaceRoles(Long projectId, Long userId, List<SystemRole> roles, Long operatorId) {
@@ -430,15 +447,6 @@ public class ProjectMemberService {
         }
         if (roles.isEmpty()) throw new BusinessException("请至少分配一个项目角色");
         return roles;
-    }
-
-    private SystemRole requireEnabledProjectRoleByCode(String roleCode) {
-        String code = projectPermissionService.normalizeProjectRoleCode(roleCode);
-        SystemRole role = systemRoleMapper.selectOne(new LambdaQueryWrapper<SystemRole>()
-                .eq(SystemRole::getRoleCode, code).eq(SystemRole::getScopeType, "PROJECT")
-                .eq(SystemRole::getEnabled, 1).eq(SystemRole::getDeleted, 0).last("LIMIT 1"));
-        if (role == null) throw new BusinessException("项目角色不存在或已停用：" + code);
-        return role;
     }
 
     private void requireManageMembers(SysUser currentUser, Long projectId, String action) {
@@ -559,12 +567,14 @@ public class ProjectMemberService {
     }
 
     private PreparedChange prepareChange(Long projectId, Long userId, String rawOperation,
-                                         List<Long> roleIds, SysUser currentUser) {
+                                         List<Long> roleIds, SysUser currentUser,
+                                         boolean confirmResponsibilityRelease) {
         String operation = normalizeOperation(rawOperation);
         SysUserProject existing = userProjectMapper.selectByProjectAndUserForUpdate(projectId, userId);
         ProjectMemberVO existingMember = existing == null ? null : findMember(projectId, userId);
         if ("REMOVE".equals(operation)) {
-            if (existing != null) validateRemoval(projectId, userId, existingMember, currentUser);
+            if (existing != null) validateRemoval(projectId, userId, existingMember, currentUser,
+                    confirmResponsibilityRelease);
             return new PreparedChange(projectId, userId, operation, List.of(), existing, existingMember);
         }
 
@@ -577,13 +587,17 @@ public class ProjectMemberService {
         }
         List<SystemRole> roles = requireEnabledProjectRoles(roleIds);
         assertProjectManagerCanChangeRoles(currentUser, projectId, userId, existing, roles);
-        requireRequestedRolesKeepOpenQualityServiceable(projectId, userId, existing, roles);
+        if (!confirmResponsibilityRelease) {
+            requireRequestedRolesKeepOpenQualityServiceable(projectId, userId, existing, roles);
+        }
         return new PreparedChange(projectId, userId, operation, roles, existing, existingMember);
     }
 
-    private void validateRemoval(Long projectId, Long userId, ProjectMemberVO member, SysUser currentUser) {
+    private void validateRemoval(Long projectId, Long userId, ProjectMemberVO member, SysUser currentUser,
+                                 boolean allowResponsibilityRelease) {
         if (Objects.equals(currentUser.getId(), userId)) throw new BusinessException("不能移除自己的项目授权");
         assertProjectManagerCanChangeTarget(currentUser, projectId, userId);
+        if (allowResponsibilityRelease && projectPermissionService.isPlatformAdmin(currentUser.getId())) return;
         requireNoOpenQualityAssignments(projectId, userId, "移除");
         if (member != null && ((member.getResponsibleBoxCount() != null && member.getResponsibleBoxCount() > 0)
                 || (member.getPendingRectificationCount() != null && member.getPendingRectificationCount() > 0))) {
@@ -619,6 +633,58 @@ public class ProjectMemberService {
                 .collect(java.util.stream.Collectors.toSet());
         return codes.contains(SystemPermissionCodes.QUALITY_VIEW)
                 && codes.contains(SystemPermissionCodes.QUALITY_RECTIFY);
+    }
+
+    private ResponsibilityImpactVO responsibilityImpactForChange(PreparedChange change) {
+        ResponsibilityImpactVO impact = responsibilityReleaseService.impact(change.projectId(), change.userId());
+        if ("REMOVE".equals(change.operation())) return impact;
+        if (projectPermissionService.isPlatformAdmin(change.userId())) {
+            clearResponsibilityCounts(impact);
+            return impact;
+        }
+        Set<String> codes = permissionCodesForRoles(change.userId(), change.roles());
+        if (codes.contains(InspectionPermissionCodes.INSPECTION_DAILY_SUBMIT)
+                || codes.contains(SystemPermissionCodes.INSPECTION_SUBMIT)) {
+            impact.setResponsibleElectricBoxCount(0);
+        }
+        if (codes.contains(InspectionPermissionCodes.INSPECTION_REVIEW)
+                || codes.contains(SystemPermissionCodes.INSPECTION_MANAGE)) {
+            impact.setSafetyManagedElectricBoxCount(0);
+            impact.setPendingInspectionReviewCount(0);
+        }
+        if (codes.contains(SystemPermissionCodes.INSPECTION_RECTIFY)) {
+            impact.setOpenRectificationCount(0);
+        }
+        if (codes.contains(SystemPermissionCodes.QUALITY_RECTIFY)) {
+            impact.setOpenQualityIssueCount(0);
+        }
+        return impact;
+    }
+
+    private Set<String> permissionCodesForRoles(Long userId, List<SystemRole> roles) {
+        Set<String> codes = new LinkedHashSet<>(safeList(systemPermissionMapper.selectPlatformCodesByUserId(userId)));
+        Set<Long> permissionIds = new LinkedHashSet<>();
+        for (SystemRole role : safeList(roles)) {
+            permissionIds.addAll(safeList(systemRoleMapper.selectPermissionIds(role.getId())));
+        }
+        if (!permissionIds.isEmpty()) {
+            systemPermissionMapper.selectBatchIds(permissionIds).stream()
+                    .filter(permission -> permission != null
+                            && Integer.valueOf(1).equals(permission.getEnabled())
+                            && !Integer.valueOf(1).equals(permission.getDeleted()))
+                    .map(SystemPermission::getPermissionCode)
+                    .filter(StringUtils::hasText)
+                    .forEach(codes::add);
+        }
+        return codes;
+    }
+
+    private void clearResponsibilityCounts(ResponsibilityImpactVO impact) {
+        impact.setResponsibleElectricBoxCount(0);
+        impact.setSafetyManagedElectricBoxCount(0);
+        impact.setPendingInspectionReviewCount(0);
+        impact.setOpenRectificationCount(0);
+        impact.setOpenQualityIssueCount(0);
     }
 
     private void applyPreparedChanges(List<PreparedChange> changes, SysUser currentUser) {

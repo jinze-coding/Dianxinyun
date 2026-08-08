@@ -29,6 +29,7 @@ import com.example.siteplatform.inspection.mapper.InspectionRectificationReviewL
 import com.example.siteplatform.inspection.mapper.InspectionReviewLogMapper;
 import com.example.siteplatform.inspection.mapper.InspectionTemplateMapper;
 import com.example.siteplatform.inspection.vo.InspectionMonthSummaryVO;
+import com.example.siteplatform.inspection.vo.InspectionAssigneeVO;
 import com.example.siteplatform.inspection.vo.InspectionRectificationReviewLogVO;
 import com.example.siteplatform.inspection.vo.InspectionRectificationVO;
 import com.example.siteplatform.inspection.vo.InspectionRecordItemVO;
@@ -44,7 +45,7 @@ import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.entity.SysUserProject;
 import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
-import com.example.siteplatform.project.service.ProjectMemberService;
+import com.example.siteplatform.project.mapper.SysUserProjectRoleMapper;
 import com.example.siteplatform.project.service.ProjectPermissionService;
 import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import com.example.siteplatform.notification.service.WechatNotificationService;
@@ -148,10 +149,10 @@ public class InspectionService {
     private SysUserProjectMapper userProjectMapper;
 
     @Autowired
-    private ProjectPermissionService projectPermissionService;
+    private SysUserProjectRoleMapper userProjectRoleMapper;
 
     @Autowired
-    private ProjectMemberService projectMemberService;
+    private ProjectPermissionService projectPermissionService;
 
     @Autowired
     private InspectionTemplateMapper inspectionTemplateMapper;
@@ -187,6 +188,26 @@ public class InspectionService {
         return inspectionTemplateMapper.selectList(new LambdaQueryWrapper<InspectionTemplate>()
                 .eq(InspectionTemplate::getStatus, "ACTIVE")
                 .orderByAsc(InspectionTemplate::getId));
+    }
+
+    public List<InspectionAssigneeVO> listRectificationAssignees(Long projectId, SysUser currentUser) {
+        if (projectId == null) {
+            throw new BusinessException("项目ID不能为空");
+        }
+        projectPermissionService.checkProjectPermission(currentUser.getId(), projectId);
+        projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
+                SystemPermissionCodes.INSPECTION_VIEW);
+        boolean canSubmitInspection = projectPermissionService.hasSystemPermission(currentUser.getId(), projectId,
+                SystemPermissionCodes.INSPECTION_SUBMIT);
+        if (!canSubmitInspection && !isSafetyReviewer(currentUser, projectId)) {
+            throw BusinessException.forbidden("无巡检整改负责人查询权限");
+        }
+        return userProjectRoleMapper.selectActiveUsersByProjectRoleCode(
+                        projectId, ProjectPermissionService.ROLE_ELECTRICIAN).stream()
+                .filter(user -> projectPermissionService.hasSystemPermission(
+                        user.getId(), projectId, SystemPermissionCodes.INSPECTION_RECTIFY))
+                .map(this::toAssigneeVO)
+                .toList();
     }
 
     public List<InspectionRecordVO> listRecords(Long projectId, Long electricBoxId, String status, String month,
@@ -257,6 +278,18 @@ public class InspectionService {
             ensureDailyUnique(box.getProjectId(), box.getId(), templateCode, source, checkDate);
         }
 
+        int abnormalCount = countAbnormal(request.getItems());
+        Assignee rectificationAssignee = null;
+        LocalDate rectificationDeadline = null;
+        if (abnormalCount > 0) {
+            if (request.getAssigneeId() == null) {
+                throw new BusinessException("巡检存在异常时必须选择整改负责人");
+            }
+            rectificationAssignee = requireElectricianAssignee(request.getAssigneeId(), box.getProjectId());
+            rectificationDeadline = validateRectificationDeadline(request.getDeadline());
+            ensureSafetyOfficerAvailable(box.getProjectId());
+        }
+
         InspectionRecord record = new InspectionRecord();
         record.setProjectId(box.getProjectId());
         record.setElectricBoxId(box.getId());
@@ -268,10 +301,14 @@ public class InspectionService {
         record.setInspectorName(currentUser.getRealName());
         record.setOuterPhotoFileIds(joinIds(request.getOuterPhotoFileIds()));
         record.setInnerPhotoFileIds(joinIds(request.getInnerPhotoFileIds()));
-        record.setAbnormalCount(countAbnormal(request.getItems()));
+        record.setAbnormalCount(abnormalCount);
         record.setRemark(request.getRemark());
         record.setDeleted(0);
-        markCompleted(record);
+        if (abnormalCount > 0) {
+            markRectificationPending(record);
+        } else {
+            markCompleted(record);
+        }
         requireSingleWrite(inspectionRecordMapper.insert(record), "巡检记录新增");
         fileResourceService.validateAndBind(currentUser, record.getProjectId(), request.getOuterPhotoFileIds(),
                 "inspection_record", "inspection_record", record.getId());
@@ -289,6 +326,10 @@ public class InspectionService {
             item.setDeleted(0);
             requireSingleWrite(inspectionRecordItemMapper.insert(item), "巡检检查项新增");
             items.add(item);
+        }
+        if (rectificationAssignee != null) {
+            createRectificationFromInspection(record, box, items, request,
+                    rectificationAssignee, rectificationDeadline, currentUser);
         }
         return toRecordVO(record, box, items, false);
     }
@@ -413,12 +454,23 @@ public class InspectionService {
         for (ProjectInfo project : projects) {
             Long projectId = project.getId();
             String projectName = StringUtils.hasText(project.getShortName()) ? project.getShortName() : project.getProjectName();
-            boolean canSubmitDaily = projectPermissionService.hasInspectionPermission(currentUser.getId(), projectId,
-                    InspectionPermissionCodes.INSPECTION_DAILY_SUBMIT)
-                    && projectPermissionService.hasSystemPermission(currentUser.getId(), projectId,
+            boolean canSubmitDaily = projectPermissionService.hasSystemPermission(currentUser.getId(), projectId,
                     SystemPermissionCodes.INSPECTION_SUBMIT);
             if (canSubmitDaily) {
                 appendInspectionTodos(todos, idGenerator, projectId, projectName);
+            }
+            boolean platformAdmin = projectPermissionService.isPlatformAdmin(currentUser.getId());
+            boolean electrician = projectPermissionService.hasProjectRole(
+                    currentUser.getId(), projectId, ProjectPermissionService.ROLE_ELECTRICIAN)
+                    && projectPermissionService.hasSystemPermission(
+                    currentUser.getId(), projectId, SystemPermissionCodes.INSPECTION_RECTIFY);
+            boolean safetyReviewer = isSafetyReviewer(currentUser, projectId);
+            if (platformAdmin || electrician) {
+                appendRectificationTodos(todos, idGenerator, projectId, projectName,
+                        currentUser, platformAdmin);
+            }
+            if (safetyReviewer) {
+                appendRecheckTodos(todos, idGenerator, projectId, projectName);
             }
         }
         return todos;
@@ -538,18 +590,28 @@ public class InspectionService {
     }
 
     public List<InspectionRectificationVO> listRectifications(Long projectId, String status, SysUser currentUser) {
+        if (projectId == null && !projectPermissionService.isPlatformAdmin(currentUser.getId())) {
+            throw new BusinessException("项目ID不能为空");
+        }
         LambdaQueryWrapper<InspectionRectification> wrapper = new LambdaQueryWrapper<>();
         applyRectificationProjectScope(wrapper, projectId, currentUser);
         if (StringUtils.hasText(status)) {
             wrapper.eq(InspectionRectification::getStatus, status);
         }
-        if (projectId != null && !projectPermissionService.hasInspectionPermission(currentUser.getId(), projectId, InspectionPermissionCodes.RECTIFICATION_VIEW)) {
+        if (projectId != null && !isSafetyReviewer(currentUser, projectId)
+                && !projectPermissionService.isPlatformAdmin(currentUser.getId())) {
+            if (!projectPermissionService.hasProjectRole(currentUser.getId(), projectId,
+                    ProjectPermissionService.ROLE_ELECTRICIAN)
+                    || !projectPermissionService.hasSystemPermission(currentUser.getId(), projectId,
+                    SystemPermissionCodes.INSPECTION_RECTIFY)) {
+                throw BusinessException.forbidden("无巡检整改访问权限");
+            }
             wrapper.eq(InspectionRectification::getAssigneeId, currentUser.getId());
         }
         wrapper.orderByAsc(InspectionRectification::getDeadline).orderByDesc(InspectionRectification::getId);
         return inspectionRectificationMapper.selectList(wrapper).stream()
                 .filter(rectification -> canViewRectification(rectification, currentUser))
-                .map(this::toRectificationVO)
+                .map(rectification -> toRectificationVO(rectification, currentUser))
                 .toList();
     }
 
@@ -558,34 +620,37 @@ public class InspectionService {
         projectPermissionService.checkProjectPermission(currentUser.getId(), rectification.getProjectId());
         projectPermissionService.requireSystemPermission(currentUser.getId(), rectification.getProjectId(),
                 SystemPermissionCodes.INSPECTION_VIEW);
-        if (!projectPermissionService.hasInspectionPermission(currentUser.getId(), rectification.getProjectId(), InspectionPermissionCodes.RECTIFICATION_VIEW)
-                && !Objects.equals(rectification.getAssigneeId(), currentUser.getId())) {
+        if (!canViewRectification(rectification, currentUser)) {
             throw BusinessException.forbidden("无整改任务访问权限");
         }
-        return toRectificationVO(rectification);
+        return toRectificationVO(rectification, currentUser);
     }
 
+    @Transactional
     public InspectionRectificationVO completeRectification(Long id, RectificationCompleteRequest request,
                                                            SysUser currentUser) {
-        InspectionRectification rectification = requireRectification(id);
-        projectPermissionService.requireSystemPermission(currentUser.getId(), rectification.getProjectId(),
-                SystemPermissionCodes.INSPECTION_MANAGE);
-        boolean manager = projectPermissionService.hasInspectionPermission(currentUser.getId(), rectification.getProjectId(), InspectionPermissionCodes.RECTIFICATION_REVIEW);
-        if (!manager && !Objects.equals(rectification.getAssigneeId(), currentUser.getId())) {
+        InspectionRectification rectification = requireRectificationForUpdate(id);
+        projectPermissionService.checkProjectPermission(currentUser.getId(), rectification.getProjectId());
+        if (!projectPermissionService.isPlatformAdmin(currentUser.getId())
+                && !isAssignedElectrician(currentUser, rectification)) {
             throw BusinessException.forbidden("只能处理分配给自己的整改任务");
         }
         if (!RECTIFICATION_PENDING.equals(rectification.getStatus())
                 && !RECTIFICATION_REJECTED.equals(rectification.getStatus())) {
-            throw new BusinessException("只有待整改或复查退回状态可以提交整改");
+            throw BusinessException.of(409, "整改任务状态已变化，请刷新后重试");
         }
         String feedback = request == null ? null : trimToNull(request.getFeedback());
         if (!StringUtils.hasText(feedback)) {
             throw new BusinessException("整改说明不能为空");
         }
+        validateLength(feedback, REMARK_MAX_LENGTH, "整改说明");
         List<Long> photoFileIds = request == null ? Collections.emptyList() : request.getPhotoFileIds();
         if (photoFileIds == null || photoFileIds.stream().noneMatch(Objects::nonNull)) {
             throw new BusinessException("整改照片不能为空");
         }
+        validatePhotoFileIds(photoFileIds, "整改照片");
+        fileResourceService.validateAndBind(currentUser, rectification.getProjectId(), photoFileIds,
+                "inspection_rectification", "inspection_rectification", rectification.getId());
         String fromStatus = rectification.getStatus();
         String photoIds = joinIds(photoFileIds);
         rectification.setStatus(RECTIFICATION_COMPLETED);
@@ -593,50 +658,61 @@ public class InspectionService {
         rectification.setRectificationPhotoFileIds(photoIds);
         rectification.setCompletedTime(LocalDateTime.now());
         rectification.setCloseTime(null);
-        inspectionRectificationMapper.updateById(rectification);
+        requireSingleWrite(inspectionRectificationMapper.updateById(rectification), "巡检整改提交");
         writeRectificationLog(rectification, "COMPLETE", fromStatus, RECTIFICATION_COMPLETED, currentUser, feedback, photoIds);
         ElectricBox box = electricBoxMapper.selectById(rectification.getElectricBoxId());
-        if (box != null && box.getSafetyManagerId() != null) {
-            wechatNotificationService.notifyUser(box.getSafetyManagerId(), "RECHECK_PENDING", "RECTIFICATION", rectification.getId(),
-                    box.getBoxCode() + " 整改待复查");
+        if (box != null) {
+            for (SysUser reviewer : userProjectRoleMapper.selectActiveUsersByProjectRoleCode(
+                    rectification.getProjectId(), ProjectPermissionService.ROLE_SAFETY_OFFICER)) {
+                if (projectPermissionService.hasSystemPermission(reviewer.getId(), rectification.getProjectId(),
+                        SystemPermissionCodes.INSPECTION_REVIEW)) {
+                    wechatNotificationService.notifyUser(reviewer.getId(), "RECHECK_PENDING", "RECTIFICATION",
+                            rectification.getId(), box.getBoxCode() + " 整改待复查");
+                }
+            }
         }
-        return toRectificationVO(rectification);
+        return toRectificationVO(rectification, currentUser);
     }
 
+    @Transactional
     public InspectionRectificationVO assignRectification(Long id, RectificationAssignRequest request, SysUser currentUser) {
         if (request == null) {
             request = new RectificationAssignRequest();
         }
-        InspectionRectification rectification = requireRectification(id);
+        InspectionRectification rectification = requireRectificationForUpdate(id);
         requireRectificationReviewPermission(currentUser, rectification.getProjectId());
-        if (RECTIFICATION_CLOSED.equals(rectification.getStatus())) {
-            throw new BusinessException("已关闭整改不可改派");
+        if (RECTIFICATION_CLOSED.equals(rectification.getStatus())
+                || RECTIFICATION_COMPLETED.equals(rectification.getStatus())) {
+            throw BusinessException.of(409, "整改任务状态已变化，请刷新后重试");
         }
-        if (request.getAssigneeId() == null && request.getDeadline() == null) {
-            throw new BusinessException("请选择整改人或整改期限");
+        if (request.getAssigneeId() == null) {
+            throw new BusinessException("请选择新的整改负责人");
         }
         String fromStatus = rectification.getStatus();
         String oldAssigneeName = rectification.getAssigneeName();
-        if (request.getAssigneeId() != null) {
-            Assignee assignee = resolveAssignee(request.getAssigneeId(), rectification.getProjectId());
-            rectification.setAssigneeId(assignee.id());
-            rectification.setAssigneeName(assignee.name());
-            projectMemberService.ensureProjectMember(rectification.getProjectId(), assignee.id(), ProjectPermissionService.ROLE_USER);
+        if (Objects.equals(request.getAssigneeId(), rectification.getAssigneeId())) {
+            throw new BusinessException("请改派给当前项目其他电工");
         }
+        Assignee assignee = resolveAssignee(request.getAssigneeId(), rectification.getProjectId());
+        rectification.setAssigneeId(assignee.id());
+        rectification.setAssigneeName(assignee.name());
         if (request.getDeadline() != null) {
             rectification.setDeadline(validateRectificationDeadline(request.getDeadline()));
         }
+        String comment = trimToNull(request.getComment());
+        if (!StringUtils.hasText(comment)) {
+            throw new BusinessException("改派原因不能为空");
+        }
+        validateLength(comment, REMARK_MAX_LENGTH, "改派原因");
         rectification.setEscalationStatus(ESCALATION_NONE);
         rectification.setEscalationTime(null);
         rectification.setEscalationNote(null);
-        inspectionRectificationMapper.updateById(rectification);
-        String comment = trimToNull(request.getComment());
-        if (!StringUtils.hasText(comment)) {
-            comment = "改派整改任务：" + (oldAssigneeName == null ? "未指定" : oldAssigneeName)
-                    + " -> " + (rectification.getAssigneeName() == null ? "未指定" : rectification.getAssigneeName());
-        }
+        requireSingleWrite(inspectionRectificationMapper.updateById(rectification), "巡检整改改派");
+        comment = "改派整改任务：" + (oldAssigneeName == null ? "未指定" : oldAssigneeName)
+                + " -> " + (rectification.getAssigneeName() == null ? "未指定" : rectification.getAssigneeName())
+                + "；原因：" + comment;
         writeRectificationLog(rectification, "ASSIGN", fromStatus, rectification.getStatus(), currentUser, comment, null);
-        return toRectificationVO(rectification);
+        return toRectificationVO(rectification, currentUser);
     }
 
     public InspectionRectificationVO escalateRectification(Long id, RectificationEscalateRequest request, SysUser currentUser) {
@@ -658,14 +734,15 @@ public class InspectionService {
         inspectionRectificationMapper.updateById(rectification);
         writeRectificationLog(rectification, overdue ? "ESCALATE" : "REMIND",
                 rectification.getStatus(), rectification.getStatus(), currentUser, rectification.getEscalationNote(), null);
-        return toRectificationVO(rectification);
+        return toRectificationVO(rectification, currentUser);
     }
 
+    @Transactional
     public InspectionRectificationVO closeRectification(Long id, RectificationReviewRequest request, SysUser currentUser) {
-        InspectionRectification rectification = requireRectification(id);
+        InspectionRectification rectification = requireRectificationForUpdate(id);
         requireRectificationReviewPermission(currentUser, rectification.getProjectId());
         if (!RECTIFICATION_COMPLETED.equals(rectification.getStatus())) {
-            throw new BusinessException("只有待复查整改可以关闭");
+            throw BusinessException.of(409, "整改任务状态已变化，请刷新后重试");
         }
         String fromStatus = rectification.getStatus();
         String comment = request == null ? null : trimToNull(request.getComment());
@@ -676,17 +753,18 @@ public class InspectionService {
         rectification.setReviewTime(now);
         rectification.setReviewComment(comment);
         rectification.setCloseTime(now);
-        inspectionRectificationMapper.updateById(rectification);
+        requireSingleWrite(inspectionRectificationMapper.updateById(rectification), "巡检整改复查关闭");
         writeRectificationLog(rectification, "CLOSE", fromStatus, RECTIFICATION_CLOSED, currentUser, comment, null);
         closeRecordIfAllRectificationsClosed(rectification.getInspectionRecordId());
-        return toRectificationVO(rectification);
+        return toRectificationVO(rectification, currentUser);
     }
 
+    @Transactional
     public InspectionRectificationVO rejectRectification(Long id, RectificationReviewRequest request, SysUser currentUser) {
-        InspectionRectification rectification = requireRectification(id);
+        InspectionRectification rectification = requireRectificationForUpdate(id);
         requireRectificationReviewPermission(currentUser, rectification.getProjectId());
         if (!RECTIFICATION_COMPLETED.equals(rectification.getStatus())) {
-            throw new BusinessException("只有待复查整改可以退回");
+            throw BusinessException.of(409, "整改任务状态已变化，请刷新后重试");
         }
         String comment = request == null ? null : trimToNull(request.getComment());
         if (!StringUtils.hasText(comment)) {
@@ -704,11 +782,11 @@ public class InspectionService {
                 : rectification.getDeadline() != null ? rectification.getDeadline() : LocalDate.now();
         rectification.setRecheckDeadline(recheckBase.plusDays(RECTIFICATION_RECHECK_DAYS));
         rectification.setCloseTime(null);
-        inspectionRectificationMapper.updateById(rectification);
+        requireSingleWrite(inspectionRectificationMapper.updateById(rectification), "巡检整改复查退回");
         writeRectificationLog(rectification, "REJECT", fromStatus, RECTIFICATION_REJECTED, currentUser, comment, null);
         wechatNotificationService.notifyUser(rectification.getAssigneeId(), "RECHECK_REJECTED", "RECTIFICATION", rectification.getId(),
                 "整改复查已退回");
-        return toRectificationVO(rectification);
+        return toRectificationVO(rectification, currentUser);
     }
 
     public InspectionMonthSummaryVO getMonthSummary(Long projectId, Long boxId, String month, SysUser currentUser) {
@@ -1634,12 +1712,7 @@ public class InspectionService {
     }
 
     private Assignee resolveAssignee(Long assigneeId, Long projectId) {
-        projectPermissionService.checkProjectPermission(assigneeId, projectId);
-        SysUser assignee = userMapper.selectById(assigneeId);
-        if (assignee == null || (assignee.getDeleted() != null && assignee.getDeleted() == 1)) {
-            throw BusinessException.notFound("整改人不存在");
-        }
-        return new Assignee(assigneeId, displayUserName(assignee));
+        return requireElectricianAssignee(assigneeId, projectId);
     }
 
     private boolean isRectificationOverdue(InspectionRectification rectification) {
@@ -1657,6 +1730,41 @@ public class InspectionService {
     }
 
     private record Assignee(Long id, String name) {
+    }
+
+    private void createRectificationFromInspection(InspectionRecord record,
+                                                    ElectricBox box,
+                                                    List<InspectionRecordItem> items,
+                                                    InspectionRecordRequest request,
+                                                    Assignee assignee,
+                                                    LocalDate deadline,
+                                                    SysUser currentUser) {
+        List<InspectionRecordItem> abnormalItems = items.stream().filter(this::isAbnormal).toList();
+        InspectionRectification rectification = new InspectionRectification();
+        rectification.setProjectId(record.getProjectId());
+        rectification.setElectricBoxId(record.getElectricBoxId());
+        rectification.setInspectionRecordId(record.getId());
+        rectification.setRecordItemId(abnormalItems.size() == 1 ? abnormalItems.get(0).getId() : null);
+        rectification.setBoxCode(box.getBoxCode());
+        rectification.setProblemDesc(abnormalItems.stream()
+                .map(item -> item.getItemName() + "：" + item.getDescription())
+                .collect(Collectors.joining("；")));
+        rectification.setProblemCategory(normalizeProblemCategory(request.getProblemCategory()));
+        rectification.setRequirement(StringUtils.hasText(request.getRequirement())
+                ? request.getRequirement().trim()
+                : "请完成上述巡检异常整改并上传整改照片");
+        rectification.setAssigneeId(assignee.id());
+        rectification.setAssigneeName(assignee.name());
+        rectification.setDeadline(deadline);
+        rectification.setStatus(RECTIFICATION_PENDING);
+        rectification.setRejectCount(0);
+        rectification.setEscalationStatus(ESCALATION_NONE);
+        rectification.setDeleted(0);
+        requireSingleWrite(inspectionRectificationMapper.insert(rectification), "巡检整改任务新增");
+        writeRectificationLog(rectification, "CREATE", null, RECTIFICATION_PENDING,
+                currentUser, "巡检异常提交并指派整改", null);
+        wechatNotificationService.notifyUser(rectification.getAssigneeId(), "RECTIFICATION_PENDING",
+                "RECTIFICATION", rectification.getId(), box.getBoxCode() + " 待整改，截止 " + deadline);
     }
 
     private void createRectification(InspectionRecord record, InspectionReviewRequest request) {
@@ -1694,7 +1802,6 @@ public class InspectionService {
         rectification.setEscalationStatus(ESCALATION_NONE);
         rectification.setDeleted(0);
         inspectionRectificationMapper.insert(rectification);
-        projectMemberService.ensureProjectMember(record.getProjectId(), rectification.getAssigneeId(), ProjectPermissionService.ROLE_USER);
         writeRectificationLog(rectification, "CREATE", null, RECTIFICATION_PENDING, null, "创建整改任务", null);
         wechatNotificationService.notifyUser(rectification.getAssigneeId(), "RECTIFICATION_PENDING", "RECTIFICATION", rectification.getId(),
                 box.getBoxCode() + " 待整改，截止 " + rectification.getDeadline());
@@ -1724,7 +1831,7 @@ public class InspectionService {
             InspectionRecord record = inspectionRecordMapper.selectById(recordId);
             if (record != null) {
                 record.setStatus(STATUS_CLOSED);
-                inspectionRecordMapper.updateById(record);
+                requireSingleWrite(inspectionRecordMapper.updateById(record), "巡检记录闭环");
             }
         }
     }
@@ -1743,7 +1850,7 @@ public class InspectionService {
                 .orderByAsc(InspectionRecordItem::getId));
         InspectionRecordVO vo = new InspectionRecordVO();
         BeanUtils.copyProperties(record, vo);
-        vo.setStatus(STATUS_COMPLETED);
+        vo.setStatus(publicView ? STATUS_COMPLETED : record.getStatus());
         vo.setReviewStatus("NOT_REQUIRED");
         vo.setReviewerId(null);
         vo.setReviewerName(null);
@@ -1917,6 +2024,18 @@ public class InspectionService {
         return vo;
     }
 
+    private InspectionRectificationVO toRectificationVO(InspectionRectification rectification, SysUser currentUser) {
+        InspectionRectificationVO vo = toRectificationVO(rectification);
+        boolean pending = RECTIFICATION_PENDING.equals(rectification.getStatus())
+                || RECTIFICATION_REJECTED.equals(rectification.getStatus());
+        boolean platformAdmin = projectPermissionService.isPlatformAdmin(currentUser.getId());
+        boolean reviewer = isSafetyReviewer(currentUser, rectification.getProjectId());
+        vo.setCanRectify(pending && (platformAdmin || isAssignedElectrician(currentUser, rectification)));
+        vo.setCanReview(RECTIFICATION_COMPLETED.equals(rectification.getStatus()) && reviewer);
+        vo.setCanAssign(pending && reviewer);
+        return vo;
+    }
+
     private InspectionRecordItemVO toItemVO(InspectionRecordItem item) {
         InspectionRecordItemVO vo = new InspectionRecordItemVO();
         BeanUtils.copyProperties(item, vo);
@@ -1944,6 +2063,9 @@ public class InspectionService {
         String remark = trimToNull(request.getRemark());
         validateLength(remark, REMARK_MAX_LENGTH, "巡检备注");
         request.setRemark(remark);
+        String requirement = trimToNull(request.getRequirement());
+        validateLength(requirement, REMARK_MAX_LENGTH, "整改要求");
+        request.setRequirement(requirement);
         Set<String> itemCodes = new HashSet<>();
         for (InspectionItemRequest item : request.getItems()) {
             if (item == null) {
@@ -2044,6 +2166,19 @@ public class InspectionService {
         record.setReviewOverdue(0);
     }
 
+    private void markRectificationPending(InspectionRecord record) {
+        record.setStatus(STATUS_RECTIFICATION_PENDING);
+        record.setReviewStatus("RECTIFICATION_REQUIRED");
+        record.setReviewerId(null);
+        record.setReviewerName(null);
+        record.setAssignedReviewerId(null);
+        record.setAssignedReviewerName(null);
+        record.setReviewTime(null);
+        record.setReviewComment(null);
+        record.setReviewDueTime(null);
+        record.setReviewOverdue(0);
+    }
+
     private void requireInspectionManager(SysUser currentUser, Long projectId) {
         projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
                 SystemPermissionCodes.INSPECTION_MANAGE);
@@ -2052,18 +2187,76 @@ public class InspectionService {
         }
     }
 
-    private void requireDailySubmitPermission(SysUser currentUser, Long projectId) {
-        projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
-                SystemPermissionCodes.INSPECTION_SUBMIT);
-        if (!projectPermissionService.hasInspectionPermission(currentUser.getId(), projectId, InspectionPermissionCodes.INSPECTION_DAILY_SUBMIT)) {
-            throw BusinessException.forbidden("无日检提交权限");
+    private InspectionAssigneeVO toAssigneeVO(SysUser user) {
+        InspectionAssigneeVO vo = new InspectionAssigneeVO();
+        vo.setUserId(user.getId());
+        vo.setUsername(user.getUsername());
+        vo.setRealName(user.getRealName());
+        vo.setDisplayName(displayUserName(user));
+        return vo;
+    }
+
+    private Assignee requireElectricianAssignee(Long assigneeId, Long projectId) {
+        if (assigneeId == null) {
+            throw new BusinessException("整改负责人不能为空");
+        }
+        SysUser assignee = userMapper.selectById(assigneeId);
+        if (assignee == null || Integer.valueOf(1).equals(assignee.getDeleted())) {
+            throw BusinessException.notFound("整改负责人不存在");
+        }
+        if (!Integer.valueOf(1).equals(assignee.getStatus())) {
+            throw new BusinessException("整改负责人账号未启用");
+        }
+        if (!"ACTIVE".equals(projectPermissionService.getProjectAccessStatus(assigneeId, projectId))) {
+            throw BusinessException.forbidden("整改负责人没有当前项目的有效访问权限");
+        }
+        if (!projectPermissionService.hasProjectRole(
+                assigneeId, projectId, ProjectPermissionService.ROLE_ELECTRICIAN)) {
+            throw BusinessException.forbidden("整改负责人必须是当前项目电工");
+        }
+        if (!projectPermissionService.hasSystemPermission(
+                assigneeId, projectId, SystemPermissionCodes.INSPECTION_RECTIFY)) {
+            throw BusinessException.forbidden("整改负责人缺少巡检整改权限");
+        }
+        return new Assignee(assigneeId, displayUserName(assignee));
+    }
+
+    private void ensureSafetyOfficerAvailable(Long projectId) {
+        boolean available = userProjectRoleMapper.selectActiveUsersByProjectRoleCode(
+                        projectId, ProjectPermissionService.ROLE_SAFETY_OFFICER).stream()
+                .anyMatch(user -> projectPermissionService.hasSystemPermission(
+                        user.getId(), projectId, SystemPermissionCodes.INSPECTION_REVIEW));
+        if (!available) {
+            throw BusinessException.of(409, "当前项目未分配具备复查权限的安全员，暂不能提交异常巡检");
         }
     }
 
-    private void requireRectificationReviewPermission(SysUser currentUser, Long projectId) {
+    private boolean isSafetyReviewer(SysUser currentUser, Long projectId) {
+        if (projectPermissionService.isPlatformAdmin(currentUser.getId())) {
+            return true;
+        }
+        return projectPermissionService.hasProjectRole(
+                currentUser.getId(), projectId, ProjectPermissionService.ROLE_SAFETY_OFFICER)
+                && projectPermissionService.hasSystemPermission(
+                currentUser.getId(), projectId, SystemPermissionCodes.INSPECTION_REVIEW);
+    }
+
+    private boolean isAssignedElectrician(SysUser currentUser, InspectionRectification rectification) {
+        return Objects.equals(currentUser.getId(), rectification.getAssigneeId())
+                && projectPermissionService.hasProjectRole(currentUser.getId(), rectification.getProjectId(),
+                ProjectPermissionService.ROLE_ELECTRICIAN)
+                && projectPermissionService.hasSystemPermission(currentUser.getId(), rectification.getProjectId(),
+                SystemPermissionCodes.INSPECTION_RECTIFY);
+    }
+
+    private void requireDailySubmitPermission(SysUser currentUser, Long projectId) {
         projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
-                SystemPermissionCodes.INSPECTION_MANAGE);
-        if (!projectPermissionService.hasInspectionPermission(currentUser.getId(), projectId, InspectionPermissionCodes.RECTIFICATION_REVIEW)) {
+                SystemPermissionCodes.INSPECTION_SUBMIT);
+    }
+
+    private void requireRectificationReviewPermission(SysUser currentUser, Long projectId) {
+        projectPermissionService.checkProjectPermission(currentUser.getId(), projectId);
+        if (!isSafetyReviewer(currentUser, projectId)) {
             throw BusinessException.forbidden("无整改复查权限");
         }
     }
@@ -2114,10 +2307,11 @@ public class InspectionService {
                 SystemPermissionCodes.INSPECTION_VIEW)) {
             return false;
         }
-        if (projectPermissionService.hasInspectionPermission(currentUser.getId(), rectification.getProjectId(), InspectionPermissionCodes.RECTIFICATION_VIEW)) {
+        if (projectPermissionService.isPlatformAdmin(currentUser.getId())
+                || isSafetyReviewer(currentUser, rectification.getProjectId())) {
             return true;
         }
-        return Objects.equals(rectification.getAssigneeId(), currentUser.getId());
+        return isAssignedElectrician(currentUser, rectification);
     }
 
     private void applyProjectScope(LambdaQueryWrapper<InspectionRecord> wrapper, Long projectId, SysUser currentUser) {
@@ -2210,6 +2404,14 @@ public class InspectionService {
 
     private InspectionRectification requireRectification(Long id) {
         InspectionRectification rectification = inspectionRectificationMapper.selectById(id);
+        if (rectification == null) {
+            throw BusinessException.notFound("整改任务不存在");
+        }
+        return rectification;
+    }
+
+    private InspectionRectification requireRectificationForUpdate(Long id) {
+        InspectionRectification rectification = inspectionRectificationMapper.selectByIdForUpdate(id);
         if (rectification == null) {
             throw BusinessException.notFound("整改任务不存在");
         }

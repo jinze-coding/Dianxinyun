@@ -45,25 +45,20 @@ public class SystemPermissionService {
     }
 
     public List<String> permissionCodes(Long userId) {
-        Set<String> effectiveModules = businessModuleCodes(userId);
         if (isPlatformAdmin(userId)) {
-            List<String> codes = permissionMapper.selectList(new LambdaQueryWrapper<SystemPermission>()
-                            .eq(SystemPermission::getEnabled, 1)
-                            .eq(SystemPermission::getDeleted, 0)
-                            .orderByAsc(SystemPermission::getPermissionCode))
-                    .stream().map(SystemPermission::getPermissionCode).distinct().toList();
-            return filterBusinessPermissionCodes(codes, effectiveModules);
+            return allEnabledPermissionCodes();
         }
+        Set<String> effectiveModules = businessModuleCodes(userId);
         List<String> codes = permissionMapper.selectPlatformCodesByUserId(userId);
         return filterBusinessPermissionCodes(codes, effectiveModules);
     }
 
     public boolean hasPermission(Long userId, String permissionCode) {
+        if (isPlatformAdmin(userId)) return true;
         String businessModule = BusinessModuleCodes.fromPermissionCode(permissionCode);
         if (businessModule != null && !businessModuleCodes(userId).contains(businessModule)) {
             return false;
         }
-        if (isPlatformAdmin(userId)) return true;
         List<String> codes = permissionMapper.selectCodesByUserId(userId);
         return codes != null && codes.contains(permissionCode);
     }
@@ -80,11 +75,11 @@ public class SystemPermissionService {
 
     public boolean hasProjectPermission(Long userId, Long projectId, String permissionCode) {
         if (userId == null || projectId == null || permissionCode == null) return false;
+        if (isPlatformAdmin(userId)) return true;
         String businessModule = BusinessModuleCodes.fromPermissionCode(permissionCode);
         if (businessModule != null && !businessModuleCodes(userId, projectId).contains(businessModule)) {
             return false;
         }
-        if (isPlatformAdmin(userId)) return true;
         List<String> codes = permissionMapper.selectCodesByUserIdAndProject(userId, projectId);
         return codes != null && codes.contains(permissionCode);
     }
@@ -96,15 +91,10 @@ public class SystemPermissionService {
     /** 当前用户在指定有效项目内由全部项目角色聚合出的权限。 */
     public List<String> projectPermissionCodes(Long userId, Long projectId) {
         if (userId == null || projectId == null) return List.of();
-        Set<String> effectiveModules = businessModuleCodes(userId, projectId);
         if (isPlatformAdmin(userId)) {
-            List<String> codes = permissionMapper.selectList(new LambdaQueryWrapper<SystemPermission>()
-                            .eq(SystemPermission::getEnabled, 1)
-                            .eq(SystemPermission::getDeleted, 0)
-                            .orderByAsc(SystemPermission::getPermissionCode))
-                    .stream().map(SystemPermission::getPermissionCode).distinct().toList();
-            return filterBusinessPermissionCodes(codes, effectiveModules);
+            return allEnabledPermissionCodes();
         }
+        Set<String> effectiveModules = businessModuleCodes(userId, projectId);
         List<String> codes = permissionMapper.selectProjectCodesByUserIdAndProject(userId, projectId);
         return filterBusinessPermissionCodes(codes, effectiveModules);
     }
@@ -112,6 +102,15 @@ public class SystemPermissionService {
     /** 当前用户在指定有效项目中由项目角色获得的可见菜单编码。 */
     public List<String> projectMenuCodes(Long userId, Long projectId) {
         if (userId == null || projectId == null) return List.of();
+        if (isPlatformAdmin(userId)) {
+            return menuMapper.selectList(new LambdaQueryWrapper<SystemMenu>()
+                            .eq(SystemMenu::getEnabled, 1)
+                            .eq(SystemMenu::getVisible, 1)
+                            .eq(SystemMenu::getDeleted, 0)
+                            .orderByAsc(SystemMenu::getSortOrder)
+                            .orderByAsc(SystemMenu::getId))
+                    .stream().map(SystemMenu::getMenuCode).filter(java.util.Objects::nonNull).distinct().toList();
+        }
         List<String> codes = menuMapper.selectEnabledCodesByUserIdAndProject(userId, projectId);
         return filterBusinessMenuCodes(codes, businessModuleCodes(userId, projectId));
     }
@@ -160,7 +159,15 @@ public class SystemPermissionService {
 
     public List<MenuVO> menuTree(Long userId) {
         Set<String> effectiveModules = businessModuleCodes(userId);
-        List<SystemMenu> menus = menuMapper.selectEnabledByUserId(userId).stream()
+        List<SystemMenu> source = isPlatformAdmin(userId)
+                ? menuMapper.selectList(new LambdaQueryWrapper<SystemMenu>()
+                .eq(SystemMenu::getEnabled, 1)
+                .eq(SystemMenu::getVisible, 1)
+                .eq(SystemMenu::getDeleted, 0)
+                .orderByAsc(SystemMenu::getSortOrder)
+                .orderByAsc(SystemMenu::getId))
+                : menuMapper.selectEnabledByUserId(userId);
+        List<SystemMenu> menus = source.stream()
                 .filter(menu -> {
                     String businessModule = BusinessModuleCodes.fromMenuCode(menu.getMenuCode());
                     return businessModule == null || effectiveModules.contains(businessModule);
@@ -180,6 +187,7 @@ public class SystemPermissionService {
     /** 当前用户任一有效作用域中的模块，用于没有 projectId 的旧接口拦截。 */
     public Set<String> businessModuleCodes(Long userId) {
         if (userId == null) return Set.of();
+        if (isPlatformAdmin(userId)) return Set.copyOf(BusinessModuleCodes.ALL);
         List<String> codes = roleBusinessModuleMapper.selectModuleCodesByUserId(userId);
         return normalizeBusinessModuleCodes(codes);
     }
@@ -187,6 +195,7 @@ public class SystemPermissionService {
     /** 当前项目中有效的平台/项目角色共同授予的模块。 */
     public Set<String> businessModuleCodes(Long userId, Long projectId) {
         if (userId == null || projectId == null) return Set.of();
+        if (isPlatformAdmin(userId)) return Set.copyOf(BusinessModuleCodes.ALL);
         List<String> codes = roleBusinessModuleMapper.selectModuleCodesByUserIdAndProject(userId, projectId);
         return normalizeBusinessModuleCodes(codes);
     }
@@ -204,6 +213,15 @@ public class SystemPermissionService {
             }
         }
         return Set.copyOf(result);
+    }
+
+    private List<String> allEnabledPermissionCodes() {
+        return permissionMapper.selectList(new LambdaQueryWrapper<SystemPermission>()
+                        .eq(SystemPermission::getEnabled, 1)
+                        .eq(SystemPermission::getDeleted, 0)
+                        .orderByAsc(SystemPermission::getPermissionCode))
+                .stream().map(SystemPermission::getPermissionCode)
+                .filter(java.util.Objects::nonNull).distinct().toList();
     }
 
     private List<String> filterBusinessPermissionCodes(List<String> codes, Set<String> effectiveModules) {

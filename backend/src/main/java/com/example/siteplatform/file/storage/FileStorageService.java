@@ -13,4 +13,6 @@ public interface FileStorageService {
     boolean exists(String storageKey) throws Exception;
 
     void delete(String storageKey) throws Exception;
+
+    void copy(String sourceStorageKey, String targetStorageKey) throws Exception;
 }

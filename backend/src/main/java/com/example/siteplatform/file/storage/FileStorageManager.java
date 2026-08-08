@@ -60,6 +60,24 @@ public class FileStorageManager {
         }
     }
 
+    /** Creates a physically independent object; archive callers must also create new metadata. */
+    public StoredFile copy(FileResource source, String targetStorageKey) {
+        String sourceProvider = providerName(source);
+        if (!sourceProvider.equalsIgnoreCase(currentProvider)) {
+            throw new BusinessException("暂不支持跨存储类型复制归档文件");
+        }
+        try {
+            provider(currentProvider).copy(key(source), targetStorageKey);
+            return new StoredFile(currentProvider, targetStorageKey,
+                    source.getOriginalFileName() == null ? source.getFileName() : source.getOriginalFileName(),
+                    source.getMimeType(), source.getFileExtension(),
+                    source.getFileSize() == null ? 0L : source.getFileSize(), source.getSha256());
+        } catch (Exception exception) {
+            LOGGER.error("File storage copy failed", exception);
+            throw new BusinessException("归档文件物理复制失败");
+        }
+    }
+
     public void deleteQuietly(String providerName, String storageKey) {
         try {
             provider(providerName).delete(storageKey);

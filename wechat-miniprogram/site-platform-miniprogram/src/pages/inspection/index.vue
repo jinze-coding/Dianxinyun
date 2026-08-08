@@ -42,7 +42,15 @@ const canSubmit = computed(() => Boolean(currentProject.value)
     'inspection.submit',
     'INSPECTION_DAILY_SUBMIT'
   ));
+const canRectify = computed(() => Boolean(currentProject.value)
+  && authStore.hasProjectPermission(currentProject.value!.id, 'inspection.rectify'));
+const canReviewRectification = computed(() => Boolean(currentProject.value)
+  && authStore.hasProjectPermission(currentProject.value!.id, 'inspection.review'));
 const inspectionTodos = computed(() => todos.value.filter((todo) => todo.type === 'INSPECTION'
+  && (!todo.projectId || todo.projectId === currentProject.value?.id)));
+const rectificationTodos = computed(() => todos.value.filter((todo) => todo.type === 'RECTIFICATION'
+  && (!todo.projectId || todo.projectId === currentProject.value?.id)));
+const recheckTodos = computed(() => todos.value.filter((todo) => todo.type === 'RECHECK'
   && (!todo.projectId || todo.projectId === currentProject.value?.id)));
 const checkedCount = computed(() => currentProject.value?.todayInspectionCount || 0);
 const requiredCount = computed(() => checkedCount.value + inspectionTodos.value.length);
@@ -181,6 +189,11 @@ function startInspection(todo: TodoItem) {
             <view class="records-copy"><text>查看巡检记录</text><text>按月份、电箱和结果查询</text></view>
             <text class="row-arrow"></text>
           </button>
+          <button v-if="canRectify || canReviewRectification" class="records-entry rectification-entry pressable" @tap="navigateTo(`/pages/rectification/index?projectId=${currentProject.id}`)">
+            <view class="records-icon rectification-icon">闭</view>
+            <view class="records-copy"><text>整改闭环</text><text>我的待整改 {{ rectificationTodos.length }} · 项目待复查 {{ recheckTodos.length }}</text></view>
+            <text class="row-arrow"></text>
+          </button>
         </template>
       </view>
     </scroll-view>
@@ -231,4 +244,5 @@ function startInspection(todo: TodoItem) {
 .records-copy text { display: block; }
 .records-copy text:first-child { font-size: 23rpx; font-weight: 750; }
 .records-copy text:last-child { margin-top: 4rpx; color: #98a2b3; font-size: 19rpx; }
+.rectification-entry { margin-top: 14rpx; }.rectification-icon { color: var(--inspection-primary-deep); font-size: 22rpx; font-weight: 850; }
 </style>

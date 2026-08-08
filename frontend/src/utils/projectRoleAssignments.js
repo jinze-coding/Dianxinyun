@@ -16,13 +16,6 @@ export const roleIdsEqual = (left = [], right = []) => {
     && normalizedLeft.every((value, index) => value === normalizedRight[index]);
 };
 
-export const defaultProjectMemberRoleId = (roles = []) => {
-  const role = roles.find((item) => String(item?.roleCode || item?.code || '').toUpperCase() === 'USER'
-    && ![0, '0', false, 'DISABLED'].includes(item?.enabled));
-  const id = roleId(role);
-  return Number.isFinite(id) ? id : null;
-};
-
 const assignmentRoleIds = (assignment) => numericIds((assignment?.projectRoles || []).map(roleId));
 
 const assignmentRoleNames = (assignment) => (assignment?.projectRoles || []).map(roleLabel).filter(Boolean);
@@ -108,18 +101,14 @@ export function buildProjectMemberNodes(options = []) {
 export const assignmentNodeChanged = (node) => Boolean(node)
   && (node.assigned !== node.originalAssigned || !roleIdsEqual(node.roleIds, node.originalRoleIds));
 
-export function toggleAssignmentNode(node, checked, defaultRoleId) {
+export function toggleAssignmentNode(node, checked) {
   if (!node || !node.roleEditable || (!checked && !node.removable)) return node;
   if (!checked) return { ...node, assigned: false, roleIds: [] };
   if (node.assigned) return node;
   if (node.originalAssigned && node.originalRoleIds.length) {
     return { ...node, assigned: true, roleIds: [...node.originalRoleIds] };
   }
-  if (defaultRoleId === null || defaultRoleId === undefined
-    || !Number.isInteger(Number(defaultRoleId)) || Number(defaultRoleId) <= 0) {
-    throw new Error('内置 USER（项目成员）角色缺失或已停用，请先在角色管理中恢复该基础角色');
-  }
-  return { ...node, assigned: true, roleIds: [Number(defaultRoleId)] };
+  return { ...node, assigned: true, roleIds: [] };
 }
 
 export function toggleAssignmentRole(node, targetRoleId, checked) {

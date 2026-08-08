@@ -20,10 +20,8 @@ const pendingText = (node) => {
 export default function ProjectRoleAssignmentTree({
   nodes = [],
   roles = [],
-  defaultRoleId,
   onNodeChange,
   onStatusChange,
-  onError,
   busy = false,
   emptyText = '暂无可分配对象',
 }) {
@@ -45,11 +43,8 @@ export default function ProjectRoleAssignmentTree({
   };
 
   const updateParent = (node, checked) => {
-    try {
-      onNodeChange(toggleAssignmentNode(node, checked, defaultRoleId));
-    } catch (error) {
-      onError?.(error.message || '成员关系更新失败');
-    }
+    onNodeChange(toggleAssignmentNode(node, checked));
+    if (checked) setExpanded((current) => new Set(current).add(node.id));
   };
 
   const updateRole = (node, role, checked) => {
@@ -71,7 +66,7 @@ export default function ProjectRoleAssignmentTree({
   return (
     <div className="system-assignment-tree">
       <div className="system-assignment-tree-actions">
-        <span>父节点代表成员关系，展开后勾选一个或多个项目角色</span>
+        <span>父节点代表成员关系，勾选后必须明确选择一个或多个项目角色</span>
         <div>
           <button type="button" onClick={() => setExpanded(new Set(nodes.map((node) => node.id)))}>展开全部</button>
           <button type="button" onClick={() => setExpanded(new Set())}>收起全部</button>

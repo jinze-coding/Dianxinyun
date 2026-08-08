@@ -179,6 +179,7 @@ function openDetail(document: ProjectDocument) { navigateTo(`/pages/documents/de
 
           <view class="document-toolbar">
             <button v-if="canUpload" class="upload-entry" @tap="openUpload"><text class="upload-plus">＋</text><view><text>上传资料</text><text>微信文件、拍照或相册</text></view></button>
+            <button class="tool-entry seal-entry" @tap="navigateTo(`/pages/seal/list?projectId=${currentProject.id}`)"><text class="tool-icon seal-icon">印</text><text>用印</text></button>
             <button v-if="canManage" class="tool-entry" @tap="navigateTo(`/pages/documents/folders?projectId=${currentProject.id}`)"><text class="tool-icon folder-icon"></text><text>目录</text></button>
             <button v-if="canManage" class="tool-entry" @tap="navigateTo(`/pages/documents/recycle?projectId=${currentProject.id}`)"><text class="tool-icon recycle-icon"></text><text>回收站</text></button>
           </view>
@@ -262,6 +263,7 @@ function openDetail(document: ProjectDocument) { navigateTo(`/pages/documents/de
 .recycle-icon { border-width: 0 3rpx 3rpx; border-radius: 0 0 5rpx 5rpx; }
 .recycle-icon::before { position: absolute; top: -6rpx; left: -4rpx; width: 37rpx; height: 3rpx; border-radius: 99rpx; background: #68869b; content: ''; }
 .recycle-icon::after { position: absolute; top: -11rpx; left: 9rpx; width: 12rpx; height: 5rpx; border: 3rpx solid #68869b; border-bottom: 0; border-radius: 4rpx 4rpx 0 0; content: ''; }
+.seal-entry { background: #fbf7f0; color: #8a612c; }.seal-icon { display: flex; height: 34rpx; align-items: center; justify-content: center; border: 2rpx solid #9a6b2d; border-radius: 7rpx; color: #9a6b2d; font-size: 18rpx; font-weight: 900; transform: rotate(-3deg); }
 .document-section { overflow: visible; }
 .document-section .section-head { border-radius: 16rpx 16rpx 0 0; }
 .search-box { margin-top: 15rpx; }

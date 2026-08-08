@@ -2,10 +2,10 @@
 import { computed, ref } from 'vue';
 import { onShow } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
-import { closeRectification, completeRectification, getRectificationDetail, rejectRectification } from '@/api/rectification';
-import { uploadPhotoIds } from '@/api/file';
-import { formatSpotCheckCategory } from '@/constants/spotCheck';
-import type { RectificationTask } from '@/types';
+import { getInspectionRectificationAssignees } from '@/api/inspection';
+import { assignRectification, closeRectification, completeRectification, getRectificationDetail, rejectRectification } from '@/api/rectification';
+import { deleteFileResources, uploadPhotoIds } from '@/api/file';
+import type { InspectionAssignee, RectificationTask } from '@/types';
 import { usePageScrollHeight } from '@/utils/navLayout';
 import { getQueryNumber, navigateTo, showToast, switchTab } from '@/utils/navigation';
 
@@ -15,7 +15,7 @@ const fromProjectList = ref(false);
 const sourceProjectId = ref<number>();
 const feedback = ref('');
 const photos = ref<string[]>([]);
-const uploadSlots = [0, 1, 2];
+const uploadSlots = [0, 1, 2, 3, 4];
 const { scrollStyle } = usePageScrollHeight({ bottomRpx: 160, minHeight: 240 });
 
 onShow(async () => {
@@ -30,8 +30,9 @@ onShow(async () => {
 });
 
 const beforePhotos = computed(() => task.value?.beforePhotos || []);
-const canSubmitFeedback = computed(() => ['PENDING', 'REJECTED'].includes(task.value?.status || ''));
-const canReview = computed(() => task.value?.status === 'COMPLETED');
+const canSubmitFeedback = computed(() => task.value?.canRectify === true);
+const canReview = computed(() => task.value?.canReview === true);
+const canAssign = computed(() => task.value?.canAssign === true);
 const isReadonly = computed(() => task.value?.status === 'CLOSED');
 const boxText = computed(() => {
   if (!task.value) return '';
@@ -64,7 +65,7 @@ function goBack() {
     navigateTo(`/pages/rectification/index?projectId=${sourceProjectId.value}`);
     return;
   }
-  switchTab('/pages/profile/index');
+  switchTab('/pages/inspection/index');
 }
 
 function afterAction() {
@@ -78,7 +79,7 @@ function afterAction() {
       return;
     }
   }
-  switchTab('/pages/profile/index');
+  switchTab('/pages/inspection/index');
 }
 
 function chooseRectificationPhoto(index: number) {
@@ -123,14 +124,19 @@ async function submitFeedback() {
   const existingPhotos = task.value.rectificationPhotos || [];
   const existingIds = task.value.rectificationPhotoFileIds || [];
   const newPhotos = photos.value.filter((path) => !existingPhotos.includes(path));
-  const newPhotoIds = await uploadPhotoIds(newPhotos, 'RECTIFICATION_PHOTO', {
-    projectId: task.value.projectId,
-    businessType: 'inspection_rectification',
-    businessId: task.value.id
-  });
-  await completeRectification(task.value.id, feedback.value, photos.value, [...existingIds, ...newPhotoIds]);
-  showToast('已提交复查');
-  afterAction();
+  let newPhotoIds: number[] = [];
+  try {
+    newPhotoIds = await uploadPhotoIds(newPhotos, 'RECTIFICATION_PHOTO', {
+      projectId: task.value.projectId,
+      businessType: 'inspection_rectification'
+    });
+    await completeRectification(task.value.id, feedback.value, photos.value, [...existingIds, ...newPhotoIds]);
+    showToast('已提交复查');
+    afterAction();
+  } catch (error) {
+    await deleteFileResources(newPhotoIds);
+    showToast(error instanceof Error ? error.message : '整改提交失败');
+  }
 }
 
 async function closeTask() {
@@ -139,6 +145,8 @@ async function closeTask() {
     showToast('待复查状态才可关闭');
     return;
   }
+  const confirmed = await confirmDialog('确认复查通过并关闭该整改任务？');
+  if (!confirmed) return;
   await closeRectification(task.value.id);
   showToast('整改已关闭');
   afterAction();
@@ -150,12 +158,62 @@ async function rejectTask() {
     showToast('待复查状态才可退回');
     return;
   }
-  await rejectRectification(task.value.id, '整改照片或现场情况仍不符合要求，请继续整改');
+  const reason = await promptReason('复查退回', '请填写必须继续整改的具体原因');
+  if (!reason) return;
+  await rejectRectification(task.value.id, reason);
   showToast('已退回继续整改');
   if (!fromProjectList.value) {
     uni.setStorageSync('site_platform_todo_filter', 'RECTIFICATION');
   }
   afterAction();
+}
+
+async function reassignTask() {
+  if (!task.value || !canAssign.value) return;
+  let assignees: InspectionAssignee[] = [];
+  try {
+    assignees = (await getInspectionRectificationAssignees(task.value.projectId))
+      .filter((item) => item.userId !== task.value?.assigneeId);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '电工列表加载失败');
+    return;
+  }
+  if (!assignees.length) { showToast('当前项目没有其他可改派电工'); return; }
+  const selectedIndex = await new Promise<number>((resolve) => {
+    uni.showActionSheet({
+      itemList: assignees.map((item) => item.displayName),
+      success: (result) => resolve(result.tapIndex),
+      fail: () => resolve(-1)
+    });
+  });
+  if (selectedIndex < 0) return;
+  const reason = await promptReason('改派整改人', '请填写改派原因');
+  if (!reason) return;
+  await assignRectification(task.value.id, { assigneeId: assignees[selectedIndex].userId, comment: reason });
+  showToast('已改派整改任务');
+  task.value = await getRectificationDetail(task.value.id);
+}
+
+function confirmDialog(content: string) {
+  return new Promise<boolean>((resolve) => {
+    uni.showModal({ title: '复查确认', content, success: (result) => resolve(result.confirm), fail: () => resolve(false) });
+  });
+}
+
+function promptReason(title: string, placeholder: string) {
+  return new Promise<string>((resolve) => {
+    uni.showModal({
+      title,
+      content: '',
+      editable: true,
+      placeholderText: placeholder,
+      success: (result) => resolve(result.confirm ? String(result.content || '').trim() : ''),
+      fail: () => resolve('')
+    });
+  }).then((value) => {
+    if (!value) showToast(`${title}原因不能为空`);
+    return value;
+  });
 }
 </script>
 
@@ -181,15 +239,20 @@ async function rejectTask() {
           </view>
           <view class="info-row">
             <text class="info-label">问题分类</text>
-            <text class="info-value">{{ formatSpotCheckCategory(task.problemCategory) }}</text>
+            <text class="info-value">巡检异常</text>
           </view>
           <view class="info-row">
-            <text class="info-label wide">要求整改期限</text>
-            <text class="info-value deadline-value">{{ task.requirement }}</text>
+            <text class="info-label">整改要求</text>
+            <text class="info-value problem-text">{{ task.requirement }}</text>
+          </view>
+          <view class="info-row">
+            <text class="info-label">整改期限</text>
+            <text class="info-value deadline-value">{{ task.deadline || '-' }}</text>
           </view>
           <view class="info-row">
             <text class="info-label">整改负责人</text>
             <text class="info-value">{{ task.assigneeName }}（{{ task.responsiblePhone || '未登记' }}）</text>
+            <button v-if="canAssign" class="inline-assign" @tap="reassignTask">改派</button>
           </view>
           <view v-if="task.completedAt" class="info-row">
             <text class="info-label">完成时间</text>
@@ -822,4 +885,5 @@ async function rejectTask() {
   border-color: #fb923c;
   color: #f97316;
 }
+.inline-assign { flex-shrink: 0; margin: 0 0 0 12rpx; padding: 8rpx 15rpx; border: 1rpx solid #8eb3d0; border-radius: 999rpx; background: #eef7ff; color: #315f86; font-size: 21rpx; line-height: 1.2; }.inline-assign::after { border: 0; }
 </style>

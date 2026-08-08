@@ -13,7 +13,7 @@
     "build:mp-weixin": "uni build -p mp-weixin",
     "build:mp-weixin:real": "uni build -p mp-weixin --mode mp-real && npm run verify:mp-weixin:real",
     "type-check": "vue-tsc --noEmit",
-    "test:scan": "node --experimental-strip-types scripts/test-electric-box-scene.mjs",
+    "test:scan": "node --experimental-strip-types scripts/test-electric-box-scene.mjs && node --experimental-strip-types scripts/test-visitor-invite-scene.mjs && node --experimental-strip-types scripts/test-seal-scene.mjs",
     "verify:mp-weixin:real": "node scripts/verify-mp-weixin-real.mjs"
   },
   "dependencies": {

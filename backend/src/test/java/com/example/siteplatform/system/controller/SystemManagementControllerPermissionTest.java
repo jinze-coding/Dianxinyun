@@ -33,6 +33,7 @@ class SystemManagementControllerPermissionTest {
     @Mock private RegistrationApplicationService registrationService;
     @Mock private WechatUserManagementService wechatUserService;
     @Mock private ProjectMemberService projectMemberService;
+    @Mock private com.example.siteplatform.system.service.AdministrativeDeletionService administrativeDeletionService;
 
     private SystemManagementController controller;
     private MockHttpServletRequest request;
@@ -41,7 +42,8 @@ class SystemManagementControllerPermissionTest {
     @BeforeEach
     void setUp() {
         controller = new SystemManagementController(authService, permissionService,
-                administrationService, registrationService, wechatUserService, projectMemberService);
+                administrationService, registrationService, wechatUserService, projectMemberService,
+                administrativeDeletionService);
         request = new MockHttpServletRequest();
         request.addHeader("Authorization", "Bearer delegated-token");
         user = new SysUser();

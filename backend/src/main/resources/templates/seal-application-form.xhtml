@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8" />
+  <title>${TITLE}</title>
+  <style type="text/css">
+    @page {
+      size: A4;
+      margin: 15mm 14mm 17mm 14mm;
+      @bottom-center {
+        content: "第 " counter(page) " 页 / 共 " counter(pages) " 页";
+        font-family: "Noto Sans SC";
+        font-size: 8pt;
+        color: #666666;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: #111111;
+      font-family: "Noto Sans SC";
+      font-size: 10pt;
+      line-height: 1.55;
+    }
+    h1, h2 { margin: 0; text-align: center; font-weight: 700; }
+    h1 { font-size: 14pt; margin-bottom: 5mm; }
+    h2 { font-size: 20pt; margin-bottom: 7mm; letter-spacing: 2pt; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .form-table { margin: 0; }
+    th, td {
+      border: 0.75pt solid #222222;
+      padding: 2.5mm 2.2mm;
+      vertical-align: middle;
+      word-wrap: break-word;
+    }
+    .form-label { width: 30%; text-align: center; font-weight: 700; background: #f5f6f8; }
+    .purpose { min-height: 16mm; }
+    .details { margin: 0; -fs-table-paginate: paginate; }
+    .details thead { display: table-header-group; }
+    .details th { text-align: center; font-weight: 700; background: #edf1f6; }
+    .details .section-title { padding: 2.5mm; background: #dfe7f2; font-size: 11pt; }
+    .details .index-column { width: 12%; }
+    .details .copies-column { width: 15%; }
+    .details tr { page-break-inside: avoid; }
+    .center { text-align: center; }
+    .pair { padding: 0; }
+    .pair-table td { border: 0; padding: 2.5mm 2.2mm; }
+    .pair-table .inline-label { width: 21%; text-align: center; font-weight: 700; background: #f5f6f8; }
+    .approval { min-height: 28mm; }
+    .approval-badge {
+      display: inline-block;
+      margin: 0 0 2mm 0;
+      padding: 1mm 3mm;
+      border: 1pt solid #245a9a;
+      color: #245a9a;
+      font-weight: 700;
+    }
+    .approval-meta { margin-top: 3mm; color: #333333; }
+    .note { margin-top: 4mm; font-size: 8.5pt; color: #444444; }
+  </style>
+</head>
+<body>
+  <h1>${COMPANY_NAME}</h1>
+  <h2>用印申请单（项目部级）</h2>
+
+  <table class="form-table">
+    <tbody>
+      <tr><td class="form-label">申请单编号</td><td>${APPLICATION_NO}</td></tr>
+      <tr><td class="form-label">申请部门/项目部</td><td>${DEPARTMENT_NAME}</td></tr>
+      <tr><td class="form-label">申请使用印章名称</td><td>${SEAL_NAME}</td></tr>
+      <tr><td class="form-label">事由</td><td class="purpose">${PURPOSE}</td></tr>
+    </tbody>
+  </table>
+
+  <table class="details">
+    <colgroup>
+      <col class="index-column" />
+      <col />
+      <col class="copies-column" />
+    </colgroup>
+    <thead>
+      <tr><th class="section-title" colspan="3">用印文件明细</th></tr>
+      <tr><th>序号</th><th>用印文件名称</th><th>份数</th></tr>
+    </thead>
+    <tbody>${ITEM_ROWS}</tbody>
+  </table>
+
+  <table class="form-table">
+    <tbody>
+      <tr>
+        <td class="form-label">申请人</td>
+        <td class="pair">
+          <table class="pair-table"><tbody><tr>
+            <td>${APPLICANT_NAME}</td><td class="inline-label">所在部门/项目部</td><td>${APPLICANT_DEPARTMENT}</td>
+          </tr></tbody></table>
+        </td>
+      </tr>
+      <tr>
+        <td class="form-label">联系方式</td>
+        <td class="pair">
+          <table class="pair-table"><tbody><tr>
+            <td>${APPLICANT_PHONE}</td><td class="inline-label">申请日期</td><td>${APPLICATION_DATE}</td>
+          </tr></tbody></table>
+        </td>
+      </tr>
+      <tr>
+        <td class="form-label">项目经理意见</td>
+        <td class="approval">
+          <div class="approval-badge">系统审批</div>
+          <div>${APPROVAL_OPINION}</div>
+          <div class="approval-meta">审批人：${APPROVER_NAME}　审批时间：${APPROVAL_TIME}</div>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="note">备注：本申请单由系统生成，项目经理意见经系统审批确认，审批人和审批时间已由系统留痕。</div>
+</body>
+</html>

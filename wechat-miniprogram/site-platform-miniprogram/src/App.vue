@@ -21,9 +21,16 @@ const PAGE_TO_ROOT: Array<[string, string]> = [
 
 async function enforceCurrentPageAccess() {
   const pages = getCurrentPages();
-  const route = String(pages[pages.length - 1]?.route || '');
+  const currentPage = pages[pages.length - 1] as unknown as { route?: string; options?: Record<string, string> } | undefined;
+  const route = String(currentPage?.route || '');
   if (!route || PUBLIC_PREFIXES.some((prefix) => route.startsWith(prefix))) return;
   if (!getToken()) {
+    if (route.startsWith('pages/seal/')) {
+      const allowedKeys = ['scene', 'id', 'projectId'];
+      const query = allowedKeys.map((key) => currentPage?.options?.[key]
+        ? `${key}=${encodeURIComponent(String(currentPage.options[key]))}` : '').filter(Boolean).join('&');
+      auth.rememberResumeUrl(`/${route}${query ? `?${query}` : ''}`);
+    }
     uni.reLaunch({ url: '/pages/login/index' });
     return;
   }

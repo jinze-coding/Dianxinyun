@@ -1,6 +1,9 @@
-import { PAGE_IDS } from '../constants/dicts';
+import { PAGE_IDS } from '../constants/dicts.js';
 
 const PAGE_ACCESS_RULES = {
+  [PAGE_IDS.SITE_ACCESS]: {
+    menuCodes: ['WEB_SITE_ACCESS', 'SITE_VISITOR'],
+  },
   [PAGE_IDS.DOCUMENT_MANAGEMENT]: {
     menuCodes: ['WEB_DOCUMENT', 'DOCUMENT_MANAGEMENT'],
   },
@@ -11,6 +14,7 @@ const PAGE_ACCESS_RULES = {
     menuCodes: ['WEB_QUALITY', 'QUALITY_MANAGEMENT'],
   },
   [PAGE_IDS.SYSTEM_MANAGEMENT]: {
+    platformOnly: true,
     menuCodes: [
       'WEB_SYSTEM',
       'SYSTEM_MANAGEMENT',
@@ -18,9 +22,9 @@ const PAGE_ACCESS_RULES = {
       'SYSTEM_USER',
       'SYSTEM_ROLE',
       'SYSTEM_MENU',
-      'SYSTEM_PROJECT',
       'SYSTEM_WECHAT',
       'SYSTEM_AUDIT',
+      'SYSTEM_APPROVAL',
     ],
   },
 };
@@ -105,6 +109,8 @@ export function canAccessPage(user, pageId, projectId = null) {
   if (!user) return false;
   const rule = PAGE_ACCESS_RULES[pageId];
   if (!rule) return false;
+  if (isPlatformAdmin(user)) return true;
+  if (rule.platformOnly && !isPlatformAdmin(user)) return false;
   if (projectId !== null && projectId !== undefined) {
     return hasAssignedProjectMenu(user, projectId, pageId, ...rule.menuCodes);
   }

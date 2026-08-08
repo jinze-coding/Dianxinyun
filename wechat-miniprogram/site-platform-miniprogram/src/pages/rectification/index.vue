@@ -5,6 +5,7 @@ import AppNavBar from '@/components/AppNavBar.vue';
 import EmptyState from '@/components/EmptyState.vue';
 import { getRectificationList } from '@/api/rectification';
 import { formatSpotCheckCategory } from '@/constants/spotCheck';
+import { useAuthStore } from '@/stores/auth';
 import type { RectificationStatus, RectificationTask } from '@/types';
 import { usePageScrollHeight } from '@/utils/navLayout';
 import { getQueryNumber, navigateTo, showToast, switchTab } from '@/utils/navigation';
@@ -12,6 +13,7 @@ import { getQueryNumber, navigateTo, showToast, switchTab } from '@/utils/naviga
 type RectificationFilter = '' | RectificationStatus;
 
 const projectId = ref(1);
+const authStore = useAuthStore();
 const loading = ref(false);
 const filter = ref<RectificationFilter>('');
 const tasks = ref<RectificationTask[]>([]);
@@ -45,6 +47,7 @@ const visibleTasks = computed(() => {
 });
 
 onShow(async () => {
+  if (!await authStore.ensureRootAccess('/pages/inspection/index')) return;
   const pages = getCurrentPages();
   const current = pages[pages.length - 1] as unknown as { options?: Record<string, string> };
   projectId.value = getQueryNumber(current.options?.projectId, projectId.value || 1);
@@ -122,7 +125,7 @@ function goBack() {
     uni.navigateBack();
     return;
   }
-  switchTab('/pages/safety/index');
+  switchTab('/pages/inspection/index');
 }
 
 function openTask(task: RectificationTask) {
@@ -140,7 +143,7 @@ function openTask(task: RectificationTask) {
           <view class="summary-head">
             <view>
               <text class="summary-title">项目整改闭环</text>
-              <text class="summary-subtitle">当前项目全部整改任务</text>
+              <text class="summary-subtitle">电工查看本人任务，安全员查看项目待复查</text>
             </view>
             <button class="refresh-button" @tap="loadTasks">刷新</button>
           </view>

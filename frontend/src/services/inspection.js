@@ -44,6 +44,10 @@ export function getInspectionRectifications(params = {}) {
   return get('/inspection/rectifications', params);
 }
 
+export function getInspectionRectificationAssignees(projectId) {
+  return get('/inspection/rectification-assignees', { projectId });
+}
+
 export function getInspectionRectification(id) {
   return get(`/inspection/rectifications/${id}`);
 }

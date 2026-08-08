@@ -59,7 +59,7 @@ export const workbenchActions: WorkbenchAction[] = [
     icon: 'todo',
     tone: 'slate',
     url: '/pages/todo/index',
-    targetType: 'navigate',
+    targetType: 'switchTab',
     todoFilter: 'INSPECTION'
   }
 ];

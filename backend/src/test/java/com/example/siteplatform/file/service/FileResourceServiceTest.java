@@ -122,6 +122,26 @@ class FileResourceServiceTest {
     }
 
     @Test
+    void genericFileApiCannotReadSealEvidenceEvenWhenUserHasProjectAccess() {
+        FileResource file = file(11L, 2L, 7L, "SEAL_SOURCE", 42L);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.checkRead(user(7L), file));
+
+        assertEquals(403, exception.getCode());
+        verify(permissionService, never()).checkProjectPermission(7L, 2L);
+    }
+
+    @Test
+    void genericUploadCannotForgeSealEvidenceBusinessType() {
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.authorizeUpload(user(7L), 2L, " seal_stamped_result ", 42L));
+
+        assertEquals(403, exception.getCode());
+        verify(permissionService).checkProjectPermission(7L, 2L);
+    }
+
+    @Test
     void genericFileApiCannotModifyBoundWorkflowAttachment() {
         FileResource file = file(11L, 2L, 7L, "QUALITY_ISSUE", 19L);
 

@@ -8,6 +8,8 @@ import com.example.siteplatform.auth.service.CaptchaService;
 import com.example.siteplatform.auth.service.WechatAuthService;
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.log.mapper.OperationLogMapper;
+import com.example.siteplatform.project.entity.ProjectInfo;
+import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectRoleMapper;
 import com.example.siteplatform.project.service.InspectionPermissionTemplateService;
@@ -30,6 +32,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.dao.DuplicateKeyException;
 
 import java.util.List;
+import java.util.Collection;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -40,6 +43,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -58,6 +62,7 @@ class RegistrationApplicationServiceTest {
     @Mock private CaptchaService captchaService;
     @Mock private WechatAuthService wechatAuthService;
     @Mock private OperationLogMapper operationLogMapper;
+    @Mock private ProjectInfoMapper projectInfoMapper;
 
     private RegistrationApplicationService service;
 
@@ -66,9 +71,23 @@ class RegistrationApplicationServiceTest {
         service = new RegistrationApplicationService(
                 applicationMapper, userMapper, roleMapper, userProjectMapper,
                 inspectionTemplateService, authService, captchaService,
-                wechatAuthService, operationLogMapper, new ObjectMapper());
+                wechatAuthService, operationLogMapper, new ObjectMapper(), projectInfoMapper);
         ReflectionTestUtils.setField(service, "userProjectRoleMapper", userProjectRoleMapper);
         ReflectionTestUtils.setField(service, "wechatBindingMapper", wechatBindingMapper);
+        lenient().when(projectInfoMapper.selectBatchIds(any())).thenAnswer(invocation ->
+                ((Collection<?>) invocation.getArgument(0)).stream()
+                        .map(value -> availableProject(((Number) value).longValue()))
+                        .toList());
+        lenient().when(projectInfoMapper.selectById(any())).thenAnswer(invocation ->
+                availableProject(((Number) invocation.getArgument(0)).longValue()));
+        SystemRole projectMemberRole = new SystemRole();
+        projectMemberRole.setId(30L);
+        projectMemberRole.setRoleCode("USER");
+        projectMemberRole.setScopeType("PROJECT");
+        projectMemberRole.setEnabled(1);
+        projectMemberRole.setDeleted(0);
+        projectMemberRole.setProjectManagerRole(0);
+        lenient().when(roleMapper.selectById(30L)).thenReturn(projectMemberRole);
     }
 
     @Test
@@ -134,6 +153,82 @@ class RegistrationApplicationServiceTest {
     }
 
     @Test
+    void registrationRequiresAtLeastOneAvailableProjectBeforeConsumingCaptcha() {
+        RegistrationSubmitRequest request = validWebRequest();
+        request.setDesiredProjectIds(List.of());
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> service.submit(request));
+
+        assertTrue(exception.getMessage().contains("至少选择一个"));
+        verify(captchaService, never()).verifyAndConsume(any(), any());
+        verify(applicationMapper, never()).insert(any(RegistrationApplication.class));
+    }
+
+    @Test
+    void registrationRejectsMissingOrStoppedProject() {
+        RegistrationSubmitRequest request = validWebRequest();
+        org.mockito.Mockito.doReturn(List.of()).when(projectInfoMapper).selectBatchIds(any());
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> service.submit(request));
+
+        assertTrue(exception.getMessage().contains("不可申请"));
+        verify(captchaService, never()).verifyAndConsume(any(), any());
+    }
+
+    @Test
+    void registrationRejectsStoppedProjectBeforeConsumingCaptcha() {
+        RegistrationSubmitRequest request = validWebRequest();
+        ProjectInfo stoppedProject = availableProject(1L);
+        stoppedProject.setProjectStatus("stopped");
+        org.mockito.Mockito.doReturn(List.of(stoppedProject)).when(projectInfoMapper).selectBatchIds(any());
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> service.submit(request));
+
+        assertTrue(exception.getMessage().contains("不可申请"));
+        verify(captchaService, never()).verifyAndConsume(any(), any());
+        verify(applicationMapper, never()).insert(any(RegistrationApplication.class));
+    }
+
+    @Test
+    void publicProjectSearchRanksExactMatchFirstAndReturnsMinimalOption() {
+        ProjectInfo contains = availableProject(2L);
+        contains.setProjectName("智慧工地二期");
+        ProjectInfo exact = availableProject(1L);
+        exact.setProjectName("智慧工地");
+        when(projectInfoMapper.selectList(any())).thenReturn(List.of(contains, exact));
+
+        var result = service.searchProjectOptions("智慧工地");
+
+        assertEquals(List.of(1L, 2L), result.stream().map(item -> item.getProjectId()).toList());
+        assertEquals(Boolean.TRUE, result.get(0).getAvailable());
+        assertNull(result.get(0).getArea());
+    }
+
+    @Test
+    void publicProjectCatalogIsAvailableWithoutKeywordAndSortedByName() {
+        ProjectInfo second = availableProject(2L);
+        second.setProjectName("智慧工地二期");
+        ProjectInfo first = availableProject(1L);
+        first.setProjectName("测试区域");
+        when(projectInfoMapper.selectList(any())).thenReturn(List.of(second, first));
+
+        var result = service.searchProjectOptions("");
+
+        assertEquals(List.of(1L, 2L), result.stream().map(item -> item.getProjectId()).toList());
+        assertEquals(List.of("测试区域", "智慧工地二期"),
+                result.stream().map(item -> item.getProjectName()).toList());
+    }
+
+    @Test
+    void publicProjectSearchStillRejectsSingleCharacterKeyword() {
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.searchProjectOptions("智"));
+
+        assertTrue(exception.getMessage().contains("至少输入2个字符"));
+        verify(projectInfoMapper, never()).selectList(any());
+    }
+
+    @Test
     void miniSubmissionRequiresExplicitWechatIdentity() {
         RegistrationSubmitRequest request = validWebRequest();
         request.setSourceType("MINI");
@@ -166,6 +261,7 @@ class RegistrationApplicationServiceTest {
         request.setSourceType("MINI");
         request.setRegistrationMode("WECHAT_QUICK");
         request.setRealName("微信新用户");
+        request.setDesiredProjectIds(List.of(1L));
         request.setWechatCode("login-code");
         request.setPhoneCode("phone-code");
         when(wechatAuthService.identityForCode("login-code"))
@@ -198,6 +294,7 @@ class RegistrationApplicationServiceTest {
         request.setSourceType("MINI");
         request.setRegistrationMode("WECHAT_QUICK");
         request.setRealName("微信新用户");
+        request.setDesiredProjectIds(List.of(1L));
         request.setWechatCode("login-code");
         request.setPhoneCode("phone-code");
         when(wechatAuthService.identityForCode("login-code"))
@@ -219,6 +316,7 @@ class RegistrationApplicationServiceTest {
         request.setSourceType("MINI");
         request.setRegistrationMode("WECHAT_QUICK");
         request.setRealName("微信新用户");
+        request.setDesiredProjectIds(List.of(1L));
         request.setWechatCode("login-code");
 
         BusinessException exception = assertThrows(BusinessException.class, () -> service.submit(request));
@@ -396,6 +494,7 @@ class RegistrationApplicationServiceTest {
         request.setSourceType("WEB");
         request.setCaptchaId("captcha-id");
         request.setCaptchaCode("ABCD");
+        request.setDesiredProjectIds(List.of(1L));
         return request;
     }
 
@@ -417,7 +516,20 @@ class RegistrationApplicationServiceTest {
     private RegistrationReviewRequest reviewRequest() {
         RegistrationReviewRequest request = new RegistrationReviewRequest();
         request.setReviewComment("资料核验通过");
+        RegistrationReviewRequest.ProjectAssignment assignment = new RegistrationReviewRequest.ProjectAssignment();
+        assignment.setProjectId(1L);
+        assignment.setRoleIds(List.of(30L));
+        request.setProjectAssignments(List.of(assignment));
         return request;
+    }
+
+    private ProjectInfo availableProject(Long id) {
+        ProjectInfo project = new ProjectInfo();
+        project.setId(id);
+        project.setProjectName("项目" + id);
+        project.setShortName("P" + id);
+        project.setProjectStatus("normal");
+        return project;
     }
 
     private SysUser reviewer() {

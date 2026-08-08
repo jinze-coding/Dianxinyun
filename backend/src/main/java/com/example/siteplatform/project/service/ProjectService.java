@@ -75,12 +75,26 @@ public class ProjectService {
             "quality_issue",
             "quality_issue_log",
             "safety_education_batch",
+            "seal_application",
+            "seal_application_file",
+            "seal_application_item",
+            "seal_application_log",
+            "seal_definition",
+            "site_visit_audit_log",
+            "site_visit_invitation",
+            "site_visit_person",
             "sys_user_project",
             "sys_user_project_role",
             "temporary_person",
+            "user_notification",
             "video_access_log",
             "video_layout_config",
-            "wechat_access_application"
+            "wechat_access_application",
+            "workflow_approval_config",
+            "workflow_approval_config_user",
+            "workflow_approval_instance",
+            "workflow_approval_task",
+            "workflow_cc_recipient"
     );
 
     @Autowired
@@ -228,7 +242,8 @@ public class ProjectService {
         if (!projectPermissionService.isPlatformAdmin(currentUser.getId())) {
             throw BusinessException.of(403, "只有平台管理员才能删除项目");
         }
-        ProjectInfo existing = projectMapper.selectById(projectId);
+        // 与外访邀请创建锁定同一项目行，防止“判空后删除”与新业务写入并发产生孤儿数据。
+        ProjectInfo existing = projectMapper.selectByIdForUpdate(projectId);
         if (existing == null) {
             throw BusinessException.notFound("项目不存在");
         }

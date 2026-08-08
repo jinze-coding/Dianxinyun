@@ -20,11 +20,13 @@ import com.example.siteplatform.system.dto.RolePermissionUpdateRequest;
 import com.example.siteplatform.system.dto.RoleMenuUpdateRequest;
 import com.example.siteplatform.system.dto.RoleOperationPermissionUpdateRequest;
 import com.example.siteplatform.system.dto.SystemUserStatusRequest;
+import com.example.siteplatform.system.dto.AdministrativeDeletionExecuteRequest;
 import com.example.siteplatform.system.entity.SystemMenu;
 import com.example.siteplatform.system.entity.SystemPermission;
 import com.example.siteplatform.system.entity.SystemRole;
 import com.example.siteplatform.system.service.SystemAdministrationService;
 import com.example.siteplatform.system.service.SystemPermissionService;
+import com.example.siteplatform.system.service.AdministrativeDeletionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
@@ -41,18 +43,21 @@ public class SystemManagementController {
     private final RegistrationApplicationService registrationService;
     private final WechatUserManagementService wechatUserService;
     private final ProjectMemberService projectMemberService;
+    private final AdministrativeDeletionService administrativeDeletionService;
 
     public SystemManagementController(AuthService authService, SystemPermissionService permissionService,
                                       SystemAdministrationService administrationService,
                                       RegistrationApplicationService registrationService,
                                       WechatUserManagementService wechatUserService,
-                                      ProjectMemberService projectMemberService) {
+                                      ProjectMemberService projectMemberService,
+                                      AdministrativeDeletionService administrativeDeletionService) {
         this.authService = authService;
         this.permissionService = permissionService;
         this.administrationService = administrationService;
         this.registrationService = registrationService;
         this.wechatUserService = wechatUserService;
         this.projectMemberService = projectMemberService;
+        this.administrativeDeletionService = administrativeDeletionService;
     }
 
     @GetMapping("/registration-applications")
@@ -157,6 +162,16 @@ public class SystemManagementController {
         return Result.success(projectMemberService.batchUpdateUserProjectAssignments(userId, body, operator));
     }
 
+    @PostMapping("/users/{userId}/project-role-assignments/preview")
+    public Result<List<com.example.siteplatform.project.dto.ResponsibilityImpactVO>> previewUserProjectRoleAssignments(
+            @PathVariable Long userId,
+            @Valid @RequestBody UserProjectRoleBatchRequest body,
+            HttpServletRequest request) {
+        SysUser operator = current(request);
+        permissionService.requirePlatformPermission(operator, SystemPermissionCodes.USER_MANAGE);
+        return Result.success(projectMemberService.previewUserProjectAssignmentImpact(userId, body, operator));
+    }
+
     @GetMapping("/roles")
     public Result<List<SystemRole>> roles(HttpServletRequest request) {
         permissionService.requireAnyPlatformPermission(current(request),
@@ -182,10 +197,14 @@ public class SystemManagementController {
     }
 
     @DeleteMapping("/roles/{id}")
-    public Result<Void> deleteRole(@PathVariable Long id, HttpServletRequest request) {
+    public Result<Void> deleteRole(@PathVariable Long id,
+                                   @Valid @RequestBody AdministrativeDeletionExecuteRequest confirmation,
+                                   HttpServletRequest request) {
         SysUser operator = current(request);
-        permissionService.requirePlatformPermission(operator, SystemPermissionCodes.ROLE_MANAGE);
-        administrationService.deleteRole(id, operator);
+        permissionService.requirePlatformAdmin(operator);
+        confirmation.setTargetType("ROLE");
+        confirmation.setTargetId(id);
+        administrativeDeletionService.execute(confirmation, operator);
         return Result.success();
     }
 

@@ -94,6 +94,13 @@ export interface QualityAssignee {
   displayName: string;
 }
 
+export interface InspectionAssignee {
+  userId: number;
+  username: string;
+  realName?: string;
+  displayName: string;
+}
+
 export interface Project {
   id: number;
   projectName: string;
@@ -281,26 +288,198 @@ export interface RectificationTask {
   beforePhotos?: string[];
   rectificationPhotos?: string[];
   reviewLogs?: RectificationReviewLog[];
+  canRectify?: boolean;
+  canReview?: boolean;
+  canAssign?: boolean;
 }
 
-export type TodoType = 'INSPECTION' | 'REVIEW' | 'RECTIFICATION' | 'RECHECK';
+export type TodoType = 'INSPECTION' | 'REVIEW' | 'RECTIFICATION' | 'RECHECK' | 'SEAL_APPROVAL';
 
 export interface TodoItem {
   id: number;
   type: TodoType;
+  todoKey?: string;
+  taskType?: string;
+  taskId?: number;
   title: string;
   projectId?: number;
   projectName: string;
   boxCode: string;
   installLocation?: string;
+  summary?: string;
+  applicantName?: string;
+  dueAt?: string;
   dueText: string;
   targetId: number;
   businessType?: string;
+  actionUrl?: string;
+  routeKey?: string;
+  routeCode?: string;
+  routeParams?: Record<string, string | number>;
+  scope?: 'PENDING' | 'CC' | string;
+  createdAt?: string;
   priority?: 'normal' | 'warning' | 'danger';
   reviewDueTime?: string | null;
   assignedReviewerId?: number | null;
   assignedReviewerName?: string | null;
   reviewOverdue?: number | boolean;
+}
+
+export interface TodoSummary {
+  pendingCount: number;
+  ccCount: number;
+  unreadNotificationCount: number;
+  badgeCount: number;
+}
+
+export interface UserNotification {
+  id: number;
+  projectId?: number;
+  projectName?: string;
+  businessType?: string;
+  businessId?: number;
+  eventCode?: string;
+  title: string;
+  summary?: string;
+  isRead: boolean;
+  readTime?: string;
+  createTime?: string;
+  actionUrl?: string;
+  routeKey?: string;
+  routeCode?: string;
+  routeParams?: Record<string, string | number>;
+}
+
+export type SealApplicationStatus =
+  | 'DRAFT'
+  | 'PENDING_APPROVAL'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'WITHDRAWN';
+
+export type SealFileRole = 'SOURCE' | 'STAMPED_RESULT';
+
+export interface SealEntryResolution {
+  scene: string;
+  projectId: number;
+  projectName: string;
+  projectShortName?: string;
+  companyName?: string;
+  departmentName?: string;
+  sealId?: number;
+  sealName?: string;
+  configured?: boolean;
+  active?: boolean;
+  expiresAt?: string;
+  message?: string;
+}
+
+export interface SealApplicationItem {
+  id?: number;
+  documentName: string;
+  copies: number;
+}
+
+export interface SealApplicationFile {
+  id: number;
+  fileRole: SealFileRole;
+  itemId?: number;
+  fileName: string;
+  originalFileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+  fileExtension?: string;
+  uploaderId?: number;
+  uploaderName?: string;
+  archivedDocumentId?: number;
+  archivedVersionId?: number;
+  createTime?: string;
+  canPreview?: boolean;
+  canDelete?: boolean;
+}
+
+export interface SealApplicationLog {
+  id: number;
+  action: string;
+  actionLabel?: string;
+  operatorId?: number;
+  operatorName?: string;
+  opinion?: string;
+  description?: string;
+  createTime?: string;
+}
+
+export interface SealCcCandidate {
+  userId: number;
+  displayName: string;
+  realName?: string;
+  username?: string;
+  phone?: string;
+  defaultSelected?: boolean;
+  selected?: boolean;
+}
+
+export interface SealCcRecipient extends SealCcCandidate {
+  readTime?: string;
+}
+
+export interface SealDefinition {
+  id: number;
+  projectId?: number;
+  projectName?: string;
+  sealName: string;
+  sealCode?: string;
+  sealType?: string;
+  companyName?: string;
+  status?: 'ACTIVE' | 'DISABLED' | string;
+  enabled?: boolean;
+}
+
+export interface SealApplication {
+  id: number;
+  applicationNo?: string;
+  requestKey?: string;
+  sourceApplicationId?: number;
+  projectId: number;
+  projectName: string;
+  companyName?: string;
+  departmentName: string;
+  sealId?: number;
+  sealName: string;
+  purpose: string;
+  status: SealApplicationStatus;
+  statusLabel?: string;
+  applicantId?: number;
+  applicantName?: string;
+  applicantDepartmentName?: string;
+  applicantPhone?: string;
+  applicationDate?: string;
+  submitTime?: string;
+  approverId?: number;
+  approverName?: string;
+  approvalOpinion?: string;
+  approvalTime?: string;
+  createTime?: string;
+  updateTime?: string;
+  items?: SealApplicationItem[];
+  files?: SealApplicationFile[];
+  ccRecipients?: SealCcRecipient[];
+  logs?: SealApplicationLog[];
+  canEdit?: boolean;
+  canSubmit?: boolean;
+  canApprove?: boolean;
+  canReject?: boolean;
+  canTransfer?: boolean;
+  canCancel?: boolean;
+  canUploadStampedResult?: boolean;
+  canArchive?: boolean;
+}
+
+export interface SealApplicationDetail extends SealApplication {
+  items: SealApplicationItem[];
+  files: SealApplicationFile[];
+  ccRecipients: SealCcRecipient[];
+  logs: SealApplicationLog[];
 }
 
 export interface PublicElectricBoxSummary {

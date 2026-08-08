@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { DEFAULT_THEME_ID, getThemeById } from './constants/themes';
-import { NAV_ITEMS, PAGE_IDS } from './constants/dicts';
+import { AUTHENTICATED_LANDING_PAGE, NAV_ITEMS, PAGE_IDS } from './constants/dicts';
 import { isLoggedIn, getCurrentUser, logout } from './services/auth';
-import { getProjectList, addProject, updateProject, deleteProject } from './services/project';
+import { getProjectList, addProject, updateProject } from './services/project';
+import { confirmAdministrativeDeletion } from './services/administrativeDeletion';
 import { getPersonnelList, addPersonnel, updatePersonnel, deletePersonnel } from './services/personnel';
 import { getTrainingList, createTraining, updateTraining, markTrainingComplete, deleteTraining } from './services/safety';
 import { getFileList, uploadFile, deleteFile } from './services/file';
 import { getCameraList, getDeviceList, getTowerCraneList, createCamera, updateCamera, deleteCamera, createDevice, updateDevice, deleteDevice } from './services/monitor';
 import {
   getElectricBoxList,
+  getElectricBoxDetail,
   createElectricBox,
   updateElectricBox,
   disableElectricBox,
@@ -24,7 +26,7 @@ import {
   rotateElectricBoxUnifiedCode,
   updateElectricBoxInspectionScope,
 } from './services/electricBox';
-import { getInspectionRecords, getInspectionRecord, getInspectionTodos, reviewInspectionRecord, assignInspectionReviewer, getInspectionReviewLogs, getInspectionSummary, getInspectionRectifications, getInspectionRectification, completeInspectionRectification, closeInspectionRectification, rejectInspectionRectification, assignInspectionRectification, escalateInspectionRectification, exportInspectionRecords, downloadFileAsObjectUrl, getProjectInspectionSetting, updateProjectInspectionSetting } from './services/inspection';
+import { getInspectionRecords, getInspectionRecord, getInspectionTodos, reviewInspectionRecord, assignInspectionReviewer, getInspectionReviewLogs, getInspectionSummary, getInspectionRectifications, getInspectionRectificationAssignees, getInspectionRectification, completeInspectionRectification, closeInspectionRectification, rejectInspectionRectification, assignInspectionRectification, escalateInspectionRectification, exportInspectionRecords, downloadFileAsObjectUrl, getProjectInspectionSetting, updateProjectInspectionSetting } from './services/inspection';
 import { getWechatAccessApplications, approveWechatAccessApplication, rejectWechatAccessApplication } from './services/wechatAccess';
 import { getWechatUsers, getWechatUserDetail, updateWechatBindingStatus, unbindWechatUser } from './services/wechatUsers';
 import { getProjectMembers, getProjectUserOptions, createProjectUser, saveProjectMember, updateProjectMember, removeProjectMember, updateProjectMemberStatus } from './services/projectMembers';
@@ -33,8 +35,11 @@ import { CameraPage } from './pages/Camera';
 import LoginPage from './pages/Login';
 import PersonnelManagementPage from './pages/PersonnelManagement';
 import QualityManagementPage from './pages/QualityManagement';
-import DocumentManagementPage from './pages/DocumentManagement';
+import DocumentCenterPage from './pages/DocumentCenter';
+import PersonalInboxPage from './pages/PersonalInbox';
 import SystemManagementPage from './pages/SystemManagement';
+import SiteAccessManagementPage from './pages/SiteAccessManagement';
+import { getPersonalTodoSummary, getUnreadNotificationCount } from './services/personalInbox';
 import { canAccessPage, collectProjectMenuCodes, hasProjectPermission, isPlatformAdmin } from './utils/permissions';
 import { pageMenuAllowed } from './utils/roleAuthorization';
 import { buildElectricBoxQrLabelHtml, normalizeQrImageSource } from './utils/html';
@@ -46,6 +51,7 @@ import {
   validateInspectionExportRange,
 } from './utils/inspectionExport';
 import { requireProjectList } from './utils/projectList';
+import { resolveBusinessRoute } from './utils/businessRoute';
 import StatusBadge from './components/StatusBadge';
 import SectionCard from './components/SectionCard';
 import PersonFormModal from './components/PersonFormModal';
@@ -176,7 +182,7 @@ function VideoCell({ cam, theme: T, onFullscreen, fullscreen }) {
 // ============================================
 // 顶部导航
 // ============================================
-function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, projectList, onRefreshProjects, theme, onLogout, currentUser, visibleNavItems, canAccessSystem }) {
+function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, projectList, onRefreshProjects, theme, onLogout, currentUser, visibleNavItems, canAccessSystem, inboxCount = 0 }) {
   const [showProjects, setShowProjects] = useState(false);
   const [showProjectMgmt, setShowProjectMgmt] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -207,7 +213,7 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
   }, [showProjects, showProjectMgmt]);
 
   const handleAddProject = async () => {
-    if (!addForm.projectName.trim()) { alert('请填写作业区域名称'); return; }
+    if (!addForm.projectName.trim()) { alert('请填写项目名称'); return; }
     try {
       const res = await addProject(addForm);
       if (res.code === 200) {
@@ -219,18 +225,15 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
   };
 
   const handleDeleteProject = async (id) => {
-    if (!window.confirm('仅空项目可以删除。确认删除此项目？')) return;
     try {
-      const res = await deleteProject(id);
-      if (res.code === 200) {
-        onRefreshProjects();
-        // 如果删除的是当前选中的项目，切换到第一个
-        if (currentProject === id && projectList.length > 1) {
-          const remaining = projectList.find(p => p.id !== id);
-          if (remaining) onProjectChange(remaining.id);
-        }
-      } else { alert(res.message || '删除失败'); }
-    } catch (e) { alert(e?.response?.data?.message || '删除失败，请重试'); }
+      const deleted = await confirmAdministrativeDeletion('PROJECT', id);
+      if (!deleted) return;
+      onRefreshProjects();
+      if (currentProject === id) {
+        const remaining = projectList.find(p => p.id !== id);
+        if (remaining) onProjectChange(remaining.id);
+      }
+    } catch (e) { alert(e?.message || '删除失败，请重试'); }
   };
 
   const T = theme;
@@ -267,7 +270,7 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
         </div>
       </div>
 
-      {/* 作业区域管理 */}
+      {/* 项目列表 */}
       {canManageProjects && <div style={{ position: 'relative', marginLeft: 12 }}>
         <button
           onClick={e => { e.stopPropagation(); setShowProjectMgmt(!showProjectMgmt); setShowProjects(false); }}
@@ -279,7 +282,7 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
           }}
         >
           <span>⚙</span>
-          <span>作业区域管理</span>
+          <span>项目列表</span>
         </button>
         {showProjectMgmt && (
           <div style={{
@@ -289,14 +292,14 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
             boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
           }} onClick={e => e.stopPropagation()}>
             <div style={{ padding: '8px 10px', borderBottom: `1px solid ${T.borderColor}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: T.textPrimary }}>作业区域列表</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: T.textPrimary }}>项目列表</span>
               <button onClick={() => { setShowAddModal(true); }} style={{
                 fontSize: 11, color: T.accent, background: 'none', border: 'none', cursor: 'pointer', fontWeight: 500,
               }}>+ 新增</button>
             </div>
             <div style={{ padding: '6px 8px', borderBottom: `1px solid ${T.borderColor}` }}>
               <input
-                placeholder="搜索作业区域名称..."
+                placeholder="搜索项目名称..."
                 value={projectMgmtSearch}
                 onChange={e => setProjectMgmtSearch(e.target.value)}
                 style={{
@@ -308,7 +311,7 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
             </div>
             <div style={{ maxHeight: 280, overflow: 'auto' }}>
               {filteredMgmtProjects.length === 0 ? (
-                <div style={{ padding: '20px 12px', textAlign: 'center', fontSize: 12, color: T.textMuted }}>无匹配作业区域</div>
+                <div style={{ padding: '20px 12px', textAlign: 'center', fontSize: 12, color: T.textMuted }}>无匹配项目</div>
               ) : filteredMgmtProjects.map(p => (
                 <div key={p.id} style={{
                   padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -446,6 +449,23 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
           {formatTime(time)}
         </div>
 
+        <button
+          onClick={() => onPageChange(PAGE_IDS.PERSONAL_INBOX)}
+          style={{
+            position: 'relative', display: 'flex', alignItems: 'center', gap: 6,
+            background: currentPage === PAGE_IDS.PERSONAL_INBOX ? T.accent : T.cardBg,
+            border: `1px solid ${currentPage === PAGE_IDS.PERSONAL_INBOX ? T.accent : T.borderColor}`,
+            borderRadius: 6, padding: '5px 10px', cursor: 'pointer',
+            color: currentPage === PAGE_IDS.PERSONAL_INBOX ? '#fff' : T.textSecondary,
+            fontSize: 12, fontWeight: currentPage === PAGE_IDS.PERSONAL_INBOX ? 700 : 500,
+          }}
+          title="进入个人待办与消息"
+        >
+          <span aria-hidden="true">🔔</span>
+          <span>待办/消息</span>
+          {inboxCount > 0 && <b style={{ minWidth: 17, height: 17, display: 'inline-grid', placeItems: 'center', padding: '0 3px', borderRadius: 9, background: T.danger, color: '#fff', fontSize: 10, lineHeight: 1 }}>{inboxCount > 99 ? '99+' : inboxCount}</b>}
+        </button>
+
         {canAccessSystem && (
           <button
             onClick={() => onPageChange(PAGE_IDS.SYSTEM_MANAGEMENT)}
@@ -489,7 +509,7 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
         </div>
       </div>
 
-      {/* 新增作业区域弹窗 */}
+      {/* 新增项目弹窗 */}
       {showAddModal && (
         <div style={{
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
@@ -499,17 +519,17 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
             background: T.modalBg, border: `1px solid ${T.borderColor}`,
             borderRadius: 10, padding: 24, width: 500,
           }} onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: T.textPrimary, marginBottom: 16 }}>新增作业区域</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: T.textPrimary, marginBottom: 16 }}>新增项目</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
-                <label style={{ fontSize: 12, color: T.textSecondary, marginBottom: 4, display: 'block' }}>作业区域名称 *</label>
-                <input placeholder="请输入作业区域名称" value={addForm.projectName} onChange={e => setAddForm({ ...addForm, projectName: e.target.value })} style={{
+                <label style={{ fontSize: 12, color: T.textSecondary, marginBottom: 4, display: 'block' }}>项目名称 *</label>
+                <input placeholder="请输入项目名称" value={addForm.projectName} onChange={e => setAddForm({ ...addForm, projectName: e.target.value })} style={{
                   width: '100%', background: T.surface2, border: `1px solid ${T.borderColor}`, borderRadius: 5,
                   padding: '8px 10px', fontSize: 12, color: T.textPrimary, outline: 'none',
                 }} />
               </div>
               <div>
-                <label style={{ fontSize: 12, color: T.textSecondary, marginBottom: 4, display: 'block' }}>区域简称</label>
+                <label style={{ fontSize: 12, color: T.textSecondary, marginBottom: 4, display: 'block' }}>项目简称</label>
                 <input placeholder="请输入简称" value={addForm.shortName} onChange={e => setAddForm({ ...addForm, shortName: e.target.value })} style={{
                   width: '100%', background: T.surface2, border: `1px solid ${T.borderColor}`, borderRadius: 5,
                   padding: '8px 10px', fontSize: 12, color: T.textPrimary, outline: 'none',
@@ -3312,6 +3332,7 @@ function PersonnelPage({ projectId, theme: T, compactMode }) {
 const ELECTRIC_INSPECTION_TABS = [
   { id: 'ledger', label: '电箱台账', menuCode: 'INSPECTION_LEDGER' },
   { id: 'records', label: '巡检记录', menuCode: 'INSPECTION_RECORDS' },
+  { id: 'rectification', label: '整改闭环', menuCode: 'INSPECTION_RECTIFICATIONS' },
 ];
 
 const BOX_STATUS_TEXT = { ACTIVE: '启用', INACTIVE: '停用', REMOVED: '已拆除' };
@@ -4060,10 +4081,11 @@ function PermissionCollapse({ title, subtitle, meta, defaultOpen = true, theme: 
   );
 }
 
-function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, onTabChange }) {
+function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, onTabChange, businessTarget }) {
   const [boxes, setBoxes] = useState([]);
   const [records, setRecords] = useState([]);
   const [rectifications, setRectifications] = useState([]);
+  const [rectificationAssignees, setRectificationAssignees] = useState([]);
   const [members, setMembers] = useState([]);
   const [userOptions, setUserOptions] = useState([]);
   const [permissionTemplates, setPermissionTemplates] = useState([]);
@@ -4112,6 +4134,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   const [rectificationFiles, setRectificationFiles] = useState([]);
   const [rectificationSubmitting, setRectificationSubmitting] = useState(false);
   const [selectedBox, setSelectedBox] = useState(null);
+  const openedBusinessTargetRef = useRef('');
   const [qrLabelLoading, setQrLabelLoading] = useState(false);
   const [qrLogs, setQrLogs] = useState([]);
   const [qrLogsLoading, setQrLogsLoading] = useState(false);
@@ -4167,6 +4190,19 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
       const periodParams = summaryPeriodMode === 'DAY'
         ? { checkDate: checkDate || currentDate() }
         : { month };
+      const canLoadRectificationAssignees = isPlatformUser(currentUser)
+        || hasProjectPermission(currentUser, projectId, 'inspection.review');
+      if (activeTab === 'rectification') {
+        const [rectificationRes, assigneeRes] = await Promise.all([
+          getInspectionRectifications({ projectId, status: rectificationStatus || undefined }),
+          canLoadRectificationAssignees
+            ? getInspectionRectificationAssignees(projectId)
+            : Promise.resolve({ code: 200, data: [] }),
+        ]);
+        if (rectificationRes.code === 200) setRectifications(rectificationRes.data || []);
+        if (assigneeRes.code === 200) setRectificationAssignees(assigneeRes.data || []);
+        return;
+      }
       const [boxRes, recordRes, summaryRes, memberRes, userRes, settingRes] = await Promise.all([
         getElectricBoxList({ projectId, status: boxStatus || undefined }),
         getInspectionRecords({
@@ -4175,7 +4211,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
           ...periodParams,
         }),
         getInspectionSummary({ projectId, boxId: summaryBoxId || undefined, ...periodParams }),
-        getProjectMembers(projectId),
+        canManageMembers ? getProjectMembers(projectId) : Promise.resolve({ code: 200, data: [] }),
         canManageMembers ? getProjectUserOptions(projectId, memberKeyword || undefined) : Promise.resolve({ code: 200, data: [] }),
         getProjectInspectionSetting(projectId),
       ]);
@@ -4183,6 +4219,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
       if (boxRes.code === 200) setBoxes(boxRes.data || []);
       if (recordRes.code === 200) setRecords(recordRes.data || []);
       setRectifications([]);
+      setRectificationAssignees([]);
       if (summaryRes.code === 200) setSummary(summaryRes.data || null);
       if (memberRes.code === 200) setMembers(memberRes.data || []);
       if (userRes.code === 200) setUserOptions(userRes.data || []);
@@ -4194,7 +4231,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     } finally {
       setLoading(false);
     }
-  }, [projectId, boxStatus, summaryPeriodMode, checkDate, month, summaryBoxId, memberKeyword, canManageMembers]);
+  }, [projectId, boxStatus, summaryPeriodMode, checkDate, month, summaryBoxId, memberKeyword, canManageMembers, activeTab, rectificationStatus, currentUser]);
 
   useEffect(() => {
     loadInspectionData();
@@ -4307,8 +4344,10 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   const publicAccessAllowed = generalInspectionManageAllowed && hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.BOX_PUBLIC_ACCESS);
   const inspectionReviewAllowed = generalInspectionManageAllowed
     && hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.INSPECTION_REVIEW);
-  const rectificationReviewAllowed = generalInspectionManageAllowed
-    && hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.RECTIFICATION_REVIEW);
+  const rectificationReviewAllowed = isPlatformUser(currentUser)
+    || hasProjectPermission(currentUser, projectId, 'inspection.review');
+  const rectificationRectifyAllowed = isPlatformUser(currentUser)
+    || hasProjectPermission(currentUser, projectId, 'inspection.rectify');
   const summaryExportAllowed = generalInspectionExportAllowed && hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.SUMMARY_EXPORT);
   const dailySubmitAllowed = generalInspectionSubmitAllowed && hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.INSPECTION_DAILY_SUBMIT);
   const singleBoxExportAllowed = Boolean(summaryBoxId) && (summaryExportAllowed || dailySubmitAllowed);
@@ -4328,7 +4367,8 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   const currentUserId = Number(currentUser?.id || currentUser?.userId || 0);
   const canCompleteRectification = (item) => {
     if (!item || !['PENDING', 'REJECTED'].includes(item.status)) return false;
-    return rectificationReviewAllowed || (currentUserId > 0 && Number(item.assigneeId || 0) === currentUserId);
+    if (item.canRectify !== undefined) return item.canRectify === true;
+    return rectificationRectifyAllowed && currentUserId > 0 && Number(item.assigneeId || 0) === currentUserId;
   };
 
   const buildQrLabelData = async (box) => {
@@ -4589,6 +4629,30 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     } catch (err) {
       console.error('拆除电箱失败', err);
       alert(err.message || '拆除失败');
+    }
+  };
+
+  const permanentlyDeleteBox = async (box) => {
+    try {
+      const deleted = await confirmAdministrativeDeletion('ELECTRIC_BOX', box.id);
+      if (!deleted) return;
+      setSelectedBox(null);
+      await loadInspectionData();
+    } catch (err) {
+      console.error('永久删除电箱失败', err);
+      alert(err.message || '永久删除电箱失败');
+    }
+  };
+
+  const permanentlyDeleteRecord = async (record) => {
+    try {
+      const deleted = await confirmAdministrativeDeletion('INSPECTION_RECORD', record.id);
+      if (!deleted) return;
+      setSelectedRecord(null);
+      await loadInspectionData();
+    } catch (err) {
+      console.error('永久删除巡检记录失败', err);
+      alert(err.message || '永久删除巡检记录失败');
     }
   };
 
@@ -5108,6 +5172,33 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     }
   };
 
+  useEffect(() => {
+    const targetId = Number(businessTarget?.id || 0);
+    const routeCode = String(businessTarget?.routeCode || '').toUpperCase();
+    const targetKey = targetId && routeCode
+      ? `${projectId || ''}:${routeCode}:${targetId}:${businessTarget?.openedAt || ''}`
+      : '';
+    if (!targetKey || openedBusinessTargetRef.current === targetKey) return;
+    openedBusinessTargetRef.current = targetKey;
+
+    if (routeCode === 'INSPECTION_FORM') {
+      getElectricBoxDetail(targetId)
+        .then((response) => {
+          if (Number(response?.code) !== 200 || !response.data) throw new Error(response?.message || '电箱详情加载失败');
+          setSelectedBox(response.data);
+        })
+        .catch((error) => setErrorText(error.message || '电箱详情加载失败'));
+      return;
+    }
+    if (routeCode === 'INSPECTION_RECORD_DETAIL') {
+      openRecordDetail({ id: targetId });
+      return;
+    }
+    if (routeCode === 'INSPECTION_RECTIFICATION_DETAIL') {
+      openRectificationDetail({ id: targetId });
+    }
+  }, [businessTarget?.id, businessTarget?.openedAt, businessTarget?.routeCode, projectId]);
+
   const closeRectificationDrawer = () => {
     setSelectedRectification(null);
     setRectificationFeedback('');
@@ -5128,8 +5219,8 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
       return;
     }
     setRectificationSubmitting(true);
+    const uploadedIds = [];
     try {
-      const uploadedIds = [];
       for (const file of rectificationFiles) {
         const uploadRes = await uploadFile({
           file,
@@ -5137,24 +5228,22 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
           fileName: file.name,
           fileType: 'RECTIFICATION_PHOTO',
           businessType: 'inspection_rectification',
-          businessId: rectification.id,
           remark: '整改反馈照片',
         });
         if (uploadRes.code !== 200 || !uploadRes.data?.id) {
-          alert(uploadRes.message || `${file.name} 上传失败`);
-          return;
+          throw new Error(uploadRes.message || `${file.name} 上传失败`);
         }
         uploadedIds.push(uploadRes.data.id);
       }
       const photoFileIds = [...existingPhotoIds, ...uploadedIds];
       const res = await completeInspectionRectification(rectification.id, { feedback, photoFileIds });
       if (res.code !== 200) {
-        alert(res.message || '提交整改失败');
-        return;
+        throw new Error(res.message || '提交整改失败');
       }
       closeRectificationDrawer();
       await loadInspectionData();
     } catch (err) {
+      await Promise.allSettled(uploadedIds.map(fileId => deleteFile(fileId)));
       console.error('提交整改失败', err);
       alert(err.message || '提交整改失败');
     } finally {
@@ -5165,6 +5254,10 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   const reviewRectification = async (rectification, action) => {
     const comment = window.prompt(action === 'close' ? '请输入复查关闭意见' : '请输入复查退回原因', action === 'close' ? '整改符合要求，关闭。' : '');
     if (comment === null) return;
+    if (action === 'reject' && !comment.trim()) {
+      alert('复查退回原因不能为空');
+      return;
+    }
     try {
       const res = action === 'close'
         ? await closeInspectionRectification(rectification.id, { comment })
@@ -5182,33 +5275,39 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   };
 
   const assignRectificationTask = async (rectification) => {
-    if (!rectificationReviewAllowed) {
+    if (rectification.canAssign === false || (!rectificationReviewAllowed && rectification.canAssign !== true)) {
       alert('无整改改派权限');
       return;
     }
-    if (rectification.status === 'CLOSED') {
-      alert('已关闭整改不可改派');
+    if (!['PENDING', 'REJECTED'].includes(rectification.status)) {
+      alert('只有待整改或已退回任务可以改派');
       return;
     }
-    if (!members.length) {
-      alert('当前项目暂无成员，无法改派整改人');
+    const candidates = rectificationAssignees.filter(item => Number(item.userId) !== Number(rectification.assigneeId));
+    if (!candidates.length) {
+      alert('当前项目暂无其他可改派电工');
       return;
     }
-    const memberPrompt = members
-      .map(member => `${member.userId}. ${memberDisplayName(member)}（${PROJECT_ROLE_TEXT[member.projectRoleCode] || member.projectRoleCode || '项目成员'}）`)
+    const memberPrompt = candidates
+      .map(member => `${member.userId}. ${member.displayName || member.realName || member.username}`)
       .join('\n');
-    const assigneeInput = window.prompt(`请输入新的整改人用户ID：\n${memberPrompt}`, rectification.assigneeId ? String(rectification.assigneeId) : '');
+    const assigneeInput = window.prompt(`请输入新的整改电工用户ID：\n${memberPrompt}`, '');
     if (assigneeInput === null) return;
-    const assignee = members.find(item => Number(item.userId) === Number(assigneeInput));
+    const assignee = candidates.find(item => Number(item.userId) === Number(assigneeInput));
     if (!assignee) {
-      alert('整改人必须从当前项目成员中选择');
+      alert('整改人必须从当前项目可用电工中选择');
       return;
     }
     let deadline = window.prompt('请输入新的整改截止日期（YYYY-MM-DD）', rectification.deadline || dateAfterDays(3));
     if (deadline === null) return;
     deadline = deadline.trim() || (rectification.deadline || dateAfterDays(3));
-    const comment = window.prompt('请输入改派说明', `改派给 ${memberDisplayName(assignee)}`);
+    const assigneeName = assignee.displayName || assignee.realName || assignee.username;
+    const comment = window.prompt('请输入改派原因', `改派给 ${assigneeName}`);
     if (comment === null) return;
+    if (!comment.trim()) {
+      alert('改派原因不能为空');
+      return;
+    }
     try {
       const res = await assignInspectionRectification(rectification.id, {
         assigneeId: Number(assignee.userId),
@@ -5709,6 +5808,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
                 {qrManageAllowed && box.status !== 'REMOVED' && actionButton('换绑', () => rebindQr(box), 'secondary')}
                 {boxManageAllowed && box.status === 'ACTIVE' && actionButton('停用', () => disableBox(box), 'danger')}
                 {boxManageAllowed && box.status !== 'REMOVED' && actionButton('拆除', () => removeBox(box), 'danger')}
+                {isPlatformAdmin && actionButton('永久删除', () => permanentlyDeleteBox(box), 'danger')}
               </div>
             </div>
           );
@@ -5740,7 +5840,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
                 <div style={{ color: T.textMuted, fontSize: 10, marginTop: 3 }}>{record.inspectorName || '-'}</div>
               </div>
             <div>
-              <div style={{ fontWeight: 800 }}>{record.assignedReviewerName || '未分配'}</div>
+              <div style={{ fontWeight: 800 }}>{record.assignedReviewerName || '待重新分配'}</div>
               <div style={{ color: Number(record.abnormalCount) > 0 ? T.danger : T.success, fontSize: 10, marginTop: 3 }}>异常 {record.abnormalCount || 0}</div>
             </div>
             <div style={{ color: Number(record.reviewOverdue) === 1 ? T.danger : T.textSecondary }}>
@@ -5750,6 +5850,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
             <InspectionPill status={record.status} theme={T}>{RECORD_STATUS_TEXT[record.status] || REVIEW_STATUS_TEXT[record.reviewStatus] || record.status || '-'}</InspectionPill>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {actionButton(record.status === 'REVIEW_PENDING' ? '复核' : '查看', () => openRecordDetail(record), 'secondary')}
+              {isPlatformAdmin && actionButton('永久删除', () => permanentlyDeleteRecord(record), 'danger')}
             </div>
           </div>
         ))}
@@ -5762,7 +5863,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     <div style={{ background: T.cardBg, border: `1px solid ${T.borderColor}`, borderRadius: 7, overflow: 'hidden', minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: 12, borderBottom: `1px solid ${T.borderColor}` }}>
         <div style={{ fontSize: 13, color: T.textPrimary, fontWeight: 800 }}>整改闭环</div>
-        <div style={{ fontSize: 11, color: T.textMuted, marginTop: 3 }}>安全抽查或复核转整改后，PC 后台可提交整改反馈、复查关闭或退回</div>
+        <div style={{ fontSize: 11, color: T.textMuted, marginTop: 3 }}>异常巡检指派电工整改，安全员复查关闭或退回；与历史安全复核流程保持独立</div>
       </div>
       <div style={{ ...tableHeaderStyle, gridTemplateColumns: '1fr 1fr 1.8fr 1fr 0.9fr 0.8fr 1.2fr' }}>
         <span>整改单</span><span>电箱</span><span>问题/要求</span><span>整改人</span><span>期限</span><span>状态</span><span>操作</span>
@@ -5783,7 +5884,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
 	              <div style={{ color: T.warning, fontSize: 10, marginTop: 3 }}>{SPOT_CHECK_CATEGORY_TEXT[item.problemCategory] || item.problemCategory || '未分类'}</div>
 	              <div style={{ color: T.textMuted, fontSize: 10, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.requirement || '-'}</div>
 	            </div>
-	            <div>{item.assigneeName || '-'}</div>
+	            <div>{item.assigneeName || '待重新分配'}</div>
 	            <div style={{ color: item.deadline && new Date(item.deadline) < new Date(new Date().toISOString().slice(0, 10)) && !['CLOSED', 'COMPLETED'].includes(item.status) ? T.danger : T.textSecondary }}>
 	              <div>{item.deadline || '-'}</div>
 	              {item.escalationStatus && item.escalationStatus !== 'NONE' && <div style={{ fontSize: 10, marginTop: 3, color: item.escalationStatus === 'ESCALATED' ? T.danger : T.accent }}>{item.escalationStatus === 'ESCALATED' ? '已升级' : '已提醒'}</div>}
@@ -5792,10 +5893,9 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
 	            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
 	              {actionButton('详情', () => openRectificationDetail(item), 'secondary')}
 	              {canCompleteRectification(item) && actionButton('提交整改', () => openRectificationDetail(item))}
-	              {rectificationReviewAllowed && item.status !== 'CLOSED' && item.status !== 'COMPLETED' && actionButton('改派', () => assignRectificationTask(item), 'secondary')}
-	              {rectificationReviewAllowed && item.status !== 'CLOSED' && item.status !== 'COMPLETED' && actionButton('提醒', () => escalateRectificationTask(item), 'danger')}
-	              {rectificationReviewAllowed && item.status === 'COMPLETED' && actionButton('关闭', () => reviewRectification(item, 'close'))}
-	              {rectificationReviewAllowed && item.status === 'COMPLETED' && actionButton('退回', () => reviewRectification(item, 'reject'), 'danger')}
+	              {item.canAssign === true && actionButton('改派', () => assignRectificationTask(item), 'secondary')}
+	              {item.canReview === true && actionButton('关闭', () => reviewRectification(item, 'close'))}
+	              {item.canReview === true && actionButton('退回', () => reviewRectification(item, 'reject'), 'danger')}
 	            </div>
           </div>
         ))}
@@ -5994,6 +6094,11 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
           ))}
         </div>
         <div style={{ marginTop: 14, padding: 10, background: T.surface2, borderRadius: 6, color: T.textSecondary, fontSize: 12 }}>备注：{selectedRecord.remark || '-'}</div>
+        {isPlatformAdmin && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+            {actionButton('永久删除巡检记录', () => permanentlyDeleteRecord(selectedRecord), 'danger')}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -6018,7 +6123,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
 	          <div>问题说明：<span style={{ color: T.textPrimary }}>{selectedRectification.problemDesc || '-'}</span></div>
 	          <div>问题分类：<span style={{ color: T.textPrimary }}>{SPOT_CHECK_CATEGORY_TEXT[selectedRectification.problemCategory] || selectedRectification.problemCategory || '未分类'}</span></div>
 	          <div>整改要求：<span style={{ color: T.textPrimary }}>{selectedRectification.requirement || '-'}</span></div>
-	          <div>整改人：<span style={{ color: T.textPrimary }}>{selectedRectification.assigneeName || '-'}</span></div>
+	          <div>整改人：<span style={{ color: T.textPrimary }}>{selectedRectification.assigneeName || '待重新分配'}</span></div>
           <div>提交时间：<span style={{ color: T.textPrimary }}>{formatDateTime(selectedRectification.completedAt)}</span></div>
           <div>复查时间：<span style={{ color: T.textPrimary }}>{formatDateTime(selectedRectification.reviewTime)}</span></div>
           <div>复查截止：<span style={{ color: selectedRectification.recheckDeadline ? T.warning : T.textPrimary }}>{selectedRectification.recheckDeadline || '-'}</span></div>
@@ -6057,16 +6162,15 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
             </div>
           </div>
         )}
-	        {rectificationReviewAllowed && selectedRectification.status === 'COMPLETED' && (
+	        {selectedRectification.canReview === true && (
 	          <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
 	            {actionButton('复查关闭', () => reviewRectification(selectedRectification, 'close'))}
 	            {actionButton('复查退回', () => reviewRectification(selectedRectification, 'reject'), 'danger')}
 	          </div>
 	        )}
-	        {rectificationReviewAllowed && selectedRectification.status !== 'CLOSED' && selectedRectification.status !== 'COMPLETED' && (
+	        {selectedRectification.canAssign === true && (
 	          <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
 	            {actionButton('改派整改人', () => assignRectificationTask(selectedRectification), 'secondary')}
-	            {actionButton('逾期升级提醒', () => escalateRectificationTask(selectedRectification), 'danger')}
 	          </div>
 	        )}
         <div style={{ color: T.textPrimary, fontSize: 13, fontWeight: 700, margin: '16px 0 8px' }}>整改留痕</div>
@@ -6165,7 +6269,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
         </div>
         <div style={{ padding: 12, background: T.surface2, border: `1px solid ${T.borderColor}`, borderRadius: 7, color: T.textSecondary, fontSize: 12, lineHeight: 1.9 }}>
           <div>安装位置：<span style={{ color: T.textPrimary }}>{selectedBox.installLocation || '-'}</span></div>
-          <div>负责巡检员：<span style={{ color: T.textPrimary }}>{selectedBox.responsibleElectricianName || '-'}</span></div>
+          <div>负责巡检员：<span style={{ color: T.textPrimary }}>{selectedBox.responsibleElectricianName || '待重新分配'}</span></div>
           <div>最近检查：<span style={{ color: T.textPrimary }}>{selectedBox.lastCheckDate || '-'}</span></div>
           <div>统一巡检码：<span style={{ color: T.textPrimary }}>B:{selectedBox.publicCode || '-'}</span></div>
           <div>公开访问：<span style={{ color: Number(selectedBox.publicAccessEnabled ?? 1) === 1 ? T.success : T.warning }}>{Number(selectedBox.publicAccessEnabled ?? 1) === 1 ? '已启用' : '已停用'}</span></div>
@@ -6178,6 +6282,11 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
             {selectedBox.status !== 'REMOVED' && actionButton('换码', () => rebindQr(selectedBox), 'secondary')}
             {selectedBox.status !== 'REMOVED' && actionButton('拆除电箱', () => removeBox(selectedBox), 'danger')}
             {actionButton('二维码日志', () => openQrLogs(selectedBox), 'secondary')}
+          </div>
+        )}
+        {isPlatformAdmin && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+            {actionButton('永久删除电箱', () => permanentlyDeleteBox(selectedBox), 'danger')}
           </div>
         )}
         {selectedBox.qrView && (
@@ -6700,7 +6809,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   );
 }
 
-function ElectricInspectionPage({ projectId, theme: T, currentUser }) {
+function ElectricInspectionPage({ projectId, theme: T, currentUser, businessTarget }) {
   const projectMenuCodes = useMemo(
     () => collectProjectMenuCodes(currentUser, projectId),
     [currentUser, projectId],
@@ -6720,6 +6829,20 @@ function ElectricInspectionPage({ projectId, theme: T, currentUser }) {
       if (fallback) setMenuNotice(`当前角色无原页签菜单权限，已切换到${fallback.label}`);
     }
   }, [activeTab, visibleTabs]);
+
+  useEffect(() => {
+    const targetTab = businessTarget?.routeCode === 'INSPECTION_RECTIFICATION_DETAIL'
+      ? 'rectification'
+      : businessTarget?.routeCode === 'INSPECTION_RECORD_DETAIL'
+        ? 'records'
+        : businessTarget?.routeCode === 'INSPECTION_FORM'
+          ? 'ledger'
+          : '';
+    if (targetTab) {
+      setActiveTab(targetTab);
+      setMenuNotice('');
+    }
+  }, [businessTarget]);
 
   return (
     <div style={{
@@ -6762,7 +6885,7 @@ function ElectricInspectionPage({ projectId, theme: T, currentUser }) {
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {activeTab
-          ? <InspectionBackendPanel projectId={projectId} theme={T} activeTab={activeTab} currentUser={currentUser} onTabChange={setActiveTab} />
+          ? <InspectionBackendPanel projectId={projectId} theme={T} activeTab={activeTab} currentUser={currentUser} onTabChange={setActiveTab} businessTarget={businessTarget} />
           : <div style={{ padding: 24, color: T.textMuted }}>当前角色没有可访问的巡检页签</div>}
       </div>
     </div>
@@ -6774,13 +6897,17 @@ function ElectricInspectionPage({ projectId, theme: T, currentUser }) {
 // ============================================
 export default function App() {
   const [isAuth, setIsAuth] = useState(isLoggedIn());
-  const [currentPage, setCurrentPage] = useState(PAGE_IDS.ELECTRIC_INSPECTION);
+  const [currentPage, setCurrentPage] = useState(AUTHENTICATED_LANDING_PAGE);
   const [currentProject, setCurrentProject] = useState(null);
   const [projectList, setProjectList] = useState([]);
   const [projectListLoading, setProjectListLoading] = useState(isAuth);
   const [projectListError, setProjectListError] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
   const [currentUserError, setCurrentUserError] = useState('');
+  const [inboxCounts, setInboxCounts] = useState({ todoCount: 0, notificationCount: 0 });
+  const [sealApplicationTarget, setSealApplicationTarget] = useState(null);
+  const [qualityIssueTarget, setQualityIssueTarget] = useState(null);
+  const [inspectionBusinessTarget, setInspectionBusinessTarget] = useState(null);
   const [showCameraPage, setShowCameraPage] = useState(false);
   const [cameraConfig, setCameraConfig] = useState({
     videoLayout: 4,
@@ -6795,7 +6922,33 @@ export default function App() {
       : [],
     [currentProject, currentUser],
   );
-  const canAccessSystem = currentUser ? canAccessPage(currentUser, PAGE_IDS.SYSTEM_MANAGEMENT, currentProject) : false;
+  const canAccessSystem = currentUser ? (
+    canAccessPage(currentUser, PAGE_IDS.SYSTEM_MANAGEMENT, currentProject)
+    || hasProjectPermission(currentUser, currentProject, 'system.approval.view', 'system.approval.manage')
+  ) : false;
+
+  const refreshInboxCounts = useCallback(async () => {
+    if (!currentUser || currentProject === null) return;
+    const [todoResult, notificationResult] = await Promise.allSettled([
+      getPersonalTodoSummary({ projectId: currentProject }),
+      getUnreadNotificationCount(),
+    ]);
+    const todoData = todoResult.status === 'fulfilled' && Number(todoResult.value?.code) === 200
+      ? (todoResult.value.data?.todoSummary || todoResult.value.data?.todos || todoResult.value.data || {}) : null;
+    setInboxCounts((current) => ({
+      todoCount: todoData
+        ? Number(todoData.total ?? todoData.todoCount ?? todoData.pendingCount ?? 0) : current.todoCount,
+      notificationCount: notificationResult.status === 'fulfilled' && Number(notificationResult.value?.code) === 200
+        ? Number(notificationResult.value.data?.count ?? notificationResult.value.data?.unreadCount ?? notificationResult.value.data ?? 0) : current.notificationCount,
+    }));
+  }, [currentProject, currentUser]);
+
+  useEffect(() => {
+    if (!currentUser || currentProject === null) return undefined;
+    refreshInboxCounts();
+    const timer = window.setInterval(refreshInboxCounts, 60_000);
+    return () => window.clearInterval(timer);
+  }, [currentProject, currentUser, refreshInboxCounts]);
 
   // 获取项目列表
   const fetchProjectList = useCallback(async () => {
@@ -6815,7 +6968,7 @@ export default function App() {
       console.error('获取项目列表失败', e);
       setProjectList([]);
       setCurrentProject(null);
-      setProjectListError(e?.message || '作业区域加载失败');
+      setProjectListError(e?.message || '项目加载失败');
     } finally {
       setProjectListLoading(false);
     }
@@ -6845,10 +6998,12 @@ export default function App() {
 
   useEffect(() => {
     if (!currentUser) return;
+    if (currentPage === PAGE_IDS.PERSONAL_INBOX) return;
     if (currentPage === PAGE_IDS.SYSTEM_MANAGEMENT && canAccessSystem) return;
+    if (currentPage === PAGE_IDS.DOCUMENT_MANAGEMENT && sealApplicationTarget?.id) return;
     if (visibleNavItems.some((item) => item.id === currentPage)) return;
-    setCurrentPage(visibleNavItems[0]?.id || (canAccessSystem ? PAGE_IDS.SYSTEM_MANAGEMENT : PAGE_IDS.ELECTRIC_INSPECTION));
-  }, [canAccessSystem, currentPage, currentUser, visibleNavItems]);
+    setCurrentPage(AUTHENTICATED_LANDING_PAGE);
+  }, [canAccessSystem, currentPage, currentUser, sealApplicationTarget, visibleNavItems]);
 
   useEffect(() => {
     const handleAuthExpired = () => {
@@ -6858,6 +7013,11 @@ export default function App() {
       setCurrentProject(null);
       setProjectListError('');
       setProjectListLoading(false);
+      setInboxCounts({ todoCount: 0, notificationCount: 0 });
+      setSealApplicationTarget(null);
+      setQualityIssueTarget(null);
+      setInspectionBusinessTarget(null);
+      setCurrentPage(AUTHENTICATED_LANDING_PAGE);
       setIsAuth(false);
     };
     window.addEventListener('site-platform-auth-expired', handleAuthExpired);
@@ -6870,7 +7030,11 @@ export default function App() {
     setProjectListError('');
     setProjectListLoading(true);
     setIsAuth(true);
-    setCurrentPage(PAGE_IDS.ELECTRIC_INSPECTION);
+    setInboxCounts({ todoCount: 0, notificationCount: 0 });
+    setSealApplicationTarget(null);
+    setQualityIssueTarget(null);
+    setInspectionBusinessTarget(null);
+    setCurrentPage(AUTHENTICATED_LANDING_PAGE);
   }, []);
 
   const handleLogout = useCallback(async () => {
@@ -6886,7 +7050,55 @@ export default function App() {
     setCurrentProject(null);
     setProjectListError('');
     setProjectListLoading(false);
+    setInboxCounts({ todoCount: 0, notificationCount: 0 });
+    setSealApplicationTarget(null);
+    setQualityIssueTarget(null);
+    setInspectionBusinessTarget(null);
+    setCurrentPage(AUTHENTICATED_LANDING_PAGE);
     setIsAuth(false);
+  }, []);
+
+  const navigatePage = useCallback((pageId) => {
+    setSealApplicationTarget(null);
+    setQualityIssueTarget(null);
+    setInspectionBusinessTarget(null);
+    setCurrentPage(pageId);
+  }, []);
+
+  const changeProject = useCallback((projectId) => {
+    setSealApplicationTarget(null);
+    setQualityIssueTarget(null);
+    setInspectionBusinessTarget(null);
+    setCurrentProject(projectId);
+  }, []);
+
+  const openInboxBusiness = useCallback((item) => {
+    const target = resolveBusinessRoute(item);
+    if (!target) return;
+    if (target.projectId && projectList.some((project) => Number(project.id) === target.projectId)) {
+      setCurrentProject(target.projectId);
+    }
+    const businessTarget = { ...target, openedAt: Date.now() };
+    setSealApplicationTarget(null);
+    setQualityIssueTarget(null);
+    setInspectionBusinessTarget(null);
+    if (target.routeCode === 'SEAL_APPLICATION_DETAIL') {
+      setSealApplicationTarget(businessTarget);
+      setCurrentPage(PAGE_IDS.DOCUMENT_MANAGEMENT);
+    } else if (target.routeCode === 'QUALITY_ISSUE_DETAIL') {
+      setQualityIssueTarget(businessTarget);
+      setCurrentPage(PAGE_IDS.QUALITY_MANAGEMENT);
+    } else {
+      setInspectionBusinessTarget(businessTarget);
+      setCurrentPage(PAGE_IDS.ELECTRIC_INSPECTION);
+    }
+  }, [projectList]);
+
+  const handleInboxCountsChange = useCallback((values) => {
+    setInboxCounts((current) => ({
+      todoCount: values.todoCount ?? current.todoCount,
+      notificationCount: values.notificationCount ?? Math.max(0, current.notificationCount + Number(values.notificationDelta || 0)),
+    }));
   }, []);
 
   const renderPage = () => {
@@ -6906,24 +7118,32 @@ export default function App() {
           currentUser={currentUser}
           currentProject={currentProject}
           projectList={projectList}
-          onBack={() => setCurrentPage(visibleNavItems[0]?.id || PAGE_IDS.ELECTRIC_INSPECTION)}
+          onBack={() => setCurrentPage(AUTHENTICATED_LANDING_PAGE)}
         />
       ) : <NoAuthorizedPage theme={theme} />;
+    }
+    if (currentPage === PAGE_IDS.PERSONAL_INBOX) {
+      return <PersonalInboxPage {...pageProps} onOpenBusiness={openInboxBusiness} onCountsChange={handleInboxCountsChange} />;
+    }
+    if (currentPage === PAGE_IDS.DOCUMENT_MANAGEMENT && sealApplicationTarget?.id) {
+      return <DocumentCenterPage {...pageProps} sealApplicationTarget={sealApplicationTarget} />;
     }
     if (!visibleNavItems.some((item) => item.id === currentPage)) {
       return <NoAuthorizedPage theme={theme} />;
     }
     switch (currentPage) {
+      case PAGE_IDS.SITE_ACCESS:
+        return <SiteAccessManagementPage {...pageProps} />;
       case PAGE_IDS.PERSON_MANAGEMENT:
         return <PersonnelManagementPage {...pageProps} />;
       case PAGE_IDS.QUALITY_MANAGEMENT:
-        return <QualityManagementPage {...pageProps} />;
+        return <QualityManagementPage {...pageProps} businessTarget={qualityIssueTarget} />;
       case PAGE_IDS.DOCUMENT_MANAGEMENT:
-        return <DocumentManagementPage {...pageProps} />;
+        return <DocumentCenterPage {...pageProps} />;
       case PAGE_IDS.PERSONNEL:
         return <PersonnelPage {...pageProps} />;
       case PAGE_IDS.ELECTRIC_INSPECTION:
-        return <ElectricInspectionPage {...pageProps} />;
+        return <ElectricInspectionPage {...pageProps} businessTarget={inspectionBusinessTarget} />;
       default:
         return <NoAuthorizedPage theme={theme} />;
     }
@@ -6970,9 +7190,9 @@ export default function App() {
     <div data-theme={DEFAULT_THEME_ID} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: theme.pageBg }}>
       <TopNav
         currentPage={currentPage}
-        onPageChange={setCurrentPage}
+        onPageChange={navigatePage}
         currentProject={currentProject}
-        onProjectChange={setCurrentProject}
+        onProjectChange={changeProject}
         projectList={projectList}
         onRefreshProjects={fetchProjectList}
         theme={theme}
@@ -6980,6 +7200,7 @@ export default function App() {
         currentUser={currentUser}
         visibleNavItems={visibleNavItems}
         canAccessSystem={canAccessSystem}
+        inboxCount={inboxCounts.todoCount + inboxCounts.notificationCount}
       />
       {(projectListLoading || projectListError || projectList.length === 0) && (
         <div
@@ -7000,8 +7221,8 @@ export default function App() {
         >
           <span>
             {projectListLoading
-              ? '正在加载作业区域…'
-              : projectListError || '当前账号暂无可访问的作业区域'}
+              ? '正在加载项目…'
+              : projectListError || '当前账号暂无可访问的项目'}
           </span>
           {!projectListLoading && (
             <button

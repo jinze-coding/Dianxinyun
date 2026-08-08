@@ -58,6 +58,14 @@ public class LocalFileStorageService implements FileStorageService {
         Files.deleteIfExists(resolve(storageKey));
     }
 
+    @Override
+    public void copy(String sourceStorageKey, String targetStorageKey) throws Exception {
+        Path source = resolve(sourceStorageKey);
+        Path target = resolve(targetStorageKey);
+        Files.createDirectories(target.getParent());
+        Files.copy(source, target, StandardCopyOption.COPY_ATTRIBUTES);
+    }
+
     private Path resolve(String storageKey) {
         Path raw = Paths.get(storageKey);
         Path resolved = raw.isAbsolute() ? raw.normalize() : root.resolve(raw).normalize();

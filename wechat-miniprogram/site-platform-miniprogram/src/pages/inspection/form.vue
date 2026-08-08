@@ -4,10 +4,10 @@ import { onLoad } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
 import SafetyPhotoUploader from '@/components/SafetyPhotoUploader.vue';
 import { getElectricBoxDetail } from '@/api/electricBox';
-import { createDefaultCheckItems, getInspectionRecordDetail, getInspectionRecords, submitInspectionRecord } from '@/api/inspection';
+import { createDefaultCheckItems, getInspectionRecordDetail, getInspectionRecords, getInspectionRectificationAssignees, submitInspectionRecord } from '@/api/inspection';
 import { deleteFileResources, uploadPhotoIds } from '@/api/file';
 import { useAuthStore } from '@/stores/auth';
-import type { CheckResult, ElectricBox, InspectionRecord } from '@/types';
+import type { CheckResult, ElectricBox, InspectionAssignee, InspectionRecord } from '@/types';
 import { usePageScrollHeight } from '@/utils/navLayout';
 import { getQueryNumber, showToast, switchTab } from '@/utils/navigation';
 
@@ -27,6 +27,11 @@ const showConfirm = ref(false);
 const initialized = ref(false);
 const choosingPhoto = ref(false);
 const routeOptions = ref<Record<string, string>>({});
+const rectificationAssignees = ref<InspectionAssignee[]>([]);
+const assigneeIndex = ref(-1);
+const assigneesLoaded = ref(false);
+const assigneesLoading = ref(false);
+const rectificationDeadline = ref(toLocalDateString(addDays(new Date(), 3)));
 const { scrollStyle } = usePageScrollHeight({ bottomRpx: 126, minHeight: 240 });
 
 function pad(value: number) { return `${value}`.padStart(2, '0'); }
@@ -46,6 +51,7 @@ const abnormalCount = computed(() => items.value.filter((item) => item.result ==
 const normalCount = computed(() => items.value.filter((item) => item.result === 'NORMAL').length);
 const naCount = computed(() => items.value.filter((item) => item.result === 'NA').length);
 const readOnly = computed(() => Boolean(duplicateDailyRecord.value));
+const selectedAssignee = computed(() => rectificationAssignees.value[assigneeIndex.value]);
 
 onLoad((options) => {
   routeOptions.value = Object.fromEntries(
@@ -127,6 +133,32 @@ function updateResult(itemCode: string, result: CheckResult) {
   if (!item) return;
   item.result = result;
   if (result !== 'ABNORMAL') item.description = '';
+  if (result === 'ABNORMAL') void ensureRectificationAssignees();
+}
+
+async function ensureRectificationAssignees() {
+  if (!box.value || assigneesLoading.value || assigneesLoaded.value) return;
+  assigneesLoading.value = true;
+  try {
+    rectificationAssignees.value = await getInspectionRectificationAssignees(box.value.projectId);
+    assigneesLoaded.value = true;
+  } catch (error) {
+    assigneesLoaded.value = false;
+    rectificationAssignees.value = [];
+    showToast(error instanceof Error ? error.message : '整改负责人加载失败');
+  } finally {
+    assigneesLoading.value = false;
+  }
+}
+
+function changeAssignee(event: unknown) {
+  const pickerEvent = event as { detail?: { value?: string | number } };
+  assigneeIndex.value = Number(pickerEvent.detail?.value ?? -1);
+}
+
+function changeRectificationDeadline(event: unknown) {
+  const pickerEvent = event as { detail?: { value?: string } };
+  rectificationDeadline.value = pickerEvent.detail?.value || toLocalDateString(addDays(new Date(), 3));
 }
 
 function updateDescription(itemCode: string, event: unknown) {
@@ -172,6 +204,8 @@ function resetDraft() {
   innerPhotos.value = [];
   remark.value = '';
   items.value = createDefaultCheckItems();
+  assigneeIndex.value = -1;
+  rectificationDeadline.value = toLocalDateString(addDays(new Date(), 3));
 }
 
 function applyExistingRecord(record: InspectionRecord) {
@@ -190,6 +224,12 @@ async function requestSubmit() {
   if (items.value.some((item) => !item.result)) { showToast('请完成六项检查结果'); return; }
   const missingDescription = items.value.find((item) => item.result === 'ABNORMAL' && !item.description?.trim());
   if (missingDescription) { showToast(`${missingDescription.itemName}异常时请填写说明`); return; }
+  if (abnormalCount.value > 0) {
+    await ensureRectificationAssignees();
+    if (!rectificationAssignees.value.length) { showToast('当前项目暂无可指派电工，请联系系统管理员分配电工角色和整改权限'); return; }
+    if (!selectedAssignee.value) { showToast('发现异常时必须选择整改负责人'); return; }
+    if (!rectificationDeadline.value) { showToast('请选择整改期限'); return; }
+  }
   if (await checkExistingDailyRecord(false)) { showToast('该日期已提交日检'); return; }
   showConfirm.value = true;
 }
@@ -214,7 +254,7 @@ async function confirmSubmit() {
       throw new Error(`内部照片上传失败：${error instanceof Error ? error.message : '请检查网络后重试'}`);
     }
     uploadedFileIds.push(...innerPhotoFileIds);
-    await submitInspectionRecord({ projectId: box.value.projectId, electricBoxId: box.value.id, boxCode: box.value.boxCode, checkDate: checkDate.value, remark: remark.value, outerPhotoFileIds, innerPhotoFileIds, outerPhotos: outerPhotos.value, innerPhotos: innerPhotos.value, items: items.value });
+    await submitInspectionRecord({ projectId: box.value.projectId, electricBoxId: box.value.id, boxCode: box.value.boxCode, checkDate: checkDate.value, remark: remark.value, outerPhotoFileIds, innerPhotoFileIds, outerPhotos: outerPhotos.value, innerPhotos: innerPhotos.value, items: items.value, assigneeId: abnormalCount.value > 0 ? selectedAssignee.value?.userId : undefined, requirement: abnormalCount.value > 0 ? '请按异常说明完成整改并上传现场照片' : undefined, deadline: abnormalCount.value > 0 ? rectificationDeadline.value : undefined });
     resetDraft();
     showToast('巡检已完成');
     setTimeout(() => switchTab('/pages/inspection/index'), 450);
@@ -273,13 +313,32 @@ async function confirmSubmit() {
             </view>
           </view>
 
+          <view v-if="abnormalCount > 0 && !readOnly" class="rectification-card flow-card">
+            <view class="section-heading"><view><text>异常整改</text><text>异常项合并为一个整改任务</text></view><text class="required-mark">必填</text></view>
+            <view class="rectification-field">
+              <text class="field-label">整改负责人</text>
+              <picker :range="rectificationAssignees" range-key="displayName" :value="assigneeIndex" :disabled="assigneesLoading || !rectificationAssignees.length" @change="changeAssignee">
+                <view class="field-picker" :class="{ placeholder: !selectedAssignee }">
+                  <text>{{ assigneesLoading ? '正在加载项目电工' : selectedAssignee?.displayName || (rectificationAssignees.length ? '请选择本项目电工' : '当前项目暂无可用电工') }}</text><text class="chevron"></text>
+                </view>
+              </picker>
+            </view>
+            <view class="rectification-field">
+              <text class="field-label">整改期限</text>
+              <picker mode="date" :value="rectificationDeadline" :start="maxCheckDate" @change="changeRectificationDeadline">
+                <view class="field-picker"><text>{{ rectificationDeadline }}</text><text class="chevron"></text></view>
+              </picker>
+            </view>
+            <text class="rectification-hint">仅显示账号启用、当前项目访问有效且已分配“电工”角色和整改权限的人员。</text>
+          </view>
+
           <view class="remark-card flow-card"><view class="section-heading"><view><text>备注</text><text>{{ readOnly ? '巡检记录' : '选填' }}</text></view><text v-if="!readOnly">{{ remark.length }}/200</text></view><textarea v-model="remark" class="remark-input" maxlength="200" :disabled="readOnly" :placeholder="readOnly ? '无备注' : '补充现场情况'" :adjust-position="true" :cursor-spacing="112" /></view>
       </view>
     </scroll-view>
 
     <view v-if="box && !readOnly" class="bottom-bar"><view class="completion"><text>已上传照片 {{ completedPhotos }} 张（选填）</text><text>检查项 {{ completedItems }}/{{ items.length }}</text></view><button class="submit-button pressable" :disabled="submitting || checkingDuplicate" @tap="requestSubmit">{{ submitting ? '提交中' : '完成巡检' }}</button></view>
 
-    <view v-if="showConfirm" class="flow-overlay" @tap="showConfirm = false"><view class="flow-sheet" @tap.stop><text class="flow-sheet-title">确认完成巡检？</text><text class="flow-sheet-desc">{{ box?.boxCode }} · {{ checkDate }}</text><view class="confirm-summary"><text>外观照片 {{ outerPhotos.length }} 张</text><text>内部照片 {{ innerPhotos.length }} 张</text><text>正常 {{ normalCount }} 项</text><text class="danger-text">异常 {{ abnormalCount }} 项</text><text>不适用 {{ naCount }} 项</text></view><view class="flow-sheet-actions"><button class="flow-sheet-cancel" @tap="showConfirm = false">再检查一下</button><button class="flow-sheet-confirm" @tap="confirmSubmit">确认完成</button></view></view></view>
+    <view v-if="showConfirm" class="flow-overlay" @tap="showConfirm = false"><view class="flow-sheet" @tap.stop><text class="flow-sheet-title">确认完成巡检？</text><text class="flow-sheet-desc">{{ box?.boxCode }} · {{ checkDate }}</text><view class="confirm-summary"><text>外观照片 {{ outerPhotos.length }} 张</text><text>内部照片 {{ innerPhotos.length }} 张</text><text>正常 {{ normalCount }} 项</text><text class="danger-text">异常 {{ abnormalCount }} 项</text><text>不适用 {{ naCount }} 项</text><template v-if="abnormalCount > 0"><text>整改人 {{ selectedAssignee?.displayName }}</text><text>期限 {{ rectificationDeadline }}</text></template></view><view class="flow-sheet-actions"><button class="flow-sheet-cancel" @tap="showConfirm = false">再检查一下</button><button class="flow-sheet-confirm" @tap="confirmSubmit">确认完成</button></view></view></view>
   </view>
 </template>
 
@@ -301,12 +360,13 @@ async function confirmSubmit() {
 @keyframes state-spin { to { transform: rotate(360deg); } }
 .device-card { padding: 22rpx; background: linear-gradient(135deg, #edf5fc, #fff); }.device-top, .device-meta { display: flex; align-items: center; justify-content: space-between; gap: 18rpx; }.box-code, .box-name, .date-hint { display: block; }.box-code { color: var(--inspection-text); font-size: 29rpx; font-weight: 900; }.box-name { margin-top: 3rpx; color: #65768a; font-size: 21rpx; }.scope-pill { padding: 6rpx 13rpx; border-radius: 999rpx; background: var(--inspection-success-soft); color: var(--inspection-success); font-size: 19rpx; }.device-meta { margin-top: 18rpx; padding-top: 16rpx; border-top: 1rpx solid var(--inspection-divider); color: #6d7f91; font-size: 21rpx; }.device-meta>text { max-width: 54%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.date-button { display: flex; align-items: center; gap: 10rpx; color: #3d5167; font-size: 22rpx; font-weight: 750; }.chevron { width: 10rpx; height: 10rpx; border-right: 2rpx solid #6d8ba7; border-bottom: 2rpx solid #6d8ba7; transform: rotate(45deg) translateY(-3rpx); }.date-hint { margin-top: 9rpx; color: var(--inspection-muted); font-size: 19rpx; }
 .readonly-banner { display: flex; align-items: center; gap: 15rpx; padding: 22rpx; border-color: #cee8da; background: #f5fbf8; }.readonly-icon { display: flex; width: 48rpx; height: 48rpx; align-items: center; justify-content: center; border-radius: 50%; background: #dff2e8; color: #168557; font-weight: 900; }.readonly-banner view text { display: block; }.readonly-banner view text:first-child { color: #266048; font-size: 24rpx; font-weight: 800; }.readonly-banner view text:last-child { margin-top: 4rpx; color: #72877d; font-size: 20rpx; }
-.check-card, .remark-card { padding: 22rpx; }.section-heading { display: flex; align-items: center; justify-content: space-between; padding-bottom: 16rpx; }.section-heading view text { display: block; }.section-heading view text:first-child { color: var(--inspection-text); font-size: 26rpx; font-weight: 850; }.section-heading view text:last-child { margin-top: 3rpx; color: #929eaa; font-size: 19rpx; }.section-heading>text { color: var(--inspection-primary-deep); font-size: 20rpx; font-weight: 750; }
+.check-card, .remark-card, .rectification-card { padding: 22rpx; }.section-heading { display: flex; align-items: center; justify-content: space-between; padding-bottom: 16rpx; }.section-heading view text { display: block; }.section-heading view text:first-child { color: var(--inspection-text); font-size: 26rpx; font-weight: 850; }.section-heading view text:last-child { margin-top: 3rpx; color: #929eaa; font-size: 19rpx; }.section-heading>text { color: var(--inspection-primary-deep); font-size: 20rpx; font-weight: 750; }
 .check-item { padding: 16rpx 0; border-top: 1rpx solid var(--inspection-divider); }.check-row { display: flex; min-height: 58rpx; align-items: center; justify-content: space-between; gap: 14rpx; }.check-name { display: flex; min-width: 114rpx; align-items: center; color: var(--inspection-text); font-size: 22rpx; font-weight: 700; line-height: 1.25; }.result-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5rpx; width: 360rpx; padding: 5rpx; border-radius: 13rpx; background: #eef3f7; }.result-tabs button { display: flex; height: 48rpx; min-height: 48rpx; align-items: center; justify-content: center; margin: 0; padding: 0; border-radius: 9rpx; background: transparent; color: #727f8e; font-size: 19rpx; line-height: 1; text-align: center; }.result-tabs button::after { border: 0; }.result-tabs button.active { background: var(--inspection-success-soft); color: var(--inspection-success); box-shadow: inset 0 0 0 1rpx rgba(47,128,101,.14); }.result-tabs button.active.danger { background: var(--inspection-danger-soft); color: var(--inspection-danger); box-shadow: inset 0 0 0 1rpx rgba(183,83,83,.14); }
 .result-tabs button[disabled] { opacity: 1; }
 .abnormal-description { margin-top: 12rpx; padding: 14rpx; border: 1rpx solid #f0cfca; border-radius: 13rpx; background: #fff8f7; }.abnormal-heading { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; }.abnormal-heading text:first-child { color: var(--inspection-danger); font-size: 20rpx; font-weight: 750; }.abnormal-heading text:last-child { color: #a77b77; font-size: 18rpx; }.abnormal-input { box-sizing: border-box; width: 100%; height: 108rpx; margin-top: 10rpx; padding: 12rpx; border: 1rpx solid #f0cfca; border-radius: 10rpx; background: #fff; color: #3b4657; font-size: 21rpx; line-height: 1.45; }
 .remark-input { box-sizing: border-box; width: 100%; height: 122rpx; padding: 16rpx; border: 1rpx solid var(--inspection-divider); border-radius: 14rpx; background: #f7fafc; color: #3b4d61; font-size: 21rpx; }
 .remark-input[disabled] { color: #3b4d61; opacity: 1; }
+.rectification-card { border-color: #f0cfca; background: #fffafa; }.required-mark { color: var(--inspection-danger) !important; }.rectification-field { padding: 16rpx 0; border-top: 1rpx solid #f2dddd; }.field-label { display: block; margin-bottom: 10rpx; color: var(--inspection-text); font-size: 21rpx; font-weight: 750; }.field-picker { display: flex; min-height: 68rpx; align-items: center; justify-content: space-between; padding: 0 18rpx; border: 1rpx solid #e4c9c6; border-radius: 13rpx; background: #fff; color: #344054; font-size: 21rpx; }.field-picker.placeholder { color: #98a2b3; }.rectification-hint { display: block; margin-top: 8rpx; color: #95736f; font-size: 18rpx; line-height: 1.5; }
 .bottom-bar { position: fixed; z-index: 40; right: 0; bottom: 0; left: 0; display: flex; min-height: 108rpx; align-items: center; gap: 18rpx; padding: 16rpx 24rpx calc(16rpx + env(safe-area-inset-bottom)); border-top: 1rpx solid var(--inspection-divider); background: rgba(255, 255, 255, .97); box-shadow: 0 -10rpx 28rpx rgba(49,95,134,.07); }.completion { display: flex; min-width: 0; align-self: stretch; justify-content: center; flex: 1; flex-direction: column; }.completion text { display: block; color: #78899a; font-size: 19rpx; line-height: 1.45; }.submit-button { display: flex; width: 264rpx; height: 76rpx; min-height: 76rpx; align-items: center; justify-content: center; margin: 0; padding: 0 20rpx; border: 1rpx solid var(--inspection-border); border-radius: 15rpx; background: var(--inspection-soft); color: var(--inspection-primary-deep); font-size: 24rpx; font-weight: 800; line-height: 1; text-align: center; box-shadow: 0 6rpx 16rpx rgba(49,95,134,.08); }.submit-button::after { border: 0; }.submit-button:active { background: var(--inspection-soft-strong); }.submit-button[disabled] { background: #eef2f5; color: #98a5b3; opacity: 1; }
 .confirm-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 12rpx; margin-top: 22rpx; padding: 18rpx; border-radius: 16rpx; background: #f1f6fa; color: #5f7082; font-size: 21rpx; }.danger-text { color: var(--inspection-danger); }
 </style>

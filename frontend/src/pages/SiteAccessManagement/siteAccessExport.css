@@ -1,0 +1,54 @@
+.site-access-export-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 13px;
+  padding: 16px;
+}
+
+.site-access-export-form .site-access-field.full,
+.site-access-export-summary.full {
+  grid-column: 1 / -1;
+}
+
+.site-access-export-form .site-access-period-tabs button {
+  flex: 1;
+}
+
+.site-access-export-summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 6px 10px;
+  border: 1px solid #cfe0f6;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f5f9ff;
+}
+
+.site-access-export-summary strong {
+  color: var(--sa-accent);
+}
+
+.site-access-export-summary span {
+  font-weight: 700;
+}
+
+.site-access-export-summary small {
+  grid-column: 1 / -1;
+  color: var(--sa-muted);
+}
+
+.site-access-export-summary small.error {
+  color: #a63f3f;
+}
+
+@media (max-width: 760px) {
+  .site-access-export-form {
+    grid-template-columns: 1fr;
+  }
+
+  .site-access-export-form .site-access-field.full,
+  .site-access-export-summary.full {
+    grid-column: auto;
+  }
+}

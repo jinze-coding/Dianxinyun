@@ -25,7 +25,6 @@ import com.example.siteplatform.inspection.mapper.InspectionRecordMapper;
 import com.example.siteplatform.inspection.mapper.InspectionRectificationMapper;
 import com.example.siteplatform.project.constant.InspectionPermissionCodes;
 import com.example.siteplatform.project.entity.ProjectInfo;
-import com.example.siteplatform.project.service.ProjectMemberService;
 import com.example.siteplatform.project.service.ProjectPermissionService;
 import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import com.google.zxing.BarcodeFormat;
@@ -102,9 +101,6 @@ public class ElectricBoxService {
 
     @Autowired
     private ProjectPermissionService projectPermissionService;
-
-    @Autowired
-    private ProjectMemberService projectMemberService;
 
     @Autowired
     private InspectionRecordMapper inspectionRecordMapper;
@@ -205,6 +201,7 @@ public class ElectricBoxService {
         validateRequest(request);
         requireManagePermission(currentUser, request.getProjectId());
         resolveAssigneeNames(request);
+        validateAssigneeMemberships(request.getProjectId(), request);
         ensureUnique(request.getProjectId(), request.getBoxCode(), request.getQrCode(), null);
 
         ElectricBox box = new ElectricBox();
@@ -221,7 +218,6 @@ public class ElectricBoxService {
         box.setCreateTime(LocalDateTime.now());
         box.setUpdateTime(LocalDateTime.now());
         requireSingleWrite(electricBoxMapper.insert(box), "电箱新增");
-        ensureBoxAssignees(box);
         recordQrLog(box, ACTION_GENERATE, QR_TYPE_INTERNAL, null, box.getQrCode(), currentUser, "新增电箱生成或绑定内部二维码");
         recordQrLog(box, ACTION_GENERATE, QR_TYPE_PUBLIC, null, box.getPublicCode(), currentUser, "新增电箱生成公开只读码");
         return toVO(box);
@@ -247,6 +243,7 @@ public class ElectricBoxService {
                 ? existing.getPublicAccessEnabled() : request.getPublicAccessEnabled());
         validateRequest(request);
         resolveAssigneeNames(request);
+        validateAssigneeMemberships(existing.getProjectId(), request);
         if (!Objects.equals(request.getQrCode(), existing.getQrCode())) {
             requireQrManagePermission(currentUser, existing.getProjectId());
         }
@@ -264,7 +261,6 @@ public class ElectricBoxService {
         existing.setPublicAccessEnabled(request.getPublicAccessEnabled());
         existing.setUpdateTime(LocalDateTime.now());
         requireSingleWrite(electricBoxMapper.updateById(existing), "电箱编辑");
-        ensureBoxAssignees(existing);
         if (StringUtils.hasText(request.getQrCode()) && StringUtils.hasText(oldQrCode)
                 && !Objects.equals(request.getQrCode(), oldQrCode)) {
             recordQrLog(existing, ACTION_REBIND, QR_TYPE_INTERNAL, oldQrCode,
@@ -755,17 +751,16 @@ public class ElectricBoxService {
         return Objects.equals(box.getResponsibleElectricianId(), currentUser.getId());
     }
 
-    private void ensureBoxAssignees(ElectricBox box) {
-        projectMemberService.ensureProjectMember(
-                box.getProjectId(),
-                box.getResponsibleElectricianId(),
-                ProjectPermissionService.ROLE_USER
-        );
-        projectMemberService.ensureProjectMember(
-                box.getProjectId(),
-                box.getSafetyManagerId(),
-                ProjectPermissionService.ROLE_SAFETY_ADMIN
-        );
+    private void validateAssigneeMemberships(Long projectId, ElectricBoxRequest request) {
+        requireAssigneeMembership(projectId, request.getResponsibleElectricianId(), "负责电工");
+        requireAssigneeMembership(projectId, request.getSafetyManagerId(), "安全负责人");
+    }
+
+    private void requireAssigneeMembership(Long projectId, Long userId, String fieldName) {
+        if (userId == null) return;
+        if (!projectPermissionService.hasProjectPermission(userId, projectId)) {
+            throw new BusinessException(fieldName + "必须先由管理员分配该项目及角色");
+        }
     }
 
     private ElectricBoxVO toVO(ElectricBox box) {

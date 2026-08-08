@@ -8,6 +8,7 @@ import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.log.mapper.OperationLogMapper;
 import com.example.siteplatform.project.dto.ProjectMemberBatchRequest;
 import com.example.siteplatform.project.dto.ProjectMemberVO;
+import com.example.siteplatform.project.dto.ResponsibilityImpactVO;
 import com.example.siteplatform.project.dto.UserProjectRoleBatchRequest;
 import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.entity.SysUserProject;
@@ -19,6 +20,7 @@ import com.example.siteplatform.system.entity.SystemRole;
 import com.example.siteplatform.system.mapper.SystemPermissionMapper;
 import com.example.siteplatform.system.mapper.SystemRoleBusinessModuleMapper;
 import com.example.siteplatform.system.mapper.SystemRoleMapper;
+import com.example.siteplatform.system.service.ResponsibilityReleaseService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -56,6 +58,7 @@ class ProjectMemberBatchAssignmentTest {
     @Mock private SystemPermissionMapper systemPermissionMapper;
     @Mock private QualityAssigneeService qualityAssigneeService;
     @Mock private ProjectInfoMapper projectInfoMapper;
+    @Mock private ResponsibilityReleaseService responsibilityReleaseService;
 
     private ProjectMemberService service;
     private SysUser operator;
@@ -74,6 +77,9 @@ class ProjectMemberBatchAssignmentTest {
         ReflectionTestUtils.setField(service, "systemPermissionMapper", systemPermissionMapper);
         ReflectionTestUtils.setField(service, "qualityAssigneeService", qualityAssigneeService);
         ReflectionTestUtils.setField(service, "projectInfoMapper", projectInfoMapper);
+        ReflectionTestUtils.setField(service, "responsibilityReleaseService", responsibilityReleaseService);
+        lenient().when(responsibilityReleaseService.impact(any(), any()))
+                .thenReturn(new com.example.siteplatform.project.dto.ResponsibilityImpactVO());
         lenient().when(projectPermissionService.canManageProjectMembers(1L, 9L)).thenReturn(true);
         lenient().when(projectPermissionService.isPlatformAdmin(1L)).thenReturn(true);
         lenient().when(projectInfoMapper.selectById(any())).thenAnswer(invocation -> project(invocation.getArgument(0)));
@@ -164,6 +170,52 @@ class ProjectMemberBatchAssignmentTest {
         verify(authService, times(1)).logout(2L);
         verify(authService, times(1)).repeatLogoutAfterCommit(2L);
         verify(operationLogMapper, times(1)).insert(any());
+    }
+
+    @Test
+    void completeProjectRemovalRequiresImpactConfirmationThenReleasesResponsibilities() {
+        SysUserProject existing = relation(7L, 10L, 2L, "ACTIVE");
+        when(userMapper.selectByIdForUpdate(2L)).thenReturn(user(2L, 1));
+        when(userProjectMapper.selectByProjectAndUserForUpdate(10L, 2L)).thenReturn(existing);
+        when(userProjectMapper.selectMembersByProjectId(10L)).thenReturn(List.of(member(7L, 10L, 2L, "ACTIVE")));
+        when(responsibilityReleaseService.impact(10L, 2L)).thenReturn(responsibilityImpact(10L, 2L, 3));
+
+        BusinessException blocked = assertThrows(BusinessException.class,
+                () -> service.batchUpdateUserProjectAssignments(2L,
+                        userBatch(userChange(10L, "REMOVE", List.of())), operator));
+
+        assertEquals(409, blocked.getCode());
+        verify(userProjectMapper, never()).deleteById(7L);
+        verify(responsibilityReleaseService, never()).releaseAll(10L, 2L);
+
+        UserProjectRoleBatchRequest confirmed = userBatch(userChange(10L, "REMOVE", List.of()));
+        confirmed.setConfirmResponsibilityRelease(true);
+        service.batchUpdateUserProjectAssignments(2L, confirmed, operator);
+
+        verify(userProjectMapper).deleteById(7L);
+        verify(responsibilityReleaseService).releaseAll(10L, 2L);
+        verify(authService).logout(2L);
+        verify(authService).repeatLogoutAfterCommit(2L);
+    }
+
+    @Test
+    void partialRoleRevocationRechecksCapabilitiesAndKeepsBusinessRecords() {
+        SysUserProject existing = relation(8L, 9L, 2L, "ACTIVE");
+        when(userMapper.selectByIdForUpdate(2L)).thenReturn(user(2L, 1));
+        when(userMapper.selectById(2L)).thenReturn(user(2L, 1));
+        when(userProjectMapper.selectByProjectAndUserForUpdate(9L, 2L)).thenReturn(existing);
+        when(userProjectMapper.selectMembersByProjectId(9L)).thenReturn(List.of(member(8L, 9L, 2L, "ACTIVE")));
+        when(systemRoleMapper.selectById(30L)).thenReturn(role(30L, "USER", 0));
+        when(responsibilityReleaseService.impact(9L, 2L)).thenReturn(responsibilityImpact(9L, 2L, 1));
+        UserProjectRoleBatchRequest confirmed = userBatch(userChange(9L, "UPSERT", List.of(30L)));
+        confirmed.setConfirmResponsibilityRelease(true);
+
+        service.batchUpdateUserProjectAssignments(2L, confirmed, operator);
+
+        verify(userProjectMapper).updateById(existing);
+        verify(responsibilityReleaseService).releaseForCapabilityLoss(9L, 2L);
+        verify(responsibilityReleaseService, never()).releaseAll(9L, 2L);
+        verify(userProjectMapper, never()).deleteById(8L);
     }
 
     @Test
@@ -315,5 +367,14 @@ class ProjectMemberBatchAssignmentTest {
         member.setResponsibleBoxCount(0);
         member.setPendingRectificationCount(0);
         return member;
+    }
+
+    private ResponsibilityImpactVO responsibilityImpact(Long projectId, Long userId, long openQualityIssues) {
+        ResponsibilityImpactVO impact = new ResponsibilityImpactVO();
+        impact.setProjectId(projectId);
+        impact.setUserId(userId);
+        impact.setProjectName("项目" + projectId);
+        impact.setOpenQualityIssueCount(openQualityIssues);
+        return impact;
     }
 }

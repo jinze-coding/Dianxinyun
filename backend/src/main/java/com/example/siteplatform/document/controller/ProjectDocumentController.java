@@ -14,6 +14,9 @@ import com.example.siteplatform.document.vo.ProjectDocumentDetailVO;
 import com.example.siteplatform.document.vo.ProjectDocumentSummaryVO;
 import com.example.siteplatform.document.vo.ProjectDocumentVO;
 import com.example.siteplatform.file.security.FileUploadPolicy;
+import com.example.siteplatform.system.dto.AdministrativeDeletionExecuteRequest;
+import com.example.siteplatform.system.service.AdministrativeDeletionService;
+import com.example.siteplatform.system.service.SystemPermissionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.core.io.Resource;
@@ -42,10 +45,16 @@ import java.util.List;
 public class ProjectDocumentController {
     private final ProjectDocumentService documentService;
     private final AuthService authService;
+    private final AdministrativeDeletionService administrativeDeletionService;
+    private final SystemPermissionService systemPermissionService;
 
-    public ProjectDocumentController(ProjectDocumentService documentService, AuthService authService) {
+    public ProjectDocumentController(ProjectDocumentService documentService, AuthService authService,
+                                     AdministrativeDeletionService administrativeDeletionService,
+                                     SystemPermissionService systemPermissionService) {
         this.documentService = documentService;
         this.authService = authService;
+        this.administrativeDeletionService = administrativeDeletionService;
+        this.systemPermissionService = systemPermissionService;
     }
 
     @GetMapping
@@ -164,9 +173,14 @@ public class ProjectDocumentController {
     }
 
     @DeleteMapping("/{id}/purge")
-    public Result<Void> purge(@PathVariable Long id, @RequestHeader("Authorization") String token,
-                              HttpServletRequest request) {
-        documentService.purge(id, currentUser(token), request);
+    public Result<Void> purge(@PathVariable Long id,
+                              @Valid @RequestBody AdministrativeDeletionExecuteRequest confirmation,
+                              @RequestHeader("Authorization") String token) {
+        SysUser operator = currentUser(token);
+        systemPermissionService.requirePlatformAdmin(operator);
+        confirmation.setTargetType("PROJECT_DOCUMENT");
+        confirmation.setTargetId(id);
+        administrativeDeletionService.execute(confirmation, operator);
         return Result.success();
     }
 

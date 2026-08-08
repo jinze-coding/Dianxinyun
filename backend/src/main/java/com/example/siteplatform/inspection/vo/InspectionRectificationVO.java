@@ -39,4 +39,7 @@ public class InspectionRectificationVO {
     private List<Long> beforePhotoFileIds;
     private List<Long> rectificationPhotoFileIds;
     private List<InspectionRectificationReviewLogVO> reviewLogs;
+    private Boolean canRectify;
+    private Boolean canReview;
+    private Boolean canAssign;
 }

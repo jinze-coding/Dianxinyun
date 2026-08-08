@@ -1,0 +1,14 @@
+.seal-form-grid label small { color: var(--seal-muted, #718096); }
+.seal-form-section span { color: var(--seal-muted, #718096); font-size: 10px; }
+.seal-cc-picker { border: 1px solid var(--seal-border, #dfe6ee); border-radius: 7px; overflow: hidden; }
+.seal-cc-picker > div { display: flex; align-items: center; gap: 7px; padding: 8px; background: var(--seal-surface, #f5f7fa); }
+.seal-cc-picker > div input { flex: 1; }
+.seal-cc-picker > div span { color: var(--seal-muted, #718096); }
+.seal-cc-picker > section { display: grid; grid-template-columns: 1fr 1fr; max-height: 210px; overflow: auto; }
+.seal-cc-picker label { display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 6px; padding: 8px 9px; border-bottom: 1px solid var(--seal-border, #dfe6ee); cursor: pointer; }
+.seal-cc-picker label.selected { background: var(--seal-active, #eef5ff); }
+.seal-cc-picker label span { color: var(--seal-muted, #718096); font-size: 10px; }
+
+@media (max-width: 1100px) {
+  .seal-cc-picker > section { grid-template-columns: 1fr; }
+}

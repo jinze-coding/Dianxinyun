@@ -2,6 +2,7 @@ package com.example.siteplatform.project.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.example.siteplatform.project.entity.SysUserProjectRole;
+import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.system.entity.SystemRole;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
@@ -72,6 +73,27 @@ public interface SysUserProjectRoleMapper extends BaseMapper<SysUserProjectRole>
               AND r.deleted = 0
             """)
     long countEnabledRoles(@Param("userId") Long userId, @Param("projectId") Long projectId);
+
+    @Select("""
+            SELECT DISTINCT u.*
+            FROM sys_user_project_role upr
+            INNER JOIN sys_role r ON r.id = upr.role_id
+            INNER JOIN sys_user_project up
+                    ON up.user_id = upr.user_id
+                   AND up.project_id = upr.project_id
+                   AND up.status = 'ACTIVE'
+            INNER JOIN sys_user u ON u.id = upr.user_id
+            WHERE upr.project_id = #{projectId}
+              AND r.role_code = #{roleCode}
+              AND r.scope_type = 'PROJECT'
+              AND r.enabled = 1
+              AND r.deleted = 0
+              AND u.status = 1
+              AND u.deleted = 0
+            ORDER BY COALESCE(NULLIF(TRIM(u.real_name), ''), u.username), u.username, u.id
+            """)
+    List<SysUser> selectActiveUsersByProjectRoleCode(@Param("projectId") Long projectId,
+                                                      @Param("roleCode") String roleCode);
 
     @Delete("DELETE FROM sys_user_project_role WHERE user_id = #{userId} AND project_id = #{projectId}")
     void deleteByUserAndProject(@Param("userId") Long userId, @Param("projectId") Long projectId);

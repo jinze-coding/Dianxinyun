@@ -34,6 +34,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.Resource;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -68,6 +69,7 @@ public class ProjectDocumentService {
     private final DocumentFolderService folderService;
     private final OperationLogMapper operationLogMapper;
     private final SysUserMapper userMapper;
+    private final JdbcTemplate jdbc;
 
     public ProjectDocumentService(ProjectDocumentMapper documentMapper,
                                   ProjectDocumentVersionMapper versionMapper,
@@ -77,7 +79,8 @@ public class ProjectDocumentService {
                                   ProjectPermissionService permissionService,
                                   DocumentFolderService folderService,
                                   OperationLogMapper operationLogMapper,
-                                  SysUserMapper userMapper) {
+                                  SysUserMapper userMapper,
+                                  JdbcTemplate jdbc) {
         this.documentMapper = documentMapper;
         this.versionMapper = versionMapper;
         this.folderMapper = folderMapper;
@@ -87,6 +90,7 @@ public class ProjectDocumentService {
         this.folderService = folderService;
         this.operationLogMapper = operationLogMapper;
         this.userMapper = userMapper;
+        this.jdbc = jdbc;
     }
 
     public PageResult<ProjectDocumentVO> list(Long projectId, Long folderId, String keyword,
@@ -227,6 +231,82 @@ public class ProjectDocumentService {
         return detail(id, currentUser);
     }
 
+    /**
+     * Registers an already physically copied seal-result object as an independent document resource.
+     * The caller must never pass the source storage key as {@code stored.storageKey()}.
+     */
+    @Transactional
+    public DocumentImportResult importCopiedSealFile(String archiveMode, Long projectId, Long folderId,
+                                                      Long documentId, String documentNo, String title,
+                                                      String changeNote, StoredFile stored,
+                                                      SysUser currentUser, HttpServletRequest request) {
+        permissionService.checkProjectPermission(currentUser.getId(), projectId);
+        permissionService.requireSystemPermission(currentUser.getId(), projectId,
+                SystemPermissionCodes.DOCUMENT_UPLOAD);
+        if (stored == null || !StringUtils.hasText(stored.storageKey())) {
+            throw new BusinessException("归档文件复制结果不能为空");
+        }
+        registerRollbackCleanup(stored);
+        String mode = StringUtils.hasText(archiveMode) ? archiveMode.trim().toUpperCase(Locale.ROOT) : "";
+        String normalizedChangeNote = normalizeOptional(changeNote, CHANGE_NOTE_MAX_LENGTH, "版本说明");
+        if ("NEW_DOCUMENT".equals(mode)) {
+            long targetFolderId = folderId == null ? 0L : folderId;
+            folderService.validateFolder(projectId, targetFolderId);
+            String normalizedTitle = normalizeTitle(title);
+            String normalizedNo = normalizeOptional(documentNo, DOCUMENT_NO_MAX_LENGTH, "资料编号");
+            assertDocumentIdentityAvailable(projectId, targetFolderId, normalizedTitle, normalizedNo, null);
+            FileResource resource = createFileResource(projectId, normalizedTitle, "PROJECT_DATA",
+                    "由用印申请盖章结果复制归档", currentUser, stored);
+            requireSingleWrite(fileMapper.insert(resource), "归档资料文件元数据新增");
+            LocalDateTime now = LocalDateTime.now();
+            ProjectDocument document = new ProjectDocument();
+            document.setProjectId(projectId);
+            document.setFolderId(targetFolderId);
+            document.setDocumentNo(normalizedNo);
+            document.setTitle(normalizedTitle);
+            document.setCategory("PROJECT_DATA");
+            document.setStatus(STATUS_ACTIVE);
+            document.setCreatedBy(currentUser.getId());
+            document.setCreatedByName(displayName(currentUser));
+            document.setRemark("由用印申请盖章结果复制归档");
+            document.setDeleted(0);
+            document.setCreateTime(now);
+            document.setUpdateTime(now);
+            requireSingleWrite(documentMapper.insert(document), "归档资料新增");
+            ProjectDocumentVersion version = createVersion(document.getId(), 1, resource.getId(),
+                    normalizedChangeNote, currentUser);
+            requireSingleWrite(versionMapper.insert(version), "归档资料版本新增");
+            document.setCurrentVersionId(version.getId());
+            requireSingleWrite(documentMapper.updateById(document), "归档资料当前版本更新");
+            record(currentUser, document, "DOCUMENT_UPLOAD",
+                    "从用印申请复制归档资料《" + document.getTitle() + "》V1", request);
+            return new DocumentImportResult(document.getId(), version.getId(), resource.getId());
+        }
+        if ("NEW_VERSION".equals(mode)) {
+            if (documentId == null) throw new BusinessException("新增版本必须指定资料");
+            ProjectDocument document = requireDocument(documentId);
+            if (!Objects.equals(document.getProjectId(), projectId)) throw new BusinessException("资料不属于当前项目");
+            checkRead(currentUser, document);
+            if (!STATUS_ACTIVE.equals(document.getStatus())) throw new BusinessException("归档资料不能新增版本");
+            document = documentMapper.selectForUpdate(documentId);
+            if (document == null) throw BusinessException.notFound("资料不存在");
+            FileResource resource = createFileResource(projectId, document.getTitle(), document.getCategory(),
+                    document.getRemark(), currentUser, stored);
+            requireSingleWrite(fileMapper.insert(resource), "归档资料文件元数据新增");
+            int nextVersion = versionMapper.selectMaxVersionNo(documentId) + 1;
+            ProjectDocumentVersion version = createVersion(documentId, nextVersion, resource.getId(),
+                    normalizedChangeNote, currentUser);
+            requireSingleWrite(versionMapper.insert(version), "归档资料版本新增");
+            document.setCurrentVersionId(version.getId());
+            document.setUpdateTime(LocalDateTime.now());
+            requireSingleWrite(documentMapper.updateById(document), "归档资料当前版本更新");
+            record(currentUser, document, "DOCUMENT_VERSION",
+                    "从用印申请复制归档《" + document.getTitle() + "》V" + nextVersion, request);
+            return new DocumentImportResult(documentId, version.getId(), resource.getId());
+        }
+        throw new BusinessException("归档方式必须为 NEW_DOCUMENT 或 NEW_VERSION");
+    }
+
     @Transactional
     public ProjectDocumentDetailVO update(Long id, ProjectDocumentUpdateRequest update,
                                            SysUser currentUser, HttpServletRequest request) {
@@ -276,6 +356,9 @@ public class ProjectDocumentService {
     @Transactional
     public void delete(Long id, SysUser currentUser, HttpServletRequest request) {
         ProjectDocument document = requireDocument(id);
+        if (!permissionService.isPlatformAdmin(currentUser.getId())) {
+            throw BusinessException.forbidden("仅平台管理员可将资料移入回收站");
+        }
         checkWrite(currentUser, document);
         document.setUpdateTime(LocalDateTime.now());
         requireSingleWrite(documentMapper.updateById(document), "资料删除时间更新");
@@ -296,7 +379,11 @@ public class ProjectDocumentService {
     @Transactional
     public void purge(Long id, SysUser currentUser, HttpServletRequest request) {
         ProjectDocument document = requireDeletedDocument(id);
+        if (!permissionService.isPlatformAdmin(currentUser.getId())) {
+            throw BusinessException.forbidden("仅平台管理员可永久删除资料");
+        }
         checkManage(currentUser, document.getProjectId());
+        requireNoSealArchiveReference(id);
         List<ProjectDocumentVersion> versions = versionMapper.selectList(new LambdaQueryWrapper<ProjectDocumentVersion>()
                 .eq(ProjectDocumentVersion::getDocumentId, id));
         List<FileResource> resources = new java.util.ArrayList<>();
@@ -316,6 +403,22 @@ public class ProjectDocumentService {
         requireSingleWrite(documentMapper.purgeById(id), "资料永久删除");
         record(currentUser, document, "DOCUMENT_PURGE", "永久删除资料《" + document.getTitle() + "》", request);
         registerCommittedPurge(resources);
+    }
+
+    private void requireNoSealArchiveReference(Long documentId) {
+        Long count = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM seal_application_file relation
+                WHERE relation.deleted = 0 AND (
+                    relation.archived_document_id = ?
+                    OR relation.archived_version_id IN (
+                        SELECT version.id FROM project_document_version version
+                        WHERE version.document_id = ?
+                    )
+                )
+                """, Long.class, documentId, documentId);
+        if (count != null && count > 0) {
+            throw BusinessException.of(409, "资料存在用印归档追溯，禁止永久删除；请保留审计链");
+        }
     }
 
     @Transactional

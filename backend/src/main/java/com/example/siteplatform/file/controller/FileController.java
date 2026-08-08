@@ -404,7 +404,7 @@ public class FileController {
         SysUser currentUser = authService.getCurrentUser(token);
 
         FileResource file = fileMapper.selectById(id);
-        fileResourceService.checkWrite(currentUser, file);
+        fileResourceService.checkTemporaryDelete(currentUser, file);
         fileOperationService.record(currentUser, file, "FILE_DELETE",
                 "删除《" + file.getFileName() + "》", request);
         if (fileMapper.deleteById(id) != 1) {

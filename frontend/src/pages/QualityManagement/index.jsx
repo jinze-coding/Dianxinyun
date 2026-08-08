@@ -17,6 +17,7 @@ import {
   updateFileStatus,
   uploadFile,
 } from "../../services/file";
+import { confirmAdministrativeDeletion } from "../../services/administrativeDeletion";
 import {
   collectProjectMenuCodes,
   hasProjectPermission,
@@ -215,7 +216,7 @@ const reviewEvidenceCheck = (issue, evidenceState) => {
   return { ready: true, message: "" };
 };
 
-export default function QualityManagementPage({ projectId, theme: T, currentUser }) {
+export default function QualityManagementPage({ projectId, theme: T, currentUser, businessTarget }) {
   const [summary, setSummary] = useState(null);
   const [summaryProjectKey, setSummaryProjectKey] = useState("");
   const [issues, setIssues] = useState([]);
@@ -261,6 +262,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
   const documentRequestIdRef = useRef(0);
   const memberRequestIdRef = useRef(0);
   const detailRequestIdRef = useRef(0);
+  const openedBusinessTargetRef = useRef("");
   const evidenceUrlsRef = useRef([]);
   const submittingRef = useRef(false);
   const documentBusyRef = useRef(false);
@@ -554,6 +556,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
     || hasProjectPermission(currentUser, projectId, "quality.rectify");
   const canReview = isPlatformAdmin(currentUser)
     || hasProjectPermission(currentUser, projectId, "quality.review");
+  const canDelete = isPlatformAdmin(currentUser);
   const loadMembers = async () => {
     const targetProjectId = projectId;
     const targetProjectKey = projectKey(targetProjectId);
@@ -679,6 +682,18 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
       alert(error.message || "详情加载失败");
     }
   };
+
+  useEffect(() => {
+    const issueId = Number(businessTarget?.id || 0);
+    const targetKey = businessTarget?.routeCode === "QUALITY_ISSUE_DETAIL" && issueId
+      ? `${projectId || ""}:${issueId}:${businessTarget?.openedAt || ""}`
+      : "";
+    if (!targetKey || openedBusinessTargetRef.current === targetKey || !canViewIssues) return;
+    openedBusinessTargetRef.current = targetKey;
+    setActiveTab("issues");
+    setMenuNotice("");
+    openIssue({ id: issueId });
+  }, [businessTarget?.id, businessTarget?.openedAt, businessTarget?.routeCode, canViewIssues, projectId]);
 
   const uploadFiles = async (files, businessType) => {
     const ids = [];
@@ -856,6 +871,22 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
     }
   };
 
+  const removeIssue = async (issue) => {
+    if (submittingRef.current || !issue) return;
+    if (!beginSubmitting()) return;
+    try {
+      const deleted = await confirmAdministrativeDeletion("QUALITY_ISSUE", issue.id);
+      if (!deleted) return;
+      closeModal();
+      setSelectedIssue(null);
+      await loadQualityData();
+    } catch (error) {
+      alert(error.message || "质量问题永久删除失败，请稍后重试");
+    } finally {
+      finishSubmitting();
+    }
+  };
+
   const uploadDocument = async () => {
     if (submittingRef.current) return;
     if (!documentFile) return alert("请选择质量资料");
@@ -938,18 +969,11 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
 
   const removeDocument = async (file) => {
     if (documentBusyRef.current) return;
-    if (
-      !window.confirm(
-        `确认永久删除质量资料《${file.fileName}》？删除后无法恢复。`,
-      )
-    ) {
-      return;
-    }
     documentBusyRef.current = true;
     setDocumentBusyAction(`delete:${file.id}`);
     try {
-      const res = await deleteFile(file.id);
-      if (res.code !== 200) throw new Error(res.message || "删除失败");
+      const deleted = await confirmAdministrativeDeletion("FILE", file.id);
+      if (!deleted) return;
       await loadDocuments();
     } catch (error) {
       alert(error.message || "删除失败，请稍后重试");
@@ -1255,7 +1279,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
                   </small>
                 </span>
                 <span>{issue.location || "-"}</span>
-                <span>{issue.assigneeName || "-"}</span>
+                <span>{issue.assigneeName || "待重新分配"}</span>
                 <span
                   style={{ color: issue.overdue ? T.danger : T.textSecondary }}
                 >
@@ -1412,15 +1436,15 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
                             ? "恢复"
                             : "归档"}
                       </button>
-                      <button
-                        disabled={Boolean(documentBusyAction)}
-                        onClick={() => removeDocument(file)}
-                        style={buttonStyle("danger")}
-                      >
-                        {documentBusyAction === `delete:${file.id}`
-                          ? "删除中..."
-                          : "删除"}
-                      </button>
+                      {canDelete && <button
+                          disabled={Boolean(documentBusyAction)}
+                          onClick={() => removeDocument(file)}
+                          style={buttonStyle("danger")}
+                        >
+                          {documentBusyAction === `delete:${file.id}`
+                            ? "删除中..."
+                            : "删除"}
+                        </button>}
                     </>
                   )}
                 </span>
@@ -1569,6 +1593,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
                 canManage={canManage}
                 canRectify={canRectify}
                 canReview={canReview}
+                canDelete={canDelete}
                 submitting={submitting}
                 buttonStyle={buttonStyle}
                 fieldStyle={fieldStyle}
@@ -1593,6 +1618,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
                   }));
                   setModal("void");
                 }}
+                onDelete={() => removeIssue(selectedIssue)}
               />
             )
           )}
@@ -1706,6 +1732,7 @@ function IssueDetail({
   canManage,
   canRectify,
   canReview,
+  canDelete,
   submitting,
   buttonStyle,
   fieldStyle,
@@ -1715,6 +1742,7 @@ function IssueDetail({
   onReview,
   onAssign,
   onVoid,
+  onDelete,
 }) {
   const evidenceStages = buildEvidenceStages(issue);
   const evidenceCheck = reviewEvidenceCheck(issue, evidenceState);
@@ -1768,7 +1796,7 @@ function IssueDetail({
         {[
           ["位置", issue.location],
           ["等级", severityLabel(issue.severity)],
-          ["负责人", issue.assigneeName],
+          ["负责人", issue.assigneeName || "待重新分配"],
           ["期限", issue.deadline],
           ["发起人", issue.createdByName],
           ["发起时间", formatTime(issue.createTime)],
@@ -1978,6 +2006,17 @@ function IssueDetail({
             style={buttonStyle("danger")}
           >
             作废问题
+          </button>
+        </div>
+      )}
+      {canDelete && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+          <button
+            disabled={submitting}
+            onClick={onDelete}
+            style={buttonStyle("danger")}
+          >
+            永久删除问题
           </button>
         </div>
       )}

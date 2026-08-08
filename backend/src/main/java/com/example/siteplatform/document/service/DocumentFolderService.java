@@ -77,6 +77,9 @@ public class DocumentFolderService {
     @Transactional
     public void delete(Long id, SysUser currentUser) {
         DocumentFolder folder = requireFolder(id);
+        if (!permissionService.isPlatformAdmin(currentUser.getId())) {
+            throw BusinessException.forbidden("仅平台管理员可删除资料目录");
+        }
         checkManage(currentUser, folder.getProjectId());
         if (folderMapper.countAllChildren(id) > 0 || documentMapper.countAllByFolder(id) > 0) {
             throw new BusinessException("目录非空，不能删除");

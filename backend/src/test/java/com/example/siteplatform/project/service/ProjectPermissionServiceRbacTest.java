@@ -2,6 +2,8 @@ package com.example.siteplatform.project.service;
 
 import com.example.siteplatform.auth.mapper.SysUserMapper;
 import com.example.siteplatform.project.entity.SysUserProject;
+import com.example.siteplatform.project.entity.ProjectInfo;
+import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectRoleMapper;
 import com.example.siteplatform.system.constant.BusinessModuleCodes;
@@ -20,6 +22,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
@@ -36,6 +39,7 @@ class ProjectPermissionServiceRbacTest {
     @Mock private SysUserProjectRoleMapper userProjectRoleMapper;
     @Mock private SystemPermissionService systemPermissionService;
     @Mock private RedisTemplate<String, Object> redisTemplate;
+    @Mock private ProjectInfoMapper projectInfoMapper;
 
     private ProjectPermissionService service;
 
@@ -47,6 +51,7 @@ class ProjectPermissionServiceRbacTest {
         ReflectionTestUtils.setField(service, "userProjectRoleMapper", userProjectRoleMapper);
         ReflectionTestUtils.setField(service, "systemPermissionService", systemPermissionService);
         ReflectionTestUtils.setField(service, "redisTemplate", redisTemplate);
+        ReflectionTestUtils.setField(service, "projectMapper", projectInfoMapper);
         lenient().when(userMapper.selectRoleCodesByUserId(7L)).thenReturn(List.of());
     }
 
@@ -83,6 +88,19 @@ class ProjectPermissionServiceRbacTest {
         when(userProjectMapper.selectOne(any())).thenReturn(null);
 
         assertFalse(service.canManageProjectMembers(7L, 2L));
+    }
+
+    @Test
+    void platformAdministratorReceivesEveryCurrentProjectWithoutMembershipRows() {
+        ProjectInfo first = new ProjectInfo();
+        first.setId(2L);
+        ProjectInfo newlyCreated = new ProjectInfo();
+        newlyCreated.setId(9L);
+        when(userMapper.selectRoleCodesByUserId(7L)).thenReturn(List.of("PLATFORM_ADMIN"));
+        when(projectInfoMapper.selectList(any())).thenReturn(List.of(first, newlyCreated));
+
+        assertEquals(List.of(first, newlyCreated), service.getUserProjects(7L));
+        verify(userMapper, never()).selectProjectIdsByUserId(7L);
     }
 
     @Test

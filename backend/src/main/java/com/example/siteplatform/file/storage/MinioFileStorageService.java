@@ -3,6 +3,8 @@ package com.example.siteplatform.file.storage;
 import com.example.siteplatform.file.security.FileUploadPolicy;
 import io.minio.BucketExistsArgs;
 import io.minio.GetObjectArgs;
+import io.minio.CopyObjectArgs;
+import io.minio.SourceObject;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
@@ -82,6 +84,17 @@ public class MinioFileStorageService implements FileStorageService {
     @Override
     public void delete(String storageKey) throws Exception {
         client().removeObject(RemoveObjectArgs.builder().bucket(bucket).object(storageKey).build());
+    }
+
+    @Override
+    public void copy(String sourceStorageKey, String targetStorageKey) throws Exception {
+        MinioClient minio = client();
+        ensureBucket(minio);
+        minio.copyObject(CopyObjectArgs.builder()
+                .bucket(bucket)
+                .object(targetStorageKey)
+                .source(SourceObject.builder().bucket(bucket).object(sourceStorageKey).build())
+                .build());
     }
 
     private MinioClient client() {

@@ -14,6 +14,7 @@ public class RegistrationApplicationVO {
     private String email;
     private String applicationReason;
     private List<Long> desiredProjectIds;
+    private List<RegistrationProjectOptionVO> desiredProjects;
     private String desiredProjectText;
     private String sourceType;
     private String registrationMode;

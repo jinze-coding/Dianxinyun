@@ -27,6 +27,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -58,6 +59,7 @@ class ProjectDocumentServiceTest {
     @Mock private DocumentFolderService folderService;
     @Mock private OperationLogMapper operationLogMapper;
     @Mock private SysUserMapper userMapper;
+    @Mock private JdbcTemplate jdbc;
 
     private ProjectDocumentService service;
     private SysUser user;
@@ -66,7 +68,8 @@ class ProjectDocumentServiceTest {
     @BeforeEach
     void setUp() {
         service = spy(new ProjectDocumentService(documentMapper, versionMapper, folderMapper, fileMapper,
-                storageManager, permissionService, folderService, operationLogMapper, userMapper));
+                storageManager, permissionService, folderService, operationLogMapper, userMapper, jdbc));
+        lenient().when(jdbc.queryForObject(any(String.class), eq(Long.class), anyLong(), anyLong())).thenReturn(0L);
         user = new SysUser();
         user.setId(7L);
         user.setUsername("builder");
@@ -292,6 +295,7 @@ class ProjectDocumentServiceTest {
 
     @Test
     void permanentDeleteDefersPhysicalCleanupUntilDatabaseCommit() {
+        when(permissionService.isPlatformAdmin(7L)).thenReturn(true);
         ProjectDocument document = document(200L, 1L, 300L);
         document.setTitle("施工方案");
         ProjectDocumentVersion version = version(300L, 200L, 1);
@@ -301,7 +305,6 @@ class ProjectDocumentServiceTest {
         resource.setStorageProvider("local");
         resource.setStorageKey("project-documents/1/file.pdf");
         when(documentMapper.selectDeletedById(200L)).thenReturn(document);
-        when(permissionService.canManageProject(7L, 1L)).thenReturn(true);
         when(versionMapper.selectList(any())).thenReturn(List.of(version));
         when(fileMapper.selectById(100L)).thenReturn(resource);
         when(fileMapper.deleteById(100L)).thenReturn(1);
@@ -326,13 +329,13 @@ class ProjectDocumentServiceTest {
 
     @Test
     void permanentDeleteRollbackNeverTouchesPhysicalFile() {
+        when(permissionService.isPlatformAdmin(7L)).thenReturn(true);
         ProjectDocument document = document(200L, 1L, 300L);
         ProjectDocumentVersion version = version(300L, 200L, 1);
         version.setFileResourceId(100L);
         FileResource resource = new FileResource();
         resource.setId(100L);
         when(documentMapper.selectDeletedById(200L)).thenReturn(document);
-        when(permissionService.canManageProject(7L, 1L)).thenReturn(true);
         when(versionMapper.selectList(any())).thenReturn(List.of(version));
         when(fileMapper.selectById(100L)).thenReturn(resource);
         when(fileMapper.deleteById(100L)).thenReturn(1);

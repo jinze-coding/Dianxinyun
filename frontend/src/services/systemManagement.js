@@ -40,6 +40,10 @@ export function updateSystemUserProjectRoleAssignments(id, data) {
   return put(`/system/users/${id}/project-role-assignments`, data);
 }
 
+export function previewSystemUserProjectRoleAssignments(id, data) {
+  return post(`/system/users/${id}/project-role-assignments/preview`, data);
+}
+
 export function getSystemRoles(params = {}) {
   return get('/system/roles', params);
 }

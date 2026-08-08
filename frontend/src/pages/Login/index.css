@@ -178,6 +178,125 @@
   resize: vertical;
 }
 
+.registration-project-picker {
+  position: relative;
+}
+
+.registration-project-picker.open {
+  z-index: 20;
+}
+
+.registration-project-picker input[aria-expanded='true'] {
+  border-color: #78aef8;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.1);
+}
+
+.registration-project-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+
+.registration-project-tags > span {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px 6px 10px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  color: #155bb5;
+  background: #eff6ff;
+  font-size: 12px;
+}
+
+.registration-project-tags button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
+  color: #47729f;
+  background: #dbeafe;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.registration-project-results {
+  position: absolute;
+  z-index: 30;
+  top: 100%;
+  right: 0;
+  left: 0;
+  max-height: min(230px, 42vh);
+  overflow-y: auto;
+  margin-top: 7px;
+  padding: 6px;
+  border: 1px solid #d8e3ef;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: 0 16px 36px rgba(30, 64, 109, 0.18);
+}
+
+.registration-project-results p {
+  padding: 13px 10px;
+  color: #8293a9;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.registration-project-results p.error {
+  color: #b91c1c;
+}
+
+.registration-project-results p.hint {
+  padding-top: 7px;
+  padding-bottom: 7px;
+  color: #52749a;
+  background: #f4f8fd;
+}
+
+.registration-project-results p.limit {
+  color: #9a5b10;
+  background: #fff8e8;
+}
+
+.registration-project-results button {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 7px;
+  color: #243b57;
+  background: transparent;
+  text-align: left;
+}
+
+.registration-project-results button:hover,
+.registration-project-results button:focus-visible,
+.registration-project-results button.active {
+  background: #f0f6ff;
+}
+
+.registration-project-results button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.registration-project-results button strong {
+  font-size: 13px;
+}
+
+.registration-project-results button span {
+  color: #8293a9;
+  font-size: 11px;
+  font-weight: 500;
+}
+
 .login-primary-button,
 .login-secondary-button {
   width: 100%;

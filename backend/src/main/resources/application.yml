@@ -87,9 +87,20 @@ wechat:
     read-timeout-millis: ${WECHAT_READ_TIMEOUT_MILLIS:8000}
     page: pages/scan-entry/index
     web-login-page: pages/web-login-confirm/index
+    visitor-page: pages/public/visitor-invite
     env-version: ${WECHAT_MINI_PROGRAM_ENV_VERSION:release}
     public-fallback-url: ${WECHAT_MINI_PROGRAM_PUBLIC_FALLBACK_URL:http://localhost:3003/#/pages/scan-entry/index}
   message:
     review-template-id: ${WECHAT_REVIEW_TEMPLATE_ID:}
     rectification-template-id: ${WECHAT_RECTIFICATION_TEMPLATE_ID:}
     recheck-template-id: ${WECHAT_RECHECK_TEMPLATE_ID:}
+
+site-access:
+  # 生产环境必须通过 VISITOR_DATA_ENCRYPTION_KEY 注入至少32字节的独立随机密钥。
+  encryption-key: ${VISITOR_DATA_ENCRYPTION_KEY:}
+
+seal:
+  # 用印 scene 与访客数据使用不同密钥；生产环境至少32字节。
+  scene-encryption-key: ${SEAL_SCENE_ENCRYPTION_KEY:}
+  mini-program:
+    page: pages/seal/entry
