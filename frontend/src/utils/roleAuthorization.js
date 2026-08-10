@@ -116,6 +116,8 @@ export function buildRoleMenuTree(menus = [], role = null) {
   const projectRole = normalize(role?.scopeType || role?.scope) === 'PROJECT';
   const businessNodes = BUSINESS_MENU_DEFINITIONS.map((definition) => {
     const backingMenus = definition.backingMenuCodes.map((code) => byCode.get(code)).filter(Boolean);
+    const pageMenus = definition.pages.map((page) => byCode.get(page.menuCode));
+    const hasPageCatalog = pageMenus.some(Boolean);
     const pages = definition.pages.map((page) => {
       const menu = byCode.get(page.menuCode);
       return {
@@ -124,7 +126,11 @@ export function buildRoleMenuTree(menus = [], role = null) {
         label: page.label,
         menuCode: page.menuCode,
         menuId: itemId(menu),
-        legacy: !menu,
+        // The old parent-only catalog is compatible only when the whole module has
+        // no page menu at all. Treating individual holes in a partially migrated
+        // catalog as legacy makes the UI offer permissions the backend must reject.
+        legacy: !menu && !hasPageCatalog,
+        unavailable: !menu && hasPageCatalog,
       };
     });
     return {
@@ -164,9 +170,11 @@ export function buildRoleMenuTree(menus = [], role = null) {
 export function menuNodeState(node, selectedMenuIds = [], businessModuleCodes = []) {
   const selectedIds = new Set(selectedMenuIds.map(Number));
   const selectedModules = new Set(businessModuleCodes.map(normalize));
-  const childStates = (node.children || []).map((child) => child.legacy
-    ? selectedModules.has(normalize(node.moduleCode))
-    : selectedIds.has(Number(child.menuId)));
+  const childStates = (node.children || []).map((child) => {
+    if (child.unavailable) return false;
+    if (child.legacy) return selectedModules.has(normalize(node.moduleCode));
+    return selectedIds.has(Number(child.menuId));
+  });
   let checked;
   if (node.type === 'BUSINESS_MODULE') checked = selectedModules.has(normalize(node.moduleCode));
   else if (node.children?.length) checked = childStates.every(Boolean) && selectedIds.has(Number(node.menuId));
@@ -187,7 +195,8 @@ export function toggleMenuNode({ node, checked, selectedMenuIds = [], businessMo
     if (checked) {
       modules.add(normalize(node.moduleCode));
       node.backingMenuIds?.forEach(addId);
-      node.children?.filter((child) => !child.legacy).forEach((child) => addId(child.menuId));
+      node.children?.filter((child) => !child.legacy && !child.unavailable)
+        .forEach((child) => addId(child.menuId));
     } else {
       modules.delete(normalize(node.moduleCode));
       node.backingMenuIds?.forEach(removeId);
@@ -207,7 +216,7 @@ export function toggleMenuNode({ node, checked, selectedMenuIds = [], businessMo
 }
 
 export function toggleMenuChild({ parent, child, checked, selectedMenuIds = [], businessModuleCodes = [] }) {
-  if (child.legacy) return { menuIds: selectedMenuIds, businessModuleCodes };
+  if (child.legacy || child.unavailable) return { menuIds: selectedMenuIds, businessModuleCodes };
   const ids = new Set(selectedMenuIds.map(Number));
   const modules = new Set(businessModuleCodes.map(normalize));
   if (checked) {
@@ -218,7 +227,8 @@ export function toggleMenuChild({ parent, child, checked, selectedMenuIds = [], 
     } else if (parent.type === 'SYSTEM_ROOT') ids.add(Number(parent.menuId));
   } else {
     ids.delete(Number(child.menuId));
-    const remaining = parent.children?.some((item) => !item.legacy && ids.has(Number(item.menuId)));
+    const remaining = parent.children?.some((item) => !item.legacy && !item.unavailable
+      && ids.has(Number(item.menuId)));
     if (!remaining) {
       if (parent.type === 'BUSINESS_MODULE') {
         modules.delete(normalize(parent.moduleCode));
@@ -326,6 +336,82 @@ export function groupPermissionActions(actions = []) {
     grouped.get(action.group).push(action);
   });
   return [...grouped.entries()].map(([label, items]) => ({ label, items }));
+}
+
+function secondaryGroupLabel(action) {
+  const parts = String(action?.group || '').split('·').map((part) => part.trim()).filter(Boolean);
+  return parts.length > 1 ? parts.slice(1).join(' · ') : (parts[0] || '其他操作');
+}
+
+/**
+ * Build the operation-permission view from the same first/second-level menu tree
+ * used by menu assignment. Actions that genuinely span multiple page menus stay
+ * in a clearly labelled shared group under their real first-level menu.
+ */
+export function buildPermissionActionTree(menuTree = [], actions = [], logicalMenuCodes = new Set()) {
+  const selectedCodes = new Set([...logicalMenuCodes].map(normalize));
+  const visibleActions = filterActionsByMenus(actions, selectedCodes);
+  const assigned = new Set();
+
+  const nodes = menuTree.map((node) => {
+    const childCodes = new Set((node.children || [])
+      .filter((child) => selectedCodes.has(normalize(child.menuCode)))
+      .map((child) => normalize(child.menuCode)));
+    const rootCodes = new Set([
+      normalize(node.moduleCode),
+      normalize(node.menuCode),
+      ...childCodes,
+    ].filter(Boolean));
+    const nodeActions = visibleActions.filter((action) => action.menuCodes
+      .some((code) => rootCodes.has(normalize(code))));
+    nodeActions.forEach((action) => assigned.add(action.key));
+
+    const grouped = new Map();
+    nodeActions.forEach((action) => {
+      const label = secondaryGroupLabel(action);
+      const matchingChild = (node.children || []).find((child) => (
+        selectedCodes.has(normalize(child.menuCode))
+        && normalize(child.label) === normalize(label)
+        && action.menuCodes.some((code) => normalize(code) === normalize(child.menuCode))
+      ));
+      const key = matchingChild ? `page:${matchingChild.menuCode}` : `group:${normalize(label)}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          key: `${node.key}:${key}`,
+          label,
+          menuCode: matchingChild?.menuCode || null,
+          items: [],
+        });
+      }
+      grouped.get(key).items.push(action);
+    });
+
+    return {
+      key: `permissions:${node.key}`,
+      label: node.label,
+      description: node.description,
+      groups: [...grouped.values()],
+      items: nodeActions,
+    };
+  }).filter((node) => node.items.length > 0);
+
+  const unassigned = visibleActions.filter((action) => !assigned.has(action.key));
+  if (unassigned.length) {
+    nodes.push({
+      key: 'permissions:other',
+      label: '其他操作',
+      description: '未绑定到当前标准菜单层级的自定义权限',
+      groups: [{ key: 'permissions:other:custom', label: '自定义操作', menuCode: null, items: unassigned }],
+      items: unassigned,
+    });
+  }
+  return nodes;
+}
+
+export function missingMenuCatalogCodes(menuTree = []) {
+  return menuTree.flatMap((node) => (node.children || [])
+    .filter((child) => child.unavailable)
+    .map((child) => child.menuCode));
 }
 
 export function hasPageMenuCatalog(menuCodes = [], pageCodes = []) {

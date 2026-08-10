@@ -11,6 +11,7 @@ import com.example.siteplatform.siteaccess.service.SiteAccessService;
 import com.example.siteplatform.siteaccess.vo.SiteVisitHostOptionVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitInvitationVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitMiniCodeVO;
+import com.example.siteplatform.siteaccess.vo.SiteVisitorProfileVO;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
@@ -117,5 +118,31 @@ public class SiteAccessController {
                 .contentType(MediaType.parseMediaType(
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
                 .body(file.content());
+    }
+
+    @GetMapping("/visitor-profiles")
+    public Result<PageResult<SiteVisitorProfileVO>> visitorProfiles(
+            @RequestParam Long projectId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "1") Integer pageNo,
+            @RequestParam(defaultValue = "20") Integer pageSize,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(service.visitorProfiles(projectId, status, keyword, pageNo, pageSize,
+                authService.getCurrentUser(token)));
+    }
+
+    @GetMapping("/visitor-profiles/{id}")
+    public Result<SiteVisitorProfileVO> visitorProfileDetail(
+            @PathVariable Long id,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(service.visitorProfileDetail(id, authService.getCurrentUser(token)));
+    }
+
+    @PostMapping("/visitor-profiles/{id}/disable")
+    public Result<SiteVisitorProfileVO> disableVisitorProfile(
+            @PathVariable Long id,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(service.disableVisitorProfile(id, authService.getCurrentUser(token)));
     }
 }

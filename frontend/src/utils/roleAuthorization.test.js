@@ -2,13 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildPermissionActions,
+  buildPermissionActionTree,
   buildRoleDefinitionRequest,
   buildRoleMenuTree,
   isDuplicateRoleName,
   menuNodeState,
+  missingMenuCatalogCodes,
   pageMenuAllowed,
   permissionIdsForActionKeys,
   selectedActionKeys,
+  selectedLogicalMenuCodes,
   toggleActionKey,
   toggleMenuChild,
   toggleMenuNode,
@@ -90,6 +93,56 @@ test('legacy database keeps virtual page tabs tied to parent module', () => {
   assert.equal(document.children.every((child) => child.legacy), true);
   const state = menuNodeState(document, [], ['DOCUMENT']);
   assert.deepEqual(state.childStates, [true, true, true]);
+});
+
+test('partially migrated menu catalog does not pretend missing pages are legacy tabs', () => {
+  const tree = buildRoleMenuTree([
+    { id: 30, menuCode: 'WEB_DOCUMENT', menuName: '资料管理' },
+    { id: 31, menuCode: 'MINI_DOCUMENT', menuName: '资料管理' },
+    { id: 33, parentId: 30, menuCode: 'DOCUMENT_SEAL', menuName: '用印申请' },
+  ], { scopeType: 'PROJECT' });
+  const document = tree.find((node) => node.moduleCode === 'DOCUMENT');
+  const state = menuNodeState(document, [30, 31, 33], ['DOCUMENT']);
+
+  assert.deepEqual(state.childStates, [false, true, false]);
+  assert.deepEqual(missingMenuCatalogCodes(tree), [
+    'DOCUMENT_LIBRARY', 'DOCUMENT_RECYCLE',
+  ]);
+  assert.deepEqual(selectedLogicalMenuCodes(tree, [30, 31, 33], ['DOCUMENT']), new Set([
+    'DOCUMENT', 'DOCUMENT_SEAL',
+  ]));
+
+  const actions = buildPermissionActions([
+    { id: 40, permissionCode: 'document.view', permissionName: '查看资料', moduleCode: 'WEB_DOCUMENT' },
+    { id: 41, permissionCode: 'seal.view', permissionName: '查看用印', moduleCode: 'WEB_DOCUMENT' },
+  ]);
+  const permissionTree = buildPermissionActionTree(
+    tree,
+    actions,
+    selectedLogicalMenuCodes(tree, [30, 31, 33], ['DOCUMENT']),
+  );
+  assert.deepEqual(permissionTree.flatMap((node) => node.items.map((item) => item.key)), ['seal.view']);
+});
+
+test('permission actions follow assigned first and second level menu hierarchy', () => {
+  const tree = buildRoleMenuTree(menus, { scopeType: 'PROJECT' });
+  const selectedMenuIds = menus.map((menu) => menu.id);
+  const logicalCodes = selectedLogicalMenuCodes(tree, selectedMenuIds, ['INSPECTION']);
+  const permissions = [
+    ['BOX_VIEW', 1], ['inspection.view', 2],
+    ['INSPECTION_RECORD_VIEW', 3], ['INSPECTION_DAILY_SUBMIT', 4], ['inspection.submit', 5],
+    ['inspection.rectify', 6], ['inspection.review', 7],
+  ].map(([permissionCode, id]) => ({ id, permissionCode, permissionName: permissionCode, moduleCode: 'WEB_INSPECTION' }));
+
+  const permissionTree = buildPermissionActionTree(tree, buildPermissionActions(permissions), logicalCodes);
+  const inspection = permissionTree.find((node) => node.label === '巡检管理');
+
+  assert.deepEqual(inspection.groups.map((group) => group.label), [
+    '电箱台账', '巡检记录', '整改闭环',
+  ]);
+  assert.deepEqual(inspection.groups.find((group) => group.label === '巡检记录').items.map((item) => item.label), [
+    '提交电箱日检', '查看巡检记录',
+  ]);
 });
 
 test('site access is a Web-only internal module with one visitor page', () => {

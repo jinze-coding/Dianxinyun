@@ -76,6 +76,10 @@ class BusinessModulePermissionInterceptorTest {
                 Arguments.of("GET", "/api/v1/inspection/records/export", SystemPermissionCodes.INSPECTION_EXPORT),
                 Arguments.of("POST", "/api/v1/inspection/records", SystemPermissionCodes.INSPECTION_SUBMIT),
                 Arguments.of("POST", "/api/v1/inspection/records/8/submit", SystemPermissionCodes.INSPECTION_SUBMIT),
+                Arguments.of("POST", "/api/v1/inspection/rectifications/8/complete", SystemPermissionCodes.INSPECTION_RECTIFY),
+                Arguments.of("POST", "/api/v1/inspection/rectifications/8/assign", SystemPermissionCodes.INSPECTION_REVIEW),
+                Arguments.of("POST", "/api/v1/inspection/rectifications/8/close", SystemPermissionCodes.INSPECTION_REVIEW),
+                Arguments.of("POST", "/api/v1/inspection/rectifications/8/reject", SystemPermissionCodes.INSPECTION_REVIEW),
                 Arguments.of("PUT", "/api/v1/inspection/settings/2", SystemPermissionCodes.INSPECTION_MANAGE),
                 Arguments.of("GET", "/api/v1/electric-boxes/7", SystemPermissionCodes.INSPECTION_VIEW),
                 Arguments.of("POST", "/api/v1/electric-boxes/import", SystemPermissionCodes.INSPECTION_MANAGE),
@@ -170,6 +174,21 @@ class BusinessModulePermissionInterceptorTest {
                 .andExpect(jsonPath("$.message").value("无操作权限：quality.rectify"));
 
         verify(permissionService).hasProjectPermission(9L, 22L, SystemPermissionCodes.QUALITY_RECTIFY);
+    }
+
+    @Test
+    void sharedInspectionRectificationUploadUsesRectifyPermissionInTargetProject() throws Exception {
+        when(permissionService.hasPermission(9L, SystemPermissionCodes.INSPECTION_RECTIFY)).thenReturn(true);
+        when(permissionService.hasProjectPermission(9L, 22L, SystemPermissionCodes.INSPECTION_RECTIFY)).thenReturn(true);
+
+        mockMvc.perform(post("/api/v1/files")
+                        .param("projectId", "22")
+                        .param("businessType", "INSPECTION_RECTIFICATION")
+                        .header("Authorization", "Bearer electrician"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(permissionService).hasProjectPermission(9L, 22L, SystemPermissionCodes.INSPECTION_RECTIFY);
     }
 
     @Test

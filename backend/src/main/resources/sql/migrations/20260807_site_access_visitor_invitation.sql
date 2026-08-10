@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS site_visit_person (
     person_type VARCHAR(20) NOT NULL COMMENT 'CONTACT/COMPANION',
     person_name VARCHAR(50) NOT NULL,
     id_card_encrypted VARCHAR(512) NOT NULL,
-    id_card_hash CHAR(64) NOT NULL,
+    id_card_hash CHAR(64) NOT NULL COMMENT '带用途隔离的HMAC-SHA256指纹',
     sort_order INT NOT NULL DEFAULT 1,
     deleted TINYINT NOT NULL DEFAULT 0,
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

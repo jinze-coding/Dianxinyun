@@ -4,7 +4,7 @@ import path from 'node:path';
 
 const expectedApiBase = 'https://zhihuiyz.xyz/api/v1';
 const expectedAppId = 'wxc2c8114ac4b5679a';
-const expectedBuildId = '0.1.2-20260803-scan-domain';
+const expectedBuildId = '0.1.3-20260810-seal-visitor';
 const buildRoot = path.resolve('dist/build/mp-weixin');
 
 async function collectJavaScriptFiles(directory) {

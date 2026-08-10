@@ -1,4 +1,4 @@
-import type { Project } from '@/types';
+import type { Project, ProjectProfile } from '@/types';
 import { request, USE_MOCK } from './request';
 import { getMockProjectDetail, getMockProjects } from '@/mock/runtime';
 
@@ -56,4 +56,30 @@ export async function getProjectDetail(projectId: number): Promise<Project | und
     return getMockProjectDetail(projectId);
   }
   return normalizeProject(await request<Project>(`/projects/mini-program/${projectId}`));
+}
+
+export async function getProjectProfile(projectId: number): Promise<ProjectProfile> {
+  if (USE_MOCK) {
+    const project = getMockProjectDetail(projectId);
+    if (!project) throw new Error('项目不存在');
+    return {
+      projectId: project.id,
+      projectName: project.projectName,
+      shortName: project.shortName,
+      manager: project.manager,
+      address: project.address,
+      contractor: project.contractor,
+      phase: project.phase,
+      description: project.description,
+      startDate: project.startDate,
+      endDate: project.endDate,
+      buildingArea: project.area ? Number(project.area) : undefined,
+      qualityGoal: project.qualityGoal,
+      safetyGoal: project.safetyGoal,
+      profileVersion: 0,
+      canEdit: false,
+      images: []
+    };
+  }
+  return request<ProjectProfile>(`/projects/${projectId}/profile`);
 }

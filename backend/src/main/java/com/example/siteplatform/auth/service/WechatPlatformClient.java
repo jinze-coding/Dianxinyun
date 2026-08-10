@@ -3,6 +3,7 @@ package com.example.siteplatform.auth.service;
 import com.example.siteplatform.common.BusinessException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.MediaType;
@@ -11,6 +12,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
 import java.nio.charset.StandardCharsets;
 import java.net.URI;
@@ -18,11 +20,16 @@ import java.security.MessageDigest;
 import java.util.Map;
 import java.util.Base64;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.Arrays;
+import java.util.function.Supplier;
 
 @Component
 public class WechatPlatformClient {
+
+    private static final String STABLE_TOKEN_ENDPOINT = "https://api.weixin.qq.com/cgi-bin/stable_token";
+    private static final Set<Integer> INVALID_ACCESS_TOKEN_CODES = Set.of(40001, 40014, 42001);
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
@@ -33,6 +40,7 @@ public class WechatPlatformClient {
     private final boolean mockEnabled;
     private final boolean production;
 
+    @Autowired
     public WechatPlatformClient(ObjectMapper objectMapper, RedisTemplate<String, Object> redisTemplate,
                                 @Value("${wechat.mini-program.app-id:touristappid}") String appId,
                                 @Value("${wechat.mini-program.app-secret:}") String appSecret,
@@ -43,6 +51,14 @@ public class WechatPlatformClient {
                                 @Value("${wechat.mini-program.connect-timeout-millis:5000}") int connectTimeout,
                                 @Value("${wechat.mini-program.read-timeout-millis:8000}") int readTimeout,
                                 Environment environment) {
+        this(objectMapper, redisTemplate, appId, appSecret, mockEnabled, production,
+                legalDomain, publicFallbackUrl, environment, restClient(connectTimeout, readTimeout));
+    }
+
+    WechatPlatformClient(ObjectMapper objectMapper, RedisTemplate<String, Object> redisTemplate,
+                         String appId, String appSecret, boolean mockEnabled, boolean production,
+                         String legalDomain, String publicFallbackUrl, Environment environment,
+                         RestClient restClient) {
         this.objectMapper = objectMapper;
         this.redisTemplate = redisTemplate;
         this.appId = appId;
@@ -65,10 +81,14 @@ public class WechatPlatformClient {
             throw new IllegalStateException(
                     "生产环境必须配置正式微信 AppID/AppSecret、合法 HTTPS 域名和 HTTPS 扫码回跳地址，并关闭 mock");
         }
+        this.restClient = restClient;
+    }
+
+    private static RestClient restClient(int connectTimeout, int readTimeout) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(connectTimeout);
         requestFactory.setReadTimeout(readTimeout);
-        this.restClient = RestClient.builder().requestFactory(requestFactory).build();
+        return RestClient.builder().requestFactory(requestFactory).build();
     }
 
     public WechatIdentity login(String code) {
@@ -76,10 +96,10 @@ public class WechatPlatformClient {
         if (developmentMock()) {
             return new WechatIdentity(appId, "mock_" + digest(code).substring(0, 24), null);
         }
-        String body = restClient.get()
+        String body = callWechat("微信登录服务暂时不可用", () -> restClient.get()
                 .uri("https://api.weixin.qq.com/sns/jscode2session?appid={appid}&secret={secret}&js_code={code}&grant_type=authorization_code",
                         appId, appSecret, code)
-                .retrieve().body(String.class);
+                .retrieve().body(String.class));
         JsonNode json = read(body);
         ensureSuccess(json, "微信登录失败");
         if (!json.hasNonNull("openid")) throw new BusinessException("微信登录未返回 openid");
@@ -96,12 +116,11 @@ public class WechatPlatformClient {
             return "1" + String.format(Locale.ROOT, "%010d", suffix);
         }
         if (!StringUtils.hasText(phoneCode)) throw new BusinessException("手机号授权 code 不能为空");
-        String body = restClient.post()
-                .uri("https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token={token}", accessToken())
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(jsonBody(Map.of("code", phoneCode)))
-                .retrieve().body(String.class);
-        JsonNode json = read(body);
+        JsonNode json = phoneNumberResponse(phoneCode, accessToken(false));
+        if (invalidAccessToken(json)) {
+            evictAccessToken();
+            json = phoneNumberResponse(phoneCode, accessToken(true));
+        }
         ensureSuccess(json, "获取微信手机号失败");
         String phone = json.path("phone_info").path("phoneNumber").asText();
         if (!StringUtils.hasText(phone)) throw new BusinessException("微信未返回手机号");
@@ -123,39 +142,101 @@ public class WechatPlatformClient {
 
     public String generateUnlimitedCode(String scene, String page, String envVersion) {
         if (!officialCodeEnabled()) return null;
-        byte[] bytes = restClient.post()
-                .uri("https://api.weixin.qq.com/wxa/getwxacodeunlimit?access_token={token}", accessToken())
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(jsonBody(Map.of(
-                        "scene", scene,
-                        "page", page,
-                        "env_version", StringUtils.hasText(envVersion) ? envVersion : "release",
-                        "check_path", false,
-                        "width", 430)))
-                .retrieve().body(byte[].class);
-        if (bytes == null || bytes.length == 0) throw new BusinessException("微信小程序码生成失败：返回内容为空");
-        if (bytes[0] == '{') {
-            JsonNode json = read(new String(bytes, StandardCharsets.UTF_8));
-            ensureSuccess(json, "微信小程序码生成失败");
+        Map<String, ?> request = Map.of(
+                "scene", scene,
+                "page", page,
+                "env_version", StringUtils.hasText(envVersion) ? envVersion : "release",
+                "check_path", false,
+                "width", 430);
+        byte[] bytes = unlimitedCodeResponse(request, accessToken(false));
+        JsonNode error = responseError(bytes);
+        if (invalidAccessToken(error)) {
+            evictAccessToken();
+            bytes = unlimitedCodeResponse(request, accessToken(true));
+            error = responseError(bytes);
         }
-        return "data:image/png;base64," + Base64.getEncoder().encodeToString(bytes);
+        if (bytes == null || bytes.length == 0) throw new BusinessException("微信小程序码生成失败：返回内容为空");
+        if (error != null) ensureSuccess(error, "微信小程序码生成失败");
+        String imageMediaType = imageMediaType(bytes);
+        if (imageMediaType == null) throw new BusinessException("微信小程序码生成失败：返回内容不是有效图片");
+        return "data:" + imageMediaType + ";base64," + Base64.getEncoder().encodeToString(bytes);
     }
 
-    private String accessToken() {
-        String key = "wechat:access-token:" + appId;
-        Object cached = redisTemplate.opsForValue().get(key);
-        if (cached != null && StringUtils.hasText(String.valueOf(cached))) return String.valueOf(cached);
-        String body = restClient.get()
-                .uri("https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={appid}&secret={secret}", appId, appSecret)
-                .retrieve().body(String.class);
+    private JsonNode phoneNumberResponse(String phoneCode, String token) {
+        String body = callWechat("微信手机号服务暂时不可用", () -> restClient.post()
+                .uri("https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token={token}", token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(jsonBody(Map.of("code", phoneCode)))
+                .retrieve().body(String.class));
+        return read(body);
+    }
+
+    private byte[] unlimitedCodeResponse(Map<String, ?> request, String token) {
+        return callWechat("微信小程序码服务暂时不可用", () -> restClient.post()
+                .uri("https://api.weixin.qq.com/wxa/getwxacodeunlimit?access_token={token}", token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(jsonBody(request))
+                .retrieve().body(byte[].class));
+    }
+
+    private JsonNode responseError(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return null;
+        int index = 0;
+        while (index < bytes.length && Character.isWhitespace(bytes[index])) index++;
+        return index < bytes.length && bytes[index] == '{'
+                ? read(new String(bytes, StandardCharsets.UTF_8)) : null;
+    }
+
+    private String imageMediaType(byte[] bytes) {
+        if (bytes.length >= 8
+                && (bytes[0] & 0xff) == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4e && bytes[3] == 0x47
+                && bytes[4] == 0x0d && bytes[5] == 0x0a && bytes[6] == 0x1a && bytes[7] == 0x0a) {
+            return "image/png";
+        }
+        if (bytes.length >= 3
+                && (bytes[0] & 0xff) == 0xff && (bytes[1] & 0xff) == 0xd8 && (bytes[2] & 0xff) == 0xff) {
+            return "image/jpeg";
+        }
+        return null;
+    }
+
+    private String accessToken(boolean forceRefresh) {
+        String key = accessTokenCacheKey();
+        if (!forceRefresh) {
+            Object cached = redisTemplate.opsForValue().get(key);
+            if (cached != null && StringUtils.hasText(String.valueOf(cached))) return String.valueOf(cached);
+        }
+        String body = callWechat("微信凭证服务暂时不可用", () -> restClient.post()
+                .uri(STABLE_TOKEN_ENDPOINT)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(jsonBody(Map.of(
+                        "grant_type", "client_credential",
+                        "appid", appId,
+                        "secret", appSecret,
+                        "force_refresh", forceRefresh)))
+                .retrieve().body(String.class));
         JsonNode json = read(body);
         ensureSuccess(json, "获取微信 access_token 失败");
         String token = json.path("access_token").asText();
+        if (!StringUtils.hasText(token)) throw new BusinessException("微信未返回 access_token");
         redisTemplate.opsForValue().set(key, token, Math.max(json.path("expires_in").asLong(7200) - 300, 60), TimeUnit.SECONDS);
         return token;
     }
 
+    private boolean invalidAccessToken(JsonNode json) {
+        return json != null && INVALID_ACCESS_TOKEN_CODES.contains(json.path("errcode").asInt());
+    }
+
+    private void evictAccessToken() {
+        redisTemplate.delete(accessTokenCacheKey());
+    }
+
+    private String accessTokenCacheKey() {
+        return "wechat:stable-access-token:" + appId;
+    }
+
     private JsonNode read(String body) {
+        if (!StringUtils.hasText(body)) throw new BusinessException("微信接口响应解析失败");
         try { return objectMapper.readTree(body); }
         catch (Exception e) { throw new BusinessException("微信接口响应解析失败"); }
     }
@@ -166,8 +247,19 @@ public class WechatPlatformClient {
     }
 
     private void ensureSuccess(JsonNode json, String message) {
+        if (json == null) throw new BusinessException("微信接口响应解析失败");
         if (json.has("errcode") && json.path("errcode").asInt() != 0) {
-            throw new BusinessException(message + "：" + json.path("errmsg").asText());
+            throw new BusinessException(message + "（微信错误码 " + json.path("errcode").asInt() + "）");
+        }
+    }
+
+    private <T> T callWechat(String safeMessage, Supplier<T> call) {
+        try {
+            return call.get();
+        } catch (RestClientException exception) {
+            // RestClient exception messages can contain the fully expanded URI, including
+            // AppSecret, one-time codes or access tokens. Never propagate or attach the cause.
+            throw BusinessException.of(502, safeMessage);
         }
     }
 

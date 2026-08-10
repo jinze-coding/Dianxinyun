@@ -16,6 +16,7 @@ import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
 import com.example.siteplatform.project.service.ProjectPermissionService;
 import com.example.siteplatform.siteaccess.dto.PublicSiteVisitSubmitRequest;
+import com.example.siteplatform.siteaccess.dto.PublicVisitorSessionCreateRequest;
 import com.example.siteplatform.siteaccess.dto.SiteVisitInvitationCreateRequest;
 import com.example.siteplatform.siteaccess.dto.SiteVisitInvitationUpdateRequest;
 import com.example.siteplatform.siteaccess.dto.SiteVisitPersonRequest;
@@ -26,6 +27,8 @@ import com.example.siteplatform.siteaccess.mapper.SiteVisitAuditLogMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteVisitInvitationMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteVisitPersonMapper;
 import com.example.siteplatform.siteaccess.vo.PublicSiteVisitInvitationVO;
+import com.example.siteplatform.siteaccess.vo.PublicVisitorSessionVO;
+import com.example.siteplatform.siteaccess.vo.SiteVisitorProfileVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitAuditVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitHostOptionVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitInvitationVO;
@@ -97,6 +100,8 @@ public class SiteAccessService {
     private final ProjectPermissionService projectPermissionService;
     private final VisitorDataCryptoService cryptoService;
     private final WechatPlatformClient wechatPlatformClient;
+    private final VisitorSessionService visitorSessionService;
+    private final VisitorProfileService visitorProfileService;
     private final OperationLogMapper operationLogMapper;
     private final ObjectMapper objectMapper;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -113,6 +118,8 @@ public class SiteAccessService {
             ProjectPermissionService projectPermissionService,
             VisitorDataCryptoService cryptoService,
             WechatPlatformClient wechatPlatformClient,
+            VisitorSessionService visitorSessionService,
+            VisitorProfileService visitorProfileService,
             OperationLogMapper operationLogMapper,
             ObjectMapper objectMapper,
             @Value("${wechat.mini-program.visitor-page:pages/public/visitor-invite}") String miniProgramPage,
@@ -126,6 +133,8 @@ public class SiteAccessService {
         this.projectPermissionService = projectPermissionService;
         this.cryptoService = cryptoService;
         this.wechatPlatformClient = wechatPlatformClient;
+        this.visitorSessionService = visitorSessionService;
+        this.visitorProfileService = visitorProfileService;
         this.operationLogMapper = operationLogMapper;
         this.objectMapper = objectMapper;
         this.miniProgramPage = miniProgramPage;
@@ -308,8 +317,51 @@ public class SiteAccessService {
         return vo;
     }
 
+    public PublicVisitorSessionVO createVisitorSession(PublicVisitorSessionCreateRequest request) {
+        if (request == null) throw new BusinessException("外访临时会话参数不能为空");
+        SiteVisitInvitation invitation = findByToken(request.getInviteToken(), false);
+        if (!STATUS_PENDING.equals(effectiveStatus(invitation))) {
+            throw stateConflict("当前邀请不能获取常用资料");
+        }
+        return visitorSessionService.issue(request.getWechatCode(), invitation);
+    }
+
+    public List<SiteVisitorProfileVO> publicVisitorProfiles(String visitorSessionToken) {
+        VisitorSessionService.VisitorSessionContext context = requirePendingVisitorSession(visitorSessionToken);
+        return visitorProfileService.publicList(context);
+    }
+
+    public SiteVisitorProfileVO publicVisitorProfile(String visitorSessionToken, String profileCode) {
+        VisitorSessionService.VisitorSessionContext context = requirePendingVisitorSession(visitorSessionToken);
+        return visitorProfileService.publicDetail(context, profileCode);
+    }
+
+    public void disablePublicVisitorProfile(String visitorSessionToken, String profileCode) {
+        VisitorSessionService.VisitorSessionContext context = requirePendingVisitorSession(visitorSessionToken);
+        visitorProfileService.publicDisable(context, profileCode);
+    }
+
+    public PageResult<SiteVisitorProfileVO> visitorProfiles(Long projectId, String status, String keyword,
+                                                            Integer pageNo, Integer pageSize, SysUser currentUser) {
+        return visitorProfileService.internalPage(projectId, status, keyword, pageNo, pageSize, currentUser);
+    }
+
+    public SiteVisitorProfileVO visitorProfileDetail(Long id, SysUser currentUser) {
+        return visitorProfileService.internalDetail(id, currentUser);
+    }
+
+    public SiteVisitorProfileVO disableVisitorProfile(Long id, SysUser currentUser) {
+        return visitorProfileService.internalDisable(id, currentUser);
+    }
+
     @Transactional
     public PublicSiteVisitInvitationVO submitPublic(PublicSiteVisitSubmitRequest request) {
+        return submitPublic(request, null);
+    }
+
+    @Transactional
+    public PublicSiteVisitInvitationVO submitPublic(PublicSiteVisitSubmitRequest request,
+                                                     String visitorSessionToken) {
         if (request == null) throw new BusinessException("外访登记参数不能为空");
         String normalizedToken = normalizeToken(request.getInviteToken());
         SiteVisitInvitation invitation = invitationMapper.selectForUpdateByTokenHash(cryptoService.digest(normalizedToken));
@@ -324,8 +376,17 @@ public class SiteAccessService {
                 request.getVehiclePlate(), request.getVisitorRemark());
         if (!Boolean.TRUE.equals(request.getPrivacyAgreed())) throw new BusinessException("请阅读并同意隐私告知");
         Map<String, Object> before = snapshot(invitation);
+        VisitorSessionService.VisitorSessionContext context = null;
+        if (requiresVisitorProfile(request)) {
+            context = visitorSessionService.require(visitorSessionToken, invitation);
+        }
+        Long sourceProfileId = visitorProfileService.applyOnSubmission(
+                context, request.getProfileAction(), request.getProfileCode(), request.getProfileName(),
+                request.getProfileRetentionAgreed(), request.getProfileVersion(),
+                toProfileSubmission(submission));
         applySubmissionFields(invitation, submission, true);
         replacePersons(invitation, submission);
+        invitation.setSourceProfileId(sourceProfileId);
         invitation.setStatus(STATUS_SUBMITTED);
         invitation.setSubmittedTime(LocalDateTime.now());
         invitation.setPrivacyAgreedTime(LocalDateTime.now());
@@ -436,7 +497,7 @@ public class SiteAccessService {
             person.setPersonType(value.personType());
             person.setPersonName(value.personName());
             person.setIdCardEncrypted(cryptoService.encrypt(value.idCard()));
-            person.setIdCardHash(cryptoService.digest(value.idCard()));
+            person.setIdCardHash(cryptoService.idCardFingerprint(value.idCard()));
             person.setSortOrder(order++);
             person.setDeleted(0);
             person.setCreateTime(LocalDateTime.now());
@@ -521,6 +582,33 @@ public class SiteAccessService {
         return invitation;
     }
 
+    private VisitorSessionService.VisitorSessionContext requirePendingVisitorSession(String token) {
+        VisitorSessionService.VisitorSessionContext context = visitorSessionService.require(token);
+        SiteVisitInvitation invitation = invitationMapper.selectById(context.invitationId());
+        if (invitation == null || !Objects.equals(invitation.getProjectId(), context.projectId())) {
+            throw BusinessException.of(401, "外访临时会话无效，请重新打开邀请");
+        }
+        if (!STATUS_PENDING.equals(effectiveStatus(invitation))) {
+            throw stateConflict("当前邀请不能继续管理常用资料");
+        }
+        return context;
+    }
+
+    private boolean requiresVisitorProfile(PublicSiteVisitSubmitRequest request) {
+        String action = trimToNull(request.getProfileAction());
+        return StringUtils.hasText(request.getProfileCode())
+                || (action != null && !VisitorProfileService.ACTION_NONE.equalsIgnoreCase(action));
+    }
+
+    private VisitorProfileService.SubmissionData toProfileSubmission(NormalizedSubmission submission) {
+        return new VisitorProfileService.SubmissionData(
+                submission.visitorCompany(), submission.contactName(), submission.contactPhone(),
+                submission.travelMode(), submission.vehiclePlate(), submission.people().stream()
+                .map(person -> new VisitorProfileService.PersonData(
+                        person.personType(), person.personName(), person.idCard()))
+                .toList());
+    }
+
     private String normalizeToken(String rawToken) {
         String token = requiredText(rawToken, 64, "邀请令牌");
         if (token.startsWith("V:")) token = token.substring(2);
@@ -555,6 +643,8 @@ public class SiteAccessService {
         vo.setTravelMode(invitation.getTravelMode());
         vo.setVehiclePlate(invitation.getVehiclePlate());
         vo.setVisitorRemark(invitation.getVisitorRemark());
+        vo.setSourceProfileId(invitation.getSourceProfileId());
+        vo.setSourceProfileName(visitorProfileService.sourceName(invitation.getSourceProfileId()));
         vo.setSubmittedTime(invitation.getSubmittedTime());
         vo.setVoidReason(invitation.getVoidReason());
         vo.setCreatedById(invitation.getCreatedById());
@@ -621,6 +711,7 @@ public class SiteAccessService {
         result.put("travelMode", invitation.getTravelMode());
         result.put("vehiclePlate", invitation.getVehiclePlate());
         result.put("visitorRemark", invitation.getVisitorRemark());
+        result.put("sourceProfileId", invitation.getSourceProfileId());
         result.put("visitors", persons(invitation.getId()).stream().map(person -> Map.of(
                 "personType", person.getPersonType(),
                 "personName", person.getPersonName(),

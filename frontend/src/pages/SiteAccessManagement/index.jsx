@@ -6,6 +6,9 @@ import {
   getSiteVisitInvitation,
   getSiteVisitInvitations,
   getSiteVisitMiniCode,
+  getSiteVisitorProfile,
+  getSiteVisitorProfiles,
+  disableSiteVisitorProfile,
   updateSiteVisitInvitation,
   voidSiteVisitInvitation,
 } from '../../services/siteAccess';
@@ -17,9 +20,14 @@ import {
   validateSiteVisitDateRange,
 } from '../../utils/siteAccessDates';
 import { filterSiteVisitHosts } from '../../utils/siteAccessHosts';
+import {
+  createSiteAccessProfileRequestGuard,
+  siteAccessProfileBelongsToProject,
+} from '../../utils/siteAccessProfileRequests';
 import './index.css';
 import './siteAccessExport.css';
 import './siteAccessHostPicker.css';
+import './siteAccessProfiles.css';
 
 const PAGE_SIZE = 20;
 const STATUS_LABELS = {
@@ -246,6 +254,14 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
   const [qrCode, setQrCode] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportFilters, setExportFilters] = useState(null);
+  const [profilePanel, setProfilePanel] = useState(null);
+  const [profileDetail, setProfileDetail] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const activeProjectIdRef = useRef(projectId);
+  const profileListRequestGuardRef = useRef(createSiteAccessProfileRequestGuard());
+  const profileDetailRequestGuardRef = useRef(createSiteAccessProfileRequestGuard());
+  const profileMutationRequestGuardRef = useRef(createSiteAccessProfileRequestGuard());
+  activeProjectIdRef.current = projectId;
 
   const canManage = isPlatformAdmin(currentUser)
     || hasProjectPermission(currentUser, projectId, 'site_access.manage');
@@ -293,6 +309,9 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
   }, [keyword, pageNo, projectId, range.endDate, range.startDate, status]);
 
   useEffect(() => {
+    profileListRequestGuardRef.current.invalidate();
+    profileDetailRequestGuardRef.current.invalidate();
+    profileMutationRequestGuardRef.current.invalidate();
     setPageNo(1);
     setKeyword('');
     setKeywordInput('');
@@ -300,6 +319,9 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
     setEditing(null);
     setQrCode(null);
     setExportFilters(null);
+    setProfilePanel(null);
+    setProfileDetail(null);
+    setProfileLoading(false);
   }, [projectId]);
 
   useEffect(() => {
@@ -509,6 +531,91 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
     }
   };
 
+  const loadProfiles = async (targetPage = 1, filters = profilePanel || { status: '', keyword: '' }) => {
+    const requestProjectId = projectId;
+    const requestTicket = profileListRequestGuardRef.current.begin(requestProjectId);
+    setProfileLoading(true);
+    setError('');
+    try {
+      const response = await getSiteVisitorProfiles({
+        projectId: requestProjectId,
+        status: filters.status || undefined,
+        keyword: filters.keyword?.trim() || undefined,
+        pageNo: targetPage,
+        pageSize: PAGE_SIZE,
+      });
+      const data = responseData(response, '常用资料加载失败') || { records: [], total: 0 };
+      if (!profileListRequestGuardRef.current.isCurrent(requestTicket, activeProjectIdRef.current)) return;
+      setProfilePanel({ ...filters, ...data, pageNo: targetPage, projectId: requestProjectId });
+    } catch (profileError) {
+      if (profileListRequestGuardRef.current.isCurrent(requestTicket, activeProjectIdRef.current)) {
+        setError(profileError.message || '常用资料加载失败');
+      }
+    } finally {
+      if (profileListRequestGuardRef.current.isCurrent(requestTicket, activeProjectIdRef.current)) {
+        setProfileLoading(false);
+      }
+    }
+  };
+
+  const openProfiles = () => loadProfiles(1, { status: '', keyword: '' });
+
+  const closeProfiles = () => {
+    profileListRequestGuardRef.current.invalidate();
+    profileDetailRequestGuardRef.current.invalidate();
+    profileMutationRequestGuardRef.current.invalidate();
+    setProfilePanel(null);
+    setProfileDetail(null);
+    setProfileLoading(false);
+  };
+
+  const closeProfileDetail = () => {
+    profileDetailRequestGuardRef.current.invalidate();
+    setProfileDetail(null);
+  };
+
+  const openProfileDetail = async (profile) => {
+    const requestProjectId = projectId;
+    if (!siteAccessProfileBelongsToProject(profile, requestProjectId)) {
+      setError('常用资料所属项目已变化，请重新打开常用资料');
+      return;
+    }
+    const requestTicket = profileDetailRequestGuardRef.current.begin(requestProjectId);
+    setError('');
+    try {
+      const response = await getSiteVisitorProfile(profile.id);
+      if (!profileDetailRequestGuardRef.current.isCurrent(requestTicket, activeProjectIdRef.current)) return;
+      setProfileDetail(responseData(response, '常用资料详情加载失败'));
+    } catch (profileError) {
+      if (profileDetailRequestGuardRef.current.isCurrent(requestTicket, activeProjectIdRef.current)) {
+        setError(profileError.message || '常用资料详情加载失败');
+      }
+    }
+  };
+
+  const disableProfile = async (profile) => {
+    const requestProjectId = projectId;
+    if (!siteAccessProfileBelongsToProject(profile, requestProjectId)) {
+      setError('常用资料所属项目已变化，未执行停用操作');
+      return;
+    }
+    if (!window.confirm(`确认停用常用资料“${profile.profileName}”吗？历史邀请不会受影响。`)) return;
+    const requestTicket = profileMutationRequestGuardRef.current.begin(requestProjectId);
+    setError('');
+    try {
+      responseData(await disableSiteVisitorProfile(profile.id), '常用资料停用失败');
+      if (!profileMutationRequestGuardRef.current.isCurrent(requestTicket, activeProjectIdRef.current)) return;
+      setNotice('常用资料已停用，历史来访记录未改变');
+      profileDetailRequestGuardRef.current.invalidate();
+      setProfileDetail((current) => current?.id === profile.id ? null : current);
+      await loadProfiles(profilePanel?.pageNo || 1);
+    } catch (profileError) {
+      if (profileMutationRequestGuardRef.current.isCurrent(requestTicket, activeProjectIdRef.current)) {
+        setError(profileError.message || '常用资料停用失败');
+      }
+    }
+  };
+
   const records = pageData.records || pageData.items || [];
   const totalPages = Math.max(1, Math.ceil(Number(pageData.total || 0) / PAGE_SIZE));
 
@@ -520,6 +627,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
           <p>创建单次外访邀请，通过免登录小程序提前收集人员和车辆信息。</p>
         </div>
         <div className="site-access-head-actions">
+          <button className="secondary" type="button" onClick={openProfiles}>常用资料</button>
           {canExport && <button className="secondary" type="button" disabled={exporting} onClick={openExport}>{exporting ? '导出中...' : '导出外访人员'}</button>}
           {canManage && <button className="primary" type="button" onClick={openCreate}>新建邀请</button>}
         </div>
@@ -628,6 +736,47 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
         <div className="site-access-modal-actions"><button type="button" disabled={exporting} onClick={() => setExportFilters(null)}>取消</button><button className="primary" type="button" disabled={exporting || Boolean(exportRangeError)} onClick={exportVisitors}>{exporting ? '正在导出...' : '导出 Excel'}</button></div>
       </Modal>}
 
+      {siteAccessProfileBelongsToProject(profilePanel, projectId) && <Modal title="外访人员常用资料" onClose={closeProfiles} width={980}>
+        <div className="site-access-profile-toolbar">
+          <select value={profilePanel.status || ''} onChange={(event) => loadProfiles(1, { ...profilePanel, status: event.target.value })}>
+            <option value="">全部状态</option><option value="ACTIVE">使用中</option><option value="DISABLED">已停用</option>
+          </select>
+          <input value={profilePanel.keyword || ''} onChange={(event) => setProfilePanel({ ...profilePanel, keyword: event.target.value })} onKeyDown={(event) => event.key === 'Enter' && loadProfiles(1)} placeholder="资料名称、单位、联系人、车牌" />
+          <button type="button" onClick={() => loadProfiles(1)}>查询</button>
+          <span>资料仅在同一项目、同一微信身份下复用；历史邀请保持独立快照。</span>
+        </div>
+        <div className="site-access-profile-table">
+          <table><thead><tr><th>资料名称</th><th>单位 / 联系人</th><th>人数</th><th>出行</th><th>最近使用</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody>
+              {!profileLoading && (profilePanel.records || []).map((profile) => <tr key={profile.id}>
+                <td><button className="link" type="button" onClick={() => openProfileDetail(profile)}>{profile.profileName}</button><small>{profile.profileCode}</small></td>
+                <td>{profile.visitorCompany}<small>{profile.contactName} · {profile.maskedContactPhone}</small></td>
+                <td>{profile.visitorCount}</td>
+                <td>{profile.travelMode === 'DRIVING' ? `驾车 · ${profile.vehiclePlate || '-'}` : '非驾车'}</td>
+                <td>{formatDateTime(profile.lastUsedTime)}</td>
+                <td><span className={`site-access-profile-status ${String(profile.status).toLowerCase()}`}>{profile.status === 'ACTIVE' ? '使用中' : '已停用'}</span></td>
+                <td><div className="site-access-row-actions"><button type="button" onClick={() => openProfileDetail(profile)}>详情</button>{canManage && profile.status === 'ACTIVE' && <button className="danger" type="button" onClick={() => disableProfile(profile)}>停用</button>}</div></td>
+              </tr>)}
+              {!profileLoading && !(profilePanel.records || []).length && <tr><td colSpan="7" className="site-access-empty">当前项目暂无匹配的常用资料</td></tr>}
+              {profileLoading && <tr><td colSpan="7" className="site-access-empty">正在加载...</td></tr>}
+            </tbody></table>
+        </div>
+        <div className="site-access-pagination">
+          <span>共 {profilePanel.total || 0} 条 · 第 {profilePanel.pageNo || 1}/{Math.max(1, Math.ceil(Number(profilePanel.total || 0) / PAGE_SIZE))} 页</span>
+          <button type="button" disabled={(profilePanel.pageNo || 1) <= 1 || profileLoading} onClick={() => loadProfiles((profilePanel.pageNo || 1) - 1)}>上一页</button>
+          <button type="button" disabled={(profilePanel.pageNo || 1) >= Math.max(1, Math.ceil(Number(profilePanel.total || 0) / PAGE_SIZE)) || profileLoading} onClick={() => loadProfiles((profilePanel.pageNo || 1) + 1)}>下一页</button>
+        </div>
+      </Modal>}
+
+      {siteAccessProfileBelongsToProject(profileDetail, projectId) && <Modal title={`常用资料 · ${profileDetail.profileName}`} onClose={closeProfileDetail} width={720}>
+        <div className="site-access-detail-grid">
+          {[['状态', profileDetail.status === 'ACTIVE' ? '使用中' : '已停用'], ['外访单位', profileDetail.visitorCompany], ['主联系人', `${profileDetail.contactName} ${profileDetail.contactPhone || ''}`], ['出行方式', profileDetail.travelMode === 'DRIVING' ? `驾车 · ${profileDetail.vehiclePlate || '-'}` : '非驾车'], ['最近使用', formatDateTime(profileDetail.lastUsedTime)], ['更新时间', formatDateTime(profileDetail.updateTime)]].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}
+        </div>
+        <h3 className="site-access-profile-people-title">保存的入场人员（{profileDetail.people?.length || 0}）</h3>
+        <div className="site-access-person-list">{(profileDetail.people || []).map((person, index) => <div key={`${person.personType}-${index}`}><span>{person.personType === 'CONTACT' ? '主联系人' : '同行人员'}</span><b>{person.personName}</b><code>{person.idCard}</code></div>)}</div>
+        <div className="site-access-modal-actions"><button type="button" onClick={closeProfileDetail}>关闭</button>{canManage && profileDetail.status === 'ACTIVE' && <button className="danger" type="button" onClick={() => disableProfile(profileDetail)}>停用资料</button>}</div>
+      </Modal>}
+
       {editing && <Modal title={editing.mode === 'CREATE' ? '新建外访邀请' : `修改 ${editing.value.inviteNo}`} onClose={() => setEditing(null)}>
         <div className="site-access-form-grid">
           <FormField label="计划到场" required><input type="datetime-local" value={form.visitStartTime} onChange={(event) => setForm({ ...form, visitStartTime: event.target.value })} /></FormField>
@@ -662,7 +811,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
       {detail && <div className="site-access-drawer-mask" onMouseDown={() => setDetail(null)}><aside className="site-access-drawer" onMouseDown={(event) => event.stopPropagation()}>
         <div className="site-access-modal-head"><div><strong>{detail.inviteNo}</strong><span className={`site-access-status ${String(detail.status || '').toLowerCase()}`}>{STATUS_LABELS[detail.status] || detail.status}</span></div><button type="button" onClick={() => setDetail(null)}>×</button></div>
         <div className="site-access-detail-grid">
-          {[['项目', detail.projectName], ['计划时间', `${formatDateTime(detail.visitStartTime)} 至 ${formatDateTime(detail.visitEndTime)}`], ['来访事由', detail.purpose], ['到访地点', detail.visitLocation], ['接待人', `${detail.hostName || '-'} ${detail.hostPhone || ''}`], ['外访单位', detail.visitorCompany || '-'], ['联系人', `${detail.contactName || '-'} ${detail.contactPhone || ''}`], ['出行方式', detail.travelMode === 'DRIVING' ? `驾车 · ${detail.vehiclePlate || '-'}` : detail.travelMode ? '非驾车' : '-'], ['内部备注', detail.internalRemark || '-'], ['外访备注', detail.visitorRemark || '-']].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}
+          {[['项目', detail.projectName], ['计划时间', `${formatDateTime(detail.visitStartTime)} 至 ${formatDateTime(detail.visitEndTime)}`], ['来访事由', detail.purpose], ['到访地点', detail.visitLocation], ['接待人', `${detail.hostName || '-'} ${detail.hostPhone || ''}`], ['外访单位', detail.visitorCompany || '-'], ['联系人', `${detail.contactName || '-'} ${detail.contactPhone || ''}`], ['出行方式', detail.travelMode === 'DRIVING' ? `驾车 · ${detail.vehiclePlate || '-'}` : detail.travelMode ? '非驾车' : '-'], ['资料来源', detail.sourceProfileId ? `常用资料 · ${detail.sourceProfileName || detail.sourceProfileId}` : '本次手工填写'], ['内部备注', detail.internalRemark || '-'], ['外访备注', detail.visitorRemark || '-']].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}
         </div>
         <h3>入场人员（{detail.visitors?.length || 0}）</h3>
         <div className="site-access-person-list">{(detail.visitors || []).map((person) => <div key={person.id}><span>{person.personType === 'CONTACT' ? '主联系人' : '同行人员'}</span><b>{person.personName}</b><code>{person.idCard}</code></div>)}{!detail.visitors?.length && <p>等待访客填写</p>}</div>

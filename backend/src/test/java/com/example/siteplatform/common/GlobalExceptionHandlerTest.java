@@ -65,6 +65,14 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void missingRequiredRequestParameterReturnsHttp400() throws Exception {
+        mockMvc.perform(get("/test/numeric-parameter"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("缺少必要请求参数：businessId"));
+    }
+
+    @Test
     void oversizedMultipartReturnsHttp413() throws Exception {
         mockMvc.perform(get("/test/upload-too-large"))
                 .andExpect(status().isPayloadTooLarge())

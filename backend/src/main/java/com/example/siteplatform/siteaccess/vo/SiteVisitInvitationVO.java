@@ -28,6 +28,8 @@ public class SiteVisitInvitationVO {
     private String travelMode;
     private String vehiclePlate;
     private String visitorRemark;
+    private Long sourceProfileId;
+    private String sourceProfileName;
     private LocalDateTime submittedTime;
     private String voidReason;
     private Long createdById;

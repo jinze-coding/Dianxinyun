@@ -2,6 +2,11 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 const proxyTarget = process.env.VITE_PROXY_TARGET || 'http://localhost:8080';
+const devHost = process.env.VITE_DEV_HOST || '127.0.0.1';
+const allowedHosts = (process.env.VITE_ALLOWED_HOSTS || '')
+  .split(',')
+  .map((host) => host.trim())
+  .filter(Boolean);
 
 export default defineConfig({
   plugins: [react()],
@@ -11,11 +16,10 @@ export default defineConfig({
     },
   },
   server: {
+    host: devHost,
     port: 3002,
     open: false,
-    allowedHosts: [
-      'trained-channels-alternate-petersburg.trycloudflare.com',
-    ],
+    allowedHosts,
     proxy: {
       '/api': {
         target: proxyTarget,

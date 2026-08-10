@@ -3,6 +3,8 @@ package com.example.siteplatform.siteaccess.service;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 
+import java.util.Base64;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -22,14 +24,21 @@ class VisitorDataCryptoServiceTest {
         assertThat(crypto.decrypt(first)).isEqualTo(plaintext);
         assertThat(crypto.decrypt(second)).isEqualTo(plaintext);
         assertThat(crypto.digest(plaintext)).hasSize(64).isEqualTo(crypto.digest(plaintext));
+        assertThat(crypto.fingerprint(plaintext)).hasSize(64).isEqualTo(crypto.fingerprint(plaintext));
+        assertThat(crypto.idCardFingerprint(plaintext))
+                .hasSize(64)
+                .isEqualTo(crypto.idCardFingerprint(plaintext))
+                .isNotEqualTo(crypto.digest(plaintext))
+                .isNotEqualTo(crypto.fingerprint("another-purpose", plaintext));
     }
 
     @Test
     void rejectsTamperedCiphertextWithoutLeakingItsContent() {
         VisitorDataCryptoService crypto = new VisitorDataCryptoService("", local());
         String ciphertext = crypto.encrypt("synthetic-phone-value");
-        String tampered = ciphertext.substring(0, ciphertext.length() - 1)
-                + (ciphertext.endsWith("A") ? "B" : "A");
+        byte[] envelope = Base64.getUrlDecoder().decode(ciphertext.substring("v1:".length()));
+        envelope[envelope.length - 1] ^= 0x01;
+        String tampered = "v1:" + Base64.getUrlEncoder().withoutPadding().encodeToString(envelope);
 
         IllegalStateException exception = assertThrows(IllegalStateException.class,
                 () -> crypto.decrypt(tampered));

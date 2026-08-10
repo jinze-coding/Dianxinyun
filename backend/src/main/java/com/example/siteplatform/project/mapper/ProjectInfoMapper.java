@@ -8,6 +8,6 @@ import org.apache.ibatis.annotations.Select;
 
 @Mapper
 public interface ProjectInfoMapper extends BaseMapper<ProjectInfo> {
-    @Select("SELECT * FROM project_info WHERE id = #{projectId} FOR UPDATE")
+    @Select("SELECT * FROM project_info WHERE id = #{projectId} AND deleted = 0 FOR UPDATE")
     ProjectInfo selectByIdForUpdate(@Param("projectId") Long projectId);
 }

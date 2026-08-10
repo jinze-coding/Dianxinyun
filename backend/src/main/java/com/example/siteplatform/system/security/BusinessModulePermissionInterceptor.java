@@ -104,6 +104,14 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
             }
             if (read) return SystemPermissionCodes.INSPECTION_VIEW;
             if (HttpMethod.POST.matches(method)
+                    && normalizedPath.matches(INSPECTION + "/rectifications/[^/]+/complete")) {
+                return SystemPermissionCodes.INSPECTION_RECTIFY;
+            }
+            if (HttpMethod.POST.matches(method)
+                    && normalizedPath.matches(INSPECTION + "/rectifications/[^/]+/(assign|close|reject)")) {
+                return SystemPermissionCodes.INSPECTION_REVIEW;
+            }
+            if (HttpMethod.POST.matches(method)
                     && (normalizedPath.equals(INSPECTION + "/records")
                     || normalizedPath.matches(INSPECTION + "/records/[^/]+/submit"))) {
                 return SystemPermissionCodes.INSPECTION_SUBMIT;
@@ -153,7 +161,7 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
             else permissionCode = SystemPermissionCodes.QUALITY_MANAGE;
         } else if (normalizedType.startsWith("INSPECTION_")) {
             if (read) permissionCode = SystemPermissionCodes.INSPECTION_VIEW;
-            else if (normalizedType.contains("RECTIFICATION")) permissionCode = SystemPermissionCodes.INSPECTION_MANAGE;
+            else if (normalizedType.contains("RECTIFICATION")) permissionCode = SystemPermissionCodes.INSPECTION_RECTIFY;
             else permissionCode = SystemPermissionCodes.INSPECTION_SUBMIT;
         }
         return permissionCode == null ? null : new SharedFilePermission(permissionCode, projectId);

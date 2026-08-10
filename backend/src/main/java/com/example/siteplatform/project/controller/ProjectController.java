@@ -7,8 +7,11 @@ import com.example.siteplatform.project.dto.MiniProgramProjectVO;
 import com.example.siteplatform.project.dto.MiniProgramWorkspaceOverviewVO;
 import com.example.siteplatform.project.dto.ProjectLocationUpdateRequest;
 import com.example.siteplatform.project.dto.ProjectMapPointVO;
+import com.example.siteplatform.project.dto.ProjectProfileDetailVO;
+import com.example.siteplatform.project.dto.ProjectProfileUpdateRequest;
 import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.service.ProjectService;
+import com.example.siteplatform.project.service.ProjectProfileService;
 import com.example.siteplatform.project.service.MiniProgramWorkspaceService;
 import com.example.siteplatform.system.dto.AdministrativeDeletionExecuteRequest;
 import com.example.siteplatform.system.service.AdministrativeDeletionService;
@@ -28,6 +31,9 @@ public class ProjectController {
 
     @Autowired
     private ProjectService projectService;
+
+    @Autowired
+    private ProjectProfileService projectProfileService;
 
     @Autowired
     private AuthService authService;
@@ -84,6 +90,25 @@ public class ProjectController {
         SysUser currentUser = authService.getCurrentUser(token);
         ProjectInfo project = projectService.getProjectById(projectId, currentUser);
         return Result.success(project);
+    }
+
+    @Operation(summary = "获取项目基础信息档案")
+    @GetMapping("/{projectId}/profile")
+    public Result<ProjectProfileDetailVO> getProjectProfile(
+            @PathVariable Long projectId,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(projectProfileService.getProfile(projectId, currentUser));
+    }
+
+    @Operation(summary = "更新项目基础信息档案")
+    @PutMapping("/{projectId}/profile")
+    public Result<ProjectProfileDetailVO> updateProjectProfile(
+            @PathVariable Long projectId,
+            @RequestBody ProjectProfileUpdateRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(projectProfileService.updateProfile(projectId, request, currentUser));
     }
 
     @Operation(summary = "获取项目地图点位")

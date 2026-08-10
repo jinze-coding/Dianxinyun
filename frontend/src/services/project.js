@@ -10,6 +10,14 @@ export function getProjectDetail(projectId) {
   return get(`/projects/${projectId}`);
 }
 
+export function getProjectProfile(projectId) {
+  return get(`/projects/${projectId}/profile`);
+}
+
+export function updateProjectProfile(projectId, data) {
+  return put(`/projects/${projectId}/profile`, data);
+}
+
 // 获取项目地图点位
 export function getProjectMapPoints() {
   return get('/projects/map-points');

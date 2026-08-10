@@ -39,6 +39,7 @@ const pendingFiles = ref<PendingFile[]>([]);
 const loading = ref(true);
 const saving = ref(false);
 const ccSheetOpen = ref(false);
+const ccKeyword = ref('');
 const ccSelectionInitialized = ref(false);
 const ccCandidatesReady = ref(false);
 const form = reactive({
@@ -57,6 +58,17 @@ const selectedSeal = computed(() => entry.value?.sealId
   ? { id: entry.value.sealId, sealName: entry.value.sealName || '项目印章' }
   : seals.value.find((item) => item.id === selectedSealId.value));
 const selectedCc = computed(() => ccCandidates.value.filter((item) => selectedCcUserIds.value.includes(item.userId)));
+const filteredCcCandidates = computed(() => {
+  const keyword = ccKeyword.value.trim().toLowerCase();
+  const selected = new Set(selectedCcUserIds.value);
+  return ccCandidates.value
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !keyword || [item.displayName, item.realName, item.username, item.phone]
+      .some((value) => String(value || '').toLowerCase().includes(keyword)))
+    .sort((left, right) => Number(selected.has(right.item.userId)) - Number(selected.has(left.item.userId))
+      || left.index - right.index)
+    .map(({ item }) => item);
+});
 const sourceFiles = computed(() => existingFiles.value.filter((item) => item.fileRole === 'SOURCE'));
 
 onLoad(async (options) => {
@@ -161,6 +173,7 @@ async function openCcSheet() {
     try { await loadCcCandidates(); }
     catch (error) { showToast(error instanceof Error ? error.message : '抄送人配置加载失败'); return; }
   }
+  ccKeyword.value = '';
   ccSheetOpen.value = true;
 }
 
@@ -194,9 +207,30 @@ async function removeExistingFile(file: SealApplicationFile) {
 }
 
 function toggleCc(userId: number) {
+  if (!selectedCcUserIds.value.includes(userId) && selectedCcUserIds.value.length >= 100) {
+    showToast('抄送人最多选择 100 人');
+    return;
+  }
   selectedCcUserIds.value = selectedCcUserIds.value.includes(userId)
     ? selectedCcUserIds.value.filter((id) => id !== userId)
     : [...selectedCcUserIds.value, userId];
+}
+
+function clearCcSelection() {
+  selectedCcUserIds.value = [];
+}
+
+function candidateMeta(item: SealCcCandidate) {
+  const username = String(item.username || '').trim();
+  const phone = String(item.phone || '').trim();
+  const details: string[] = [];
+  if (username && username !== phone) details.push(`账号 ${username}`);
+  if (phone) details.push(phone.replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$2'));
+  return details.join(' · ') || '当前项目有效成员';
+}
+
+function candidateInitial(item: SealCcCandidate) {
+  return String(item.displayName || item.realName || item.username || '人').trim().slice(0, 1);
 }
 
 function validate(submit: boolean) {
@@ -294,7 +328,25 @@ function goBack() { getCurrentPages().length > 1 ? uni.navigateBack() : uni.reLa
       </view>
     </scroll-view>
 
-    <view v-if="ccSheetOpen" class="overlay" @tap="ccSheetOpen = false"><view class="sheet" @tap.stop><view class="sheet-head"><view><text>选择抄送人</text><text>仅显示当前项目有效成员</text></view><button @tap="ccSheetOpen = false">×</button></view><scroll-view class="candidate-list" scroll-y><button v-for="item in ccCandidates" :key="item.userId" :class="{ selected: selectedCcUserIds.includes(item.userId) }" @tap="toggleCc(item.userId)"><text>{{ item.displayName }}</text><text>{{ selectedCcUserIds.includes(item.userId) ? '✓' : '+' }}</text></button><view v-if="!ccCandidates.length" class="empty-line">当前项目暂无可选抄送人</view></scroll-view><button class="confirm" @tap="ccSheetOpen = false">确认（{{ selectedCcUserIds.length }}）</button></view></view>
+    <view v-if="ccSheetOpen" class="overlay" @tap="ccSheetOpen = false">
+      <view class="sheet" @tap.stop>
+        <view class="sheet-head"><view><text>选择抄送人</text><text>可按姓名、账号或手机号搜索当前项目成员</text></view><button @tap="ccSheetOpen = false">×</button></view>
+        <view class="cc-toolbar">
+          <view class="cc-search"><text>搜索</text><input v-model="ccKeyword" confirm-type="search" placeholder="输入姓名、账号或手机号" /><button v-if="ccKeyword" @tap="ccKeyword = ''">清除</button></view>
+          <view class="cc-selection-summary"><text>已选 {{ selectedCcUserIds.length }} 人，已选人员优先显示</text><button v-if="selectedCcUserIds.length" @tap="clearCcSelection">清空</button></view>
+        </view>
+        <scroll-view class="candidate-list" scroll-y>
+          <button v-for="item in filteredCcCandidates" :key="item.userId" class="candidate-item" :class="{ selected: selectedCcUserIds.includes(item.userId) }" @tap="toggleCc(item.userId)">
+            <text class="candidate-avatar">{{ candidateInitial(item) }}</text>
+            <view class="candidate-info"><text>{{ item.displayName }}</text><text>{{ candidateMeta(item) }}</text></view>
+            <text class="candidate-check">{{ selectedCcUserIds.includes(item.userId) ? '✓' : '' }}</text>
+          </button>
+          <view v-if="!ccCandidates.length" class="empty-line">当前项目暂无可选抄送人</view>
+          <view v-else-if="!filteredCcCandidates.length" class="empty-line">未找到匹配人员，请换个关键词</view>
+        </scroll-view>
+        <button class="confirm" @tap="ccSheetOpen = false">完成（已选 {{ selectedCcUserIds.length }} 人）</button>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -307,5 +359,5 @@ function goBack() { getCurrentPages().length > 1 ? uni.navigateBack() : uni.reLa
 .file-row { display: flex; min-height: 76rpx; align-items: center; justify-content: space-between; gap: 16rpx; margin-top: 12rpx; padding: 12rpx 0; border-top: 1rpx solid #edf0f2; }.file-row view { min-width: 0; flex: 1; }.file-row text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.file-row text:first-child { color: #34475a; font-size: 21rpx; font-weight: 700; }.file-row text:last-child { margin-top: 5rpx; color: #8d99a5; font-size: 18rpx; }.file-row button { flex-shrink: 0; color: #aa5a55; font-size: 19rpx; }.file-row.pending text:last-child { color: #9a6b2e; }.empty-line { padding: 32rpx 10rpx; color: #98a2ad; font-size: 20rpx; text-align: center; }
 .cc-card { display: flex; width: 100%; min-height: 92rpx; align-items: center; justify-content: space-between; gap: 18rpx; padding: 18rpx 22rpx; border-radius: 17rpx; background: #fff; text-align: left; }.cc-card view { min-width: 0; flex: 1; }.cc-card view text { display: block; }.cc-card view text:first-child { color: #34475a; font-size: 23rpx; font-weight: 780; }.cc-card view text:last-child { overflow: hidden; margin-top: 6rpx; color: #8a97a4; font-size: 19rpx; text-overflow: ellipsis; white-space: nowrap; }.cc-card>text { color: #9ba6b0; font-size: 32rpx; }
 .submit-row { display: grid; grid-template-columns: 1fr 2fr; gap: 13rpx; }.submit-row button { min-height: 78rpx; border-radius: 14rpx; font-size: 23rpx; font-weight: 780; }.draft { border: 1rpx solid #cbd7df; background: #fff; color: #536a7c; }.submit { background: #8a612c; color: #fff; }.submit-row button[disabled] { opacity: .6; }
-.overlay { position: fixed; z-index: 90; inset: 0; display: flex; align-items: flex-end; background: rgba(23,35,48,.42); }.sheet { display: flex; width: 100%; max-height: 75vh; flex-direction: column; padding: 16rpx 24rpx calc(24rpx + env(safe-area-inset-bottom)); border-radius: 24rpx 24rpx 0 0; background: #fff; }.sheet-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 8rpx 0 18rpx; }.sheet-head view text { display: block; }.sheet-head view text:first-child { font-size: 27rpx; font-weight: 820; }.sheet-head view text:last-child { margin-top: 5rpx; color: #8b98a5; font-size: 19rpx; }.sheet-head>button { width: 50rpx; height: 50rpx; border-radius: 50%; background: #eef2f5; color: #687889; font-size: 27rpx; }.candidate-list { min-height: 260rpx; flex: 1; }.candidate-list>button { display: flex; width: 100%; min-height: 72rpx; align-items: center; justify-content: space-between; padding: 0 15rpx; border-bottom: 1rpx solid #edf0f2; color: #3b4d60; font-size: 22rpx; }.candidate-list>button.selected { background: #edf4f7; color: #315f86; font-weight: 750; }.confirm { min-height: 76rpx; margin-top: 16rpx; border-radius: 13rpx; background: #315f86; color: #fff; font-size: 23rpx; font-weight: 780; }
+.overlay { position: fixed; z-index: 90; inset: 0; display: flex; align-items: flex-end; background: rgba(23,35,48,.42); }.sheet { box-sizing: border-box; display: flex; width: 100%; max-height: 82vh; flex-direction: column; padding: 16rpx 24rpx calc(24rpx + env(safe-area-inset-bottom)); border-radius: 24rpx 24rpx 0 0; background: #fff; }.sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20rpx; padding: 8rpx 0 18rpx; }.sheet-head view { min-width: 0; }.sheet-head view text { display: block; }.sheet-head view text:first-child { font-size: 27rpx; font-weight: 820; }.sheet-head view text:last-child { margin-top: 5rpx; color: #8b98a5; font-size: 19rpx; }.sheet-head>button { width: 50rpx; height: 50rpx; flex-shrink: 0; border-radius: 50%; background: #eef2f5; color: #687889; font-size: 27rpx; }.cc-toolbar { padding-bottom: 10rpx; border-bottom: 1rpx solid #e7edf1; }.cc-search { display: flex; min-height: 70rpx; align-items: center; gap: 13rpx; padding: 0 17rpx; border: 1rpx solid #d9e3e9; border-radius: 13rpx; background: #f7f9fa; }.cc-search>text { flex-shrink: 0; color: #60788a; font-size: 19rpx; font-weight: 750; }.cc-search input { min-width: 0; height: 68rpx; flex: 1; color: #304255; font-size: 21rpx; }.cc-search button { flex-shrink: 0; margin: 0; padding: 6rpx 3rpx; color: #56738a; font-size: 18rpx; line-height: 1.2; }.cc-selection-summary { display: flex; min-height: 52rpx; align-items: center; justify-content: space-between; gap: 16rpx; padding: 8rpx 4rpx 0; color: #82909d; font-size: 18rpx; }.cc-selection-summary button { flex-shrink: 0; margin: 0; padding: 7rpx 10rpx; border-radius: 9rpx; background: #f5eaea; color: #a4544f; font-size: 18rpx; line-height: 1.2; }.candidate-list { min-height: 340rpx; flex: 1; }.candidate-item { box-sizing: border-box; display: flex; width: 100%; min-height: 92rpx; align-items: center; gap: 15rpx; margin: 0; padding: 12rpx 8rpx; border-bottom: 1rpx solid #edf0f2; border-radius: 0; background: #fff; color: #3b4d60; font-size: 22rpx; line-height: 1.25; text-align: left; }.candidate-item.selected { background: #edf4f7; color: #315f86; }.candidate-avatar { display: flex; width: 54rpx; height: 54rpx; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 50%; background: #e7eef3; color: #456b83; font-size: 21rpx; font-weight: 820; }.candidate-item.selected .candidate-avatar { background: #315f86; color: #fff; }.candidate-info { min-width: 0; flex: 1; }.candidate-info text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.candidate-info text:first-child { color: #304255; font-size: 22rpx; font-weight: 780; }.candidate-info text:last-child { margin-top: 6rpx; color: #8794a0; font-size: 18rpx; font-weight: 400; }.candidate-check { display: flex; width: 42rpx; height: 42rpx; align-items: center; justify-content: center; flex-shrink: 0; border: 2rpx solid #c8d3da; border-radius: 50%; color: transparent; font-size: 24rpx; font-weight: 820; }.candidate-item.selected .candidate-check { border-color: #315f86; background: #315f86; color: #fff; }.candidate-item::after,.cc-search button::after,.cc-selection-summary button::after { border: 0; }.confirm { min-height: 76rpx; margin-top: 16rpx; border-radius: 13rpx; background: #315f86; color: #fff; font-size: 23rpx; font-weight: 780; }
 </style>

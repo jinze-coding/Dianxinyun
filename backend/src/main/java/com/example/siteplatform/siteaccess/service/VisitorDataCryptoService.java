@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import javax.crypto.Cipher;
+import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
@@ -79,6 +80,39 @@ public class VisitorDataCryptoService {
     public String digest(String value) {
         if (value == null) return null;
         return java.util.HexFormat.of().formatHex(sha256(value.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    /** Keyed, non-reversible lookup fingerprint for external identities. */
+    public String fingerprint(String value) {
+        if (value == null) return null;
+        return hmac(value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Purpose-separated keyed fingerprint for structured personal data.
+     * The purpose is part of the authenticated input so fingerprints cannot be
+     * correlated across unrelated visitor-data uses.
+     */
+    public String fingerprint(String purpose, String value) {
+        if (value == null) return null;
+        if (!StringUtils.hasText(purpose)) {
+            throw new IllegalArgumentException("外访身份指纹用途不能为空");
+        }
+        return hmac((purpose.trim() + "\u0000" + value).getBytes(StandardCharsets.UTF_8));
+    }
+
+    public String idCardFingerprint(String idCard) {
+        return fingerprint("site-access:id-card:v1", idCard);
+    }
+
+    private String hmac(byte[] value) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(key.getEncoded(), "HmacSHA256"));
+            return java.util.HexFormat.of().formatHex(mac.doFinal(value));
+        } catch (GeneralSecurityException exception) {
+            throw new IllegalStateException("无法生成外访身份指纹", exception);
+        }
     }
 
     private byte[] sha256(byte[] value) {

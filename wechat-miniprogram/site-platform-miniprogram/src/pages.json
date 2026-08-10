@@ -65,6 +65,10 @@
       "style": { "navigationBarTitleText": "施工区域" }
     },
     {
+      "path": "pages/projects/detail",
+      "style": { "navigationBarTitleText": "项目信息" }
+    },
+    {
       "path": "pages/scan-entry/index",
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "电箱巡检" }
     },

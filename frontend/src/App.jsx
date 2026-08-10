@@ -39,6 +39,7 @@ import DocumentCenterPage from './pages/DocumentCenter';
 import PersonalInboxPage from './pages/PersonalInbox';
 import SystemManagementPage from './pages/SystemManagement';
 import SiteAccessManagementPage from './pages/SiteAccessManagement';
+import ProjectInformationPage from './pages/ProjectInformation';
 import { getPersonalTodoSummary, getUnreadNotificationCount } from './services/personalInbox';
 import { canAccessPage, collectProjectMenuCodes, hasProjectPermission, isPlatformAdmin } from './utils/permissions';
 import { pageMenuAllowed } from './utils/roleAuthorization';
@@ -182,7 +183,7 @@ function VideoCell({ cam, theme: T, onFullscreen, fullscreen }) {
 // ============================================
 // 顶部导航
 // ============================================
-function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, projectList, onRefreshProjects, theme, onLogout, currentUser, visibleNavItems, canAccessSystem, inboxCount = 0 }) {
+function TopNav({ currentPage, onPageChange, onOpenProjectInformation, currentProject, onProjectChange, projectList, onRefreshProjects, theme, onLogout, currentUser, visibleNavItems, canAccessSystem, inboxCount = 0 }) {
   const [showProjects, setShowProjects] = useState(false);
   const [showProjectMgmt, setShowProjectMgmt] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -394,6 +395,23 @@ function TopNav({ currentPage, onPageChange, currentProject, onProjectChange, pr
           </div>
         )}
       </div>
+
+      <button
+        type="button"
+        onClick={onOpenProjectInformation}
+        disabled={!currentProject}
+        style={{
+          marginLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 5,
+          background: currentPage === PAGE_IDS.PROJECT_INFORMATION ? T.accent : T.cardBg,
+          border: `1px solid ${currentPage === PAGE_IDS.PROJECT_INFORMATION ? T.accent : T.borderColor}`,
+          borderRadius: 6, padding: '5px 10px', cursor: currentProject ? 'pointer' : 'not-allowed',
+          color: currentPage === PAGE_IDS.PROJECT_INFORMATION ? '#fff' : T.textSecondary,
+          fontSize: 12, whiteSpace: 'nowrap', opacity: currentProject ? 1 : .55,
+        }}
+        title="查看当前项目基础信息"
+      >
+        <span aria-hidden="true">ⓘ</span><span>项目信息</span>
+      </button>
 
       {/* 主导航 */}
       <nav style={{
@@ -6908,6 +6926,7 @@ export default function App() {
   const [sealApplicationTarget, setSealApplicationTarget] = useState(null);
   const [qualityIssueTarget, setQualityIssueTarget] = useState(null);
   const [inspectionBusinessTarget, setInspectionBusinessTarget] = useState(null);
+  const [projectInformationReturnPage, setProjectInformationReturnPage] = useState(AUTHENTICATED_LANDING_PAGE);
   const [showCameraPage, setShowCameraPage] = useState(false);
   const [cameraConfig, setCameraConfig] = useState({
     videoLayout: 4,
@@ -6999,11 +7018,12 @@ export default function App() {
   useEffect(() => {
     if (!currentUser) return;
     if (currentPage === PAGE_IDS.PERSONAL_INBOX) return;
+    if (currentPage === PAGE_IDS.PROJECT_INFORMATION && currentProject !== null) return;
     if (currentPage === PAGE_IDS.SYSTEM_MANAGEMENT && canAccessSystem) return;
     if (currentPage === PAGE_IDS.DOCUMENT_MANAGEMENT && sealApplicationTarget?.id) return;
     if (visibleNavItems.some((item) => item.id === currentPage)) return;
     setCurrentPage(AUTHENTICATED_LANDING_PAGE);
-  }, [canAccessSystem, currentPage, currentUser, sealApplicationTarget, visibleNavItems]);
+  }, [canAccessSystem, currentPage, currentProject, currentUser, sealApplicationTarget, visibleNavItems]);
 
   useEffect(() => {
     const handleAuthExpired = () => {
@@ -7072,6 +7092,28 @@ export default function App() {
     setCurrentProject(projectId);
   }, []);
 
+  const openProjectInformation = useCallback(() => {
+    if (currentProject === null) return;
+    if (currentPage !== PAGE_IDS.PROJECT_INFORMATION) setProjectInformationReturnPage(currentPage);
+    setSealApplicationTarget(null);
+    setQualityIssueTarget(null);
+    setInspectionBusinessTarget(null);
+    setCurrentPage(PAGE_IDS.PROJECT_INFORMATION);
+  }, [currentPage, currentProject]);
+
+  const closeProjectInformation = useCallback(() => {
+    const returnPage = projectInformationReturnPage;
+    if (returnPage === PAGE_IDS.SYSTEM_MANAGEMENT && !canAccessSystem) {
+      setCurrentPage(AUTHENTICATED_LANDING_PAGE);
+      return;
+    }
+    if (returnPage === PAGE_IDS.PERSONAL_INBOX || visibleNavItems.some((item) => item.id === returnPage)) {
+      setCurrentPage(returnPage);
+      return;
+    }
+    setCurrentPage(AUTHENTICATED_LANDING_PAGE);
+  }, [canAccessSystem, projectInformationReturnPage, visibleNavItems]);
+
   const openInboxBusiness = useCallback((item) => {
     const target = resolveBusinessRoute(item);
     if (!target) return;
@@ -7124,6 +7166,9 @@ export default function App() {
     }
     if (currentPage === PAGE_IDS.PERSONAL_INBOX) {
       return <PersonalInboxPage {...pageProps} onOpenBusiness={openInboxBusiness} onCountsChange={handleInboxCountsChange} />;
+    }
+    if (currentPage === PAGE_IDS.PROJECT_INFORMATION) {
+      return <ProjectInformationPage projectId={currentProject} onBack={closeProjectInformation} onSaved={fetchProjectList} />;
     }
     if (currentPage === PAGE_IDS.DOCUMENT_MANAGEMENT && sealApplicationTarget?.id) {
       return <DocumentCenterPage {...pageProps} sealApplicationTarget={sealApplicationTarget} />;
@@ -7191,6 +7236,7 @@ export default function App() {
       <TopNav
         currentPage={currentPage}
         onPageChange={navigatePage}
+        onOpenProjectInformation={openProjectInformation}
         currentProject={currentProject}
         onProjectChange={changeProject}
         projectList={projectList}

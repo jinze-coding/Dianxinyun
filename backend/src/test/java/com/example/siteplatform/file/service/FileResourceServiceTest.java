@@ -218,6 +218,29 @@ class FileResourceServiceTest {
         assertFalse(service.canReadInList(user(9L), file));
     }
 
+    @Test
+    void nonAdminCannotReadAnotherUsersPendingProjectProfileImage() {
+        FileResource file = file(11L, 2L, 8L, "PROJECT_PROFILE_IMAGE_PENDING", null);
+        when(permissionService.isPlatformAdmin(9L)).thenReturn(false);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.checkRead(user(9L), file));
+
+        assertEquals(403, exception.getCode());
+        verify(permissionService, never()).checkProjectPermission(9L, 2L);
+    }
+
+    @Test
+    void onlyPlatformAdminCanOpenProjectProfileImageUploadChannel() {
+        when(permissionService.isPlatformAdmin(9L)).thenReturn(false);
+        assertThrows(BusinessException.class, () -> service.authorizeUpload(
+                user(9L), 2L, "PROJECT_PROFILE_IMAGE_PENDING", null));
+
+        when(permissionService.isPlatformAdmin(9L)).thenReturn(true);
+        assertEquals("PROJECT_PROFILE_IMAGE_PENDING", service.authorizeUpload(
+                user(9L), 2L, "PROJECT_PROFILE_IMAGE_PENDING", null));
+    }
+
     private SysUser user(Long id) {
         SysUser user = new SysUser();
         user.setId(id);

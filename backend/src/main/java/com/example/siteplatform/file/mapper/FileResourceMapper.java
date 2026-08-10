@@ -13,6 +13,41 @@ import java.util.List;
 
 @Mapper
 public interface FileResourceMapper extends BaseMapper<FileResource> {
+    @Select("""
+            <script>
+            SELECT * FROM file_resource
+            WHERE deleted = 0 AND id IN
+            <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+            FOR UPDATE
+            </script>
+            """)
+    List<FileResource> selectByIdsForUpdate(@Param("ids") List<Long> ids);
+
+    @Update("""
+            UPDATE file_resource SET status = 'ARCHIVED', update_time = CURRENT_TIMESTAMP
+            WHERE id = #{id} AND project_id = #{projectId}
+              AND business_type = 'PROJECT_PROFILE_IMAGE' AND business_id = #{projectId}
+              AND status = 'UPLOADED' AND deleted = 0
+            """)
+    int archiveProjectProfileImage(@Param("id") Long id, @Param("projectId") Long projectId);
+
+    @Update("""
+            UPDATE file_resource
+            SET business_type = 'PROJECT_PROFILE_IMAGE', business_id = #{projectId}, update_time = CURRENT_TIMESTAMP
+            WHERE id = #{id} AND project_id = #{projectId}
+              AND business_type = 'PROJECT_PROFILE_IMAGE_PENDING' AND business_id IS NULL
+              AND status = 'UPLOADED' AND deleted = 0
+            """)
+    int bindPendingProjectProfileImage(@Param("id") Long id, @Param("projectId") Long projectId);
+
+    @Update("""
+            UPDATE file_resource SET status = 'UPLOADED', update_time = CURRENT_TIMESTAMP
+            WHERE id = #{id} AND project_id = #{projectId}
+              AND business_type = 'PROJECT_PROFILE_IMAGE' AND business_id = #{projectId}
+              AND status = 'ARCHIVED' AND deleted = 0
+            """)
+    int restoreProjectProfileImage(@Param("id") Long id, @Param("projectId") Long projectId);
+
     @Delete("DELETE FROM file_resource WHERE id = #{id}")
     int purgeById(Long id);
 
@@ -65,6 +100,44 @@ public interface FileResourceMapper extends BaseMapper<FileResource> {
               AND create_time < #{cutoff}
             """)
     int purgeClaimedQualityStagingFile(
+            @Param("id") Long id,
+            @Param("cutoff") LocalDateTime cutoff);
+
+    @Select("""
+            SELECT * FROM file_resource
+            WHERE deleted IN (0, 1)
+              AND business_id IS NULL
+              AND business_type = 'PROJECT_PROFILE_IMAGE_PENDING'
+              AND create_time < #{cutoff}
+            ORDER BY create_time ASC, id ASC
+            LIMIT #{limit}
+            """)
+    List<FileResource> selectExpiredProjectProfileStagingFiles(
+            @Param("cutoff") LocalDateTime cutoff,
+            @Param("limit") int limit);
+
+    @Update("""
+            UPDATE file_resource
+            SET deleted = 1, update_time = CURRENT_TIMESTAMP
+            WHERE id = #{id}
+              AND deleted = 0
+              AND business_id IS NULL
+              AND business_type = 'PROJECT_PROFILE_IMAGE_PENDING'
+              AND create_time < #{cutoff}
+            """)
+    int claimExpiredProjectProfileStagingFile(
+            @Param("id") Long id,
+            @Param("cutoff") LocalDateTime cutoff);
+
+    @Delete("""
+            DELETE FROM file_resource
+            WHERE id = #{id}
+              AND deleted = 1
+              AND business_id IS NULL
+              AND business_type = 'PROJECT_PROFILE_IMAGE_PENDING'
+              AND create_time < #{cutoff}
+            """)
+    int purgeClaimedProjectProfileStagingFile(
             @Param("id") Long id,
             @Param("cutoff") LocalDateTime cutoff);
 }

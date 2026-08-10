@@ -5,6 +5,7 @@ import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -41,4 +42,13 @@ public class PublicSiteVisitSubmitRequest {
     @NotNull
     @AssertTrue(message = "请阅读并同意隐私告知")
     private Boolean privacyAgreed;
+    @Pattern(regexp = "^(?:|NONE|CREATE|UPDATE)$", message = "常用资料操作不正确")
+    private String profileAction;
+    @Size(max = 40)
+    private String profileCode;
+    @Size(max = 100)
+    private String profileName;
+    private Boolean profileRetentionAgreed;
+    @PositiveOrZero
+    private Integer profileVersion;
 }

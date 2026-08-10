@@ -33,6 +33,7 @@ public class SiteVisitInvitation {
     private String travelMode;
     private String vehiclePlate;
     private String visitorRemark;
+    private Long sourceProfileId;
     private LocalDateTime privacyAgreedTime;
     private LocalDateTime submittedTime;
     private String voidReason;

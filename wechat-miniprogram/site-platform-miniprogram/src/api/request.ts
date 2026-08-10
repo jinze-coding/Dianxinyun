@@ -56,6 +56,18 @@ interface RequestOptions {
   timeout?: number;
 }
 
+export class ApiRequestError extends Error {
+  readonly code?: number;
+  readonly statusCode?: number;
+
+  constructor(message: string, code?: number, statusCode?: number) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.code = code;
+    this.statusCode = statusCode;
+  }
+}
+
 function getMiniProgramRuntimeLabel() {
   const labels = [`构建 ${MINI_PROGRAM_BUILD_ID}`];
   // #ifdef MP-WEIXIN
@@ -99,7 +111,7 @@ export function request<T>(url: string, options: RequestOptions = {}): Promise<T
         if (result?.code === 401 && !options.skipAuthRedirect) {
           handleUnauthorized(message);
         }
-        reject(new Error(message));
+        reject(new ApiRequestError(message, result?.code, response.statusCode));
       },
       fail: (error) => {
         const errMsg = typeof error?.errMsg === 'string' ? error.errMsg : '';

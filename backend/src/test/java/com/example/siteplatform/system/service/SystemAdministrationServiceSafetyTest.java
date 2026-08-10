@@ -480,6 +480,27 @@ class SystemAdministrationServiceSafetyTest {
     }
 
     @Test
+    void documentViewCanBeSavedWhenDocumentLibraryPageIsAssigned() {
+        SystemRole projectRole = role(30L, "CUSTOM_REVIEWER", "PROJECT", 0, 1);
+        SystemMenu webDocument = menu(200L, "WEB_DOCUMENT");
+        SystemMenu library = menu(201L, "DOCUMENT_LIBRARY");
+        library.setParentId(200L);
+        SystemPermission documentView = permission(100L, "document.view");
+        documentView.setModuleCode("WEB_DOCUMENT");
+        when(roleMapper.selectByIdForUpdate(30L)).thenReturn(projectRole);
+        when(roleMapper.selectMenuIds(30L)).thenReturn(List.of(200L, 201L));
+        when(roleBusinessModuleMapper.selectModuleCodesByRoleId(30L)).thenReturn(List.of("DOCUMENT"));
+        when(permissionMapper.selectById(100L)).thenReturn(documentView);
+        when(menuMapper.selectList(any())).thenReturn(List.of(webDocument, library));
+        when(menuMapper.selectById(200L)).thenReturn(webDocument);
+        when(menuMapper.selectById(201L)).thenReturn(library);
+
+        service.updateRoleOperationPermissions(30L, List.of(100L), operator());
+
+        verify(roleMapper).insertPermission(30L, 100L);
+    }
+
+    @Test
     void operationPermissionOutsideSelectedMenuIsRejected() {
         SystemRole projectRole = role(30L, "CUSTOM_REVIEWER", "PROJECT", 0, 1);
         SystemMenu webDocument = menu(200L, "WEB_DOCUMENT");

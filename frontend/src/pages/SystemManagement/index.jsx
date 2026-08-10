@@ -37,12 +37,13 @@ import {
 import {
   BUSINESS_MENU_DEFINITIONS,
   buildPermissionActions,
+  buildPermissionActionTree,
   buildRoleDefinitionRequest,
   buildRoleMenuTree,
   filterActionsByMenus,
-  groupPermissionActions,
   isDuplicateRoleName,
   menuNodeState,
+  missingMenuCatalogCodes,
   permissionIdsForActionKeys,
   selectedActionKeys,
   selectedLogicalMenuCodes,
@@ -480,6 +481,7 @@ function MenuAssignmentDialog({ role, menus, selectedMenuIds, businessModuleCode
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const legacyTabs = tree.some((node) => node.children?.some((child) => child.legacy));
+  const missingTabs = useMemo(() => missingMenuCatalogCodes(tree), [tree]);
   const updateNode = (node, checked) => {
     const next = toggleMenuNode({ node, checked, selectedMenuIds: menuIds, businessModuleCodes: moduleCodes });
     setMenuIds(next.menuIds);
@@ -520,6 +522,7 @@ function MenuAssignmentDialog({ role, menus, selectedMenuIds, businessModuleCode
     >
       <div className="system-tree-toolbar"><span>已启用 {moduleCodes.length} 个业务模块</span><div><button onClick={() => toggleAll(true)}>全选</button><button onClick={() => toggleAll(false)}>清空</button></div></div>
       {legacyTabs && <div className="system-inline-notice warning">当前数据库尚未安装页签菜单迁移；灰色页签按父模块兼容显示，执行迁移后可单独分配。</div>}
+      {!!missingTabs.length && <div className="system-inline-notice warning">当前菜单目录只完成了部分迁移，缺少：{missingTabs.join('、')}。缺失页面暂不可分配，请先补齐页签菜单迁移。</div>}
       <div className="system-config-tree">
         {tree.map((node) => {
           const state = menuNodeState(node, menuIds, moduleCodes);
@@ -530,10 +533,10 @@ function MenuAssignmentDialog({ role, menus, selectedMenuIds, businessModuleCode
               <IndeterminateCheckbox checked={state.checked} indeterminate={state.indeterminate} onChange={(event) => updateNode(node, event.target.checked)} />
               <span><strong>{node.label}</strong><small>{node.description}</small></span>
             </div>
-            {open && <div className="system-tree-children">{node.children?.map((child, index) => <label className={`system-tree-row${child.legacy ? ' legacy' : ''}`} key={child.key}>
+            {open && <div className="system-tree-children">{node.children?.map((child, index) => <label className={`system-tree-row${child.legacy ? ' legacy' : ''}${child.unavailable ? ' unavailable' : ''}`} key={child.key}>
               <span className="system-tree-spacer" />
-              <input type="checkbox" checked={state.childStates[index]} disabled={child.legacy} onChange={(event) => updateChild(node, child, event.target.checked)} />
-              <span>{child.label}{child.legacy && <small>随父模块显示</small>}</span>
+              <input type="checkbox" checked={state.childStates[index]} disabled={child.legacy || child.unavailable} onChange={(event) => updateChild(node, child, event.target.checked)} />
+              <span>{child.label}{child.legacy && <small>随父模块显示</small>}{child.unavailable && <small>菜单数据缺失，暂不可分配</small>}</span>
             </label>)}</div>}
           </section>;
         })}
@@ -548,14 +551,19 @@ function PermissionAssignmentDialog({ role, menus, permissions, selectedMenuIds,
   const menuCodes = useMemo(() => selectedLogicalMenuCodes(tree, selectedMenuIds, businessModuleCodes), [businessModuleCodes, selectedMenuIds, tree]);
   const allActions = useMemo(() => buildPermissionActions(permissions), [permissions]);
   const visibleActions = useMemo(() => filterActionsByMenus(allActions, menuCodes), [allActions, menuCodes]);
-  const groups = useMemo(() => groupPermissionActions(visibleActions), [visibleActions]);
+  const permissionTree = useMemo(() => buildPermissionActionTree(tree, allActions, menuCodes), [allActions, menuCodes, tree]);
+  const missingTabs = useMemo(() => missingMenuCatalogCodes(tree), [tree]);
   const [selectedKeys, setSelectedKeys] = useState(() => selectedActionKeys(selectedPermissionIds, visibleActions));
-  const [expanded, setExpanded] = useState(() => new Set(groups.map((group) => group.label)));
+  const expandableKeys = useMemo(() => permissionTree.flatMap((node) => [
+    node.key,
+    ...node.groups.map((group) => group.key),
+  ]), [permissionTree]);
+  const [expanded, setExpanded] = useState(() => new Set(expandableKeys));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const updateGroup = (group, checked) => {
+  const updateActions = (items, checked) => {
     let next = new Set(selectedKeys);
-    group.items.forEach((action) => { next = toggleActionKey(next, action.key, checked, visibleActions); });
+    items.forEach((action) => { next = toggleActionKey(next, action.key, checked, visibleActions); });
     setSelectedKeys(next);
   };
   const submit = async () => {
@@ -573,27 +581,39 @@ function PermissionAssignmentDialog({ role, menus, permissions, selectedMenuIds,
   return (
     <ModalFrame
       title={`权限配置 - ${roleName(role)}`}
-      description="一级分组可整组开启或取消；这里只配置操作权限，保存不会改变菜单可见性。"
+      description="按已分配菜单的一级、二级层级配置页面操作；保存不会改变菜单可见性。"
       wide
       onClose={onClose}
-      footer={<><button className="plain" onClick={onClose}>取消</button><button className="primary" disabled={submitting || !groups.length} onClick={submit}>{submitting ? '保存中…' : '保存'}</button></>}
+      footer={<><button className="plain" onClick={onClose}>取消</button><button className="primary" disabled={submitting || !permissionTree.length} onClick={submit}>{submitting ? '保存中…' : '保存'}</button></>}
     >
-      <div className="system-tree-toolbar"><span>已选择 {selectedKeys.size} 项操作权限</span><div><button onClick={() => setExpanded(new Set(groups.map((group) => group.label)))}>展开全部</button><button onClick={() => setExpanded(new Set())}>收起全部</button></div></div>
-      {!groups.length && <Empty text="请先为该角色分配菜单" />}
-      <div className="system-config-tree permission-tree">{groups.map((group) => {
-        const checkedCount = group.items.filter((action) => selectedKeys.has(action.key)).length;
-        const open = expanded.has(group.label);
-        return <section key={group.label}>
+      <div className="system-tree-toolbar"><span>已选择 {selectedKeys.size} 项操作权限</span><div><button onClick={() => setExpanded(new Set(expandableKeys))}>展开全部</button><button onClick={() => setExpanded(new Set())}>收起全部</button></div></div>
+      {!!missingTabs.length && <div className="system-inline-notice warning">当前菜单目录不完整，缺少：{missingTabs.join('、')}。这些页面的操作权限已隐藏，避免保存出现在错误菜单下。</div>}
+      {!permissionTree.length && <Empty text="请先为该角色分配可用的页面菜单" />}
+      <div className="system-config-tree permission-tree">{permissionTree.map((node) => {
+        const checkedCount = node.items.filter((action) => selectedKeys.has(action.key)).length;
+        const open = expanded.has(node.key);
+        return <section key={node.key} className="permission-menu-module">
           <div className="system-tree-row root">
-            <button className="system-tree-expand" onClick={() => setExpanded((current) => { const next = new Set(current); if (next.has(group.label)) next.delete(group.label); else next.add(group.label); return next; })}>{open ? '⌄' : '›'}</button>
-            <IndeterminateCheckbox checked={checkedCount === group.items.length && group.items.length > 0} indeterminate={checkedCount > 0 && checkedCount < group.items.length} onChange={(event) => updateGroup(group, event.target.checked)} />
-            <span><strong>{group.label}</strong><small>{checkedCount}/{group.items.length} 项</small></span>
+            <button className="system-tree-expand" onClick={() => setExpanded((current) => { const next = new Set(current); if (next.has(node.key)) next.delete(node.key); else next.add(node.key); return next; })}>{open ? '⌄' : '›'}</button>
+            <IndeterminateCheckbox checked={checkedCount === node.items.length && node.items.length > 0} indeterminate={checkedCount > 0 && checkedCount < node.items.length} onChange={(event) => updateActions(node.items, event.target.checked)} />
+            <span><strong>{node.label}</strong><small>{checkedCount}/{node.items.length} 项操作权限</small></span>
           </div>
-          {open && <div className="system-tree-children">{group.items.map((action) => <label className="system-tree-row" key={action.key}>
-            <span className="system-tree-spacer" />
-            <input type="checkbox" checked={selectedKeys.has(action.key)} onChange={(event) => setSelectedKeys(toggleActionKey(selectedKeys, action.key, event.target.checked, visibleActions))} />
-            <span>{action.label}<small>{action.description || '权限依赖由系统自动补齐'}</small></span>
-          </label>)}</div>}
+          {open && <div className="permission-menu-groups">{node.groups.map((group) => {
+            const groupCheckedCount = group.items.filter((action) => selectedKeys.has(action.key)).length;
+            const groupOpen = expanded.has(group.key);
+            return <div className="permission-menu-group" key={group.key}>
+              <div className="system-tree-row permission-page-row">
+                <button className="system-tree-expand" onClick={() => setExpanded((current) => { const next = new Set(current); if (next.has(group.key)) next.delete(group.key); else next.add(group.key); return next; })}>{groupOpen ? '⌄' : '›'}</button>
+                <IndeterminateCheckbox checked={groupCheckedCount === group.items.length && group.items.length > 0} indeterminate={groupCheckedCount > 0 && groupCheckedCount < group.items.length} onChange={(event) => updateActions(group.items, event.target.checked)} />
+                <span><strong>{group.label}</strong><small>{groupCheckedCount}/{group.items.length} 项</small></span>
+              </div>
+              {groupOpen && <div className="system-tree-children permission-action-children">{group.items.map((action) => <label className="system-tree-row" key={action.key}>
+                <span className="system-tree-spacer" />
+                <input type="checkbox" checked={selectedKeys.has(action.key)} onChange={(event) => setSelectedKeys(toggleActionKey(selectedKeys, action.key, event.target.checked, visibleActions))} />
+                <span>{action.label}<small>{action.description || '权限依赖由系统自动补齐'}</small></span>
+              </label>)}</div>}
+            </div>;
+          })}</div>}
         </section>;
       })}</div>
       {error && <div className="system-form-error" role="alert">{error}</div>}

@@ -57,6 +57,8 @@ class SiteAccessServiceTest {
     @Mock private SysUserProjectMapper userProjectMapper;
     @Mock private ProjectPermissionService projectPermissionService;
     @Mock private WechatPlatformClient wechatPlatformClient;
+    @Mock private VisitorSessionService visitorSessionService;
+    @Mock private VisitorProfileService visitorProfileService;
     @Mock private OperationLogMapper operationLogMapper;
 
     private VisitorDataCryptoService crypto;
@@ -69,7 +71,7 @@ class SiteAccessServiceTest {
         crypto = new VisitorDataCryptoService("", environment);
         service = new SiteAccessService(invitationMapper, personMapper, auditLogMapper,
                 projectInfoMapper, userMapper, userProjectMapper, projectPermissionService,
-                crypto, wechatPlatformClient, operationLogMapper,
+                crypto, wechatPlatformClient, visitorSessionService, visitorProfileService, operationLogMapper,
                 new ObjectMapper().findAndRegisterModules(), "pages/public/visitor-invite", "release");
     }
 
@@ -115,7 +117,9 @@ class SiteAccessServiceTest {
         verify(personMapper).insert(personCaptor.capture());
         SiteVisitPerson saved = personCaptor.getValue();
         assertThat(saved.getIdCardEncrypted()).startsWith("v1:").doesNotContain(VALID_ID_CARD);
-        assertThat(saved.getIdCardHash()).hasSize(64).doesNotContain(VALID_ID_CARD);
+        assertThat(saved.getIdCardHash())
+                .isEqualTo(crypto.idCardFingerprint(VALID_ID_CARD))
+                .isNotEqualTo(crypto.digest(VALID_ID_CARD));
         assertThat(crypto.decrypt(saved.getIdCardEncrypted())).isEqualTo(VALID_ID_CARD);
         ArgumentCaptor<SiteVisitAuditLog> auditCaptor = ArgumentCaptor.forClass(SiteVisitAuditLog.class);
         verify(auditLogMapper).insert(auditCaptor.capture());
@@ -123,6 +127,31 @@ class SiteAccessServiceTest {
                 .startsWith("v1:")
                 .doesNotContain(TEST_PHONE)
                 .doesNotContain(VALID_ID_CARD);
+    }
+
+    @Test
+    void reusableProfileSourceIsBoundToTheSubmittedInvitationSnapshot() {
+        SiteVisitInvitation invitation = pendingInvitation();
+        when(invitationMapper.selectForUpdateByTokenHash(anyString())).thenReturn(invitation);
+        when(invitationMapper.selectOne(any(Wrapper.class))).thenReturn(invitation);
+        when(projectInfoMapper.selectById(10L)).thenReturn(project());
+        when(personMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(personMapper.insert(any(SiteVisitPerson.class))).thenReturn(1);
+        when(invitationMapper.updateById(invitation)).thenReturn(1);
+        when(auditLogMapper.insert(any(SiteVisitAuditLog.class))).thenReturn(1);
+        var context = new VisitorSessionService.VisitorSessionContext(
+                invitation.getId(), invitation.getProjectId(), "wx-app", "identity", crypto.encrypt("openid"));
+        when(visitorSessionService.require("visitor-session", invitation)).thenReturn(context);
+        when(visitorProfileService.applyOnSubmission(
+                any(), any(), any(), any(), any(), any(), any())).thenReturn(77L);
+        PublicSiteVisitSubmitRequest request = validSubmission();
+        request.setProfileAction("CREATE");
+        request.setProfileRetentionAgreed(true);
+
+        service.submitPublic(request, "visitor-session");
+
+        assertThat(invitation.getSourceProfileId()).isEqualTo(77L);
+        verify(visitorSessionService).require("visitor-session", invitation);
     }
 
     @Test

@@ -1,0 +1,26 @@
+RELEASE_ID=Dianxinyun-production-update-20260810
+BUILT_AT=2026-08-10T07:30:49+08:00
+BRANCH=main
+BASE_COMMIT=70614518e58ca0de695492c24518086b67903b96
+REMOTE=git@github.com:jinze-coding/Dianxinyun.git
+WORKTREE_STATE=dirty-current-worktree-captured-in-source-archive
+
+BUILD_SCOPE=current tracked and non-ignored untracked source files
+BACKEND_BUILD=mvn clean test package
+BACKEND_TESTS=564 passed; 0 failed; 0 errors; 0 skipped
+BACKEND_ARTIFACT=backend/site-platform.jar
+BACKEND_SHA256=06029f07219497d722321c41d35855e3468e0e1566622088316cfa6768310dee
+WEB_BUILD=npm run check && npm run audit
+WEB_TESTS=55 passed; 0 failed
+WEB_AUDIT=0 vulnerabilities
+WEB_API_BASE_URL=/api/v1
+MINIPROGRAM_BUILD=type-check + scan contracts + H5 + mp-weixin passed
+
+JAVA=openjdk 17.0.19 Temurin
+MAVEN=3.9.16
+NODE=v22.23.1
+NPM=10.9.8
+
+The source archive checksum is recorded in ARTIFACTS.sha256.
+Ignored files, dependency directories, build directories, .git metadata, local backups and private environment files are excluded.
+No database migration or production deployment was executed while creating this package.

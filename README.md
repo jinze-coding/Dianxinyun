@@ -24,6 +24,16 @@
 - 后端接口文档：`http://localhost:8080/doc.html`
 - 小程序 H5：`http://localhost:3003`
 
+开发服务默认只监听 `127.0.0.1`。如需手机访问 H5 扫码预览，应显式把 3003 绑定到
+本机私有局域网 IP，例如：
+
+```bash
+DIANXINYUN_H5_HOST="$(ipconfig getifaddr en0)" ./scripts/dev-services.sh restart
+```
+
+PC Web 如需局域网访问可同样设置 `DIANXINYUN_WEB_HOST`。脚本拒绝绑定 `0.0.0.0`
+或公网 IP，且只会复用和停止工作目录属于本仓库的端口进程。
+
 微信开发者工具可通过以下命令打开：
 
 ```bash

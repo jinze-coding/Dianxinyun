@@ -36,6 +36,10 @@ function openProject(projectId: number) {
   uni.switchTab({ url: '/pages/documents/index' });
 }
 
+function openProjectInformation(projectId: number) {
+  uni.navigateTo({ url: `/pages/projects/detail?projectId=${projectId}` });
+}
+
 function updateKeyword(event: unknown) {
   const inputEvent = event as { detail?: { value?: string }; target?: { value?: string } };
   keyword.value = inputEvent.detail?.value || inputEvent.target?.value || '';
@@ -152,7 +156,10 @@ function projectSubline(project: { area?: string; period?: string }) {
             <text class="meta-label">待办</text>
           </view>
         </view>
-        <view class="card-entry"><text>{{ project.id === currentProjectId ? '进入当前区域巡检' : '切换并进入巡检' }}</text><text class="entry-arrow"></text></view>
+        <view class="card-actions">
+          <button class="profile-entry" @tap.stop="openProjectInformation(project.id)">项目信息</button>
+          <view class="card-entry"><text>{{ project.id === currentProjectId ? '进入当前区域巡检' : '切换并进入巡检' }}</text><text class="entry-arrow"></text></view>
+        </view>
       </view>
     </view>
     <view v-else class="state-card">
@@ -493,6 +500,11 @@ function projectSubline(project: { area?: string; period?: string }) {
 .accent-red {
   color: #f87171;
 }
+
+.card-actions { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; margin-top: 18rpx; }
+.profile-entry { flex: 0 0 auto; min-width: 142rpx; height: 58rpx; margin: 0; border: 1rpx solid rgba(169,101,39,.25); border-radius: 14rpx; background: #fff8ef; color: #9a5c25; font-size: 22rpx; line-height: 56rpx; }
+.profile-entry::after { border: 0; }
+.card-actions .card-entry { flex: 1; margin-top: 0; }
 
 /* 施工区域列表 V2：压缩信息密度并明确当前区域与进入动作。 */
 .project-page {

@@ -25,6 +25,7 @@ public final class FileUploadPolicy {
     private static final int PREFIX_BYTES = 4096;
     private static final Set<String> IMAGE_EXTENSIONS = Set.of(
             "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif");
+    private static final Set<String> PROJECT_PROFILE_IMAGE_EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp");
     private static final Set<String> DOCUMENT_EXTENSIONS = Set.of(
             "pdf", "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif",
             "doc", "docx", "xls", "xlsx", "ppt", "pptx", "wps", "et", "dps", "rtf",
@@ -69,6 +70,10 @@ public final class FileUploadPolicy {
 
     public static void validateBusinessUpload(MultipartFile file, String businessType) {
         String normalized = businessType == null ? "" : businessType.trim().toUpperCase(Locale.ROOT);
+        if ("PROJECT_PROFILE_IMAGE_PENDING".equals(normalized)) {
+            validate(file, PROJECT_PROFILE_IMAGE_EXTENSIONS, MAX_IMAGE_BYTES, "项目效果图");
+            return;
+        }
         boolean workflowPhoto = (normalized.startsWith("QUALITY_") && !"QUALITY_DOCUMENT".equals(normalized))
                 || normalized.startsWith("INSPECTION_");
         validate(file,

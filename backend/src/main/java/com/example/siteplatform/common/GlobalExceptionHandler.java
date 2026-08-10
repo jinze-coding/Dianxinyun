@@ -4,8 +4,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
 import org.springframework.validation.ObjectError;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -40,6 +45,44 @@ public class GlobalExceptionHandler {
         String parameterName = e.getName() == null || e.getName().isBlank() ? "请求参数" : e.getName();
         return ResponseEntity.badRequest()
                 .body(Result.error(400, "请求参数格式错误：" + parameterName));
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<Result<?>> handleMissingRequestParameterException(
+            MissingServletRequestParameterException e) {
+        String parameterName = e.getParameterName() == null || e.getParameterName().isBlank()
+                ? "请求参数"
+                : e.getParameterName();
+        return ResponseEntity.badRequest()
+                .body(Result.error(400, "缺少必要请求参数：" + parameterName));
+    }
+
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<Result<?>> handleMissingRequestHeaderException(MissingRequestHeaderException e) {
+        if ("X-Visitor-Session".equalsIgnoreCase(e.getHeaderName())) {
+            return ResponseEntity.status(401)
+                    .body(Result.error(401, "外访临时会话无效，请重新打开邀请"));
+        }
+        return ResponseEntity.badRequest()
+                .body(Result.error(400, "缺少必要请求头：" + e.getHeaderName()));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Result<?>> handleMessageNotReadableException(HttpMessageNotReadableException e) {
+        return ResponseEntity.badRequest()
+                .body(Result.error(400, "请求体格式错误"));
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<Result<?>> handleMethodNotSupportedException(HttpRequestMethodNotSupportedException e) {
+        return ResponseEntity.status(405)
+                .body(Result.error(405, "请求方法不支持"));
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<Result<?>> handleMediaTypeNotSupportedException(HttpMediaTypeNotSupportedException e) {
+        return ResponseEntity.status(415)
+                .body(Result.error(415, "请求内容类型不支持"));
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)

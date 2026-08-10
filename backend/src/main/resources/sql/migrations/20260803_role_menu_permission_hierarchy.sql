@@ -29,7 +29,7 @@ VALUES
 (@inspection_menu_id, 'WEB', 'INSPECTION_RECORDS', '巡检记录', 'TAB', 'INSPECTION_RECORDS', 'inspection.view', 22, 1, 1, 1, 0),
 (@quality_menu_id, 'WEB', 'QUALITY_ISSUES', '质量问题', 'TAB', 'QUALITY_ISSUES', 'quality.view', 31, 1, 1, 1, 0),
 (@quality_menu_id, 'WEB', 'QUALITY_DOCUMENTS', '质量资料', 'TAB', 'QUALITY_DOCUMENTS', 'quality.view', 32, 1, 1, 1, 0)
-ON DUPLICATE KEY UPDATE menu_code = VALUES(menu_code);
+ON DUPLICATE KEY UPDATE menu_code = menu_code;
 
 -- 资料库此前随资料模块显示；回收站此前仅 document.manage 用户可见。
 INSERT IGNORE INTO sys_role_menu(role_id, menu_id)

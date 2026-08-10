@@ -26,6 +26,20 @@ class FileUploadPolicyTest {
     }
 
     @Test
+    void projectProfileOnlyAcceptsJpegPngAndWebp() {
+        MockMultipartFile jpeg = new MockMultipartFile(
+                "file", "效果图.jpeg", "image/jpeg",
+                new byte[]{(byte) 0xff, (byte) 0xd8, (byte) 0xff, 0x00});
+        MockMultipartFile gif = new MockMultipartFile(
+                "file", "效果图.gif", "image/gif", "GIF89a".getBytes());
+
+        assertDoesNotThrow(() ->
+                FileUploadPolicy.validateBusinessUpload(jpeg, "PROJECT_PROFILE_IMAGE_PENDING"));
+        assertThrows(BusinessException.class, () ->
+                FileUploadPolicy.validateBusinessUpload(gif, "PROJECT_PROFILE_IMAGE_PENDING"));
+    }
+
+    @Test
     void rejectsPdfDisguisedAsWorkflowPhoto() {
         MockMultipartFile fakePhoto = new MockMultipartFile(
                 "file", "现场照片.jpg", "image/jpeg", "%PDF-1.7".getBytes());

@@ -46,7 +46,7 @@ public class WebCorsConfig implements WebMvcConfigurer {
                         "http://127.0.0.1:3003"
                 )
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-                .allowedHeaders("Authorization", "Content-Type", "Accept")
+                .allowedHeaders("Authorization", "Content-Type", "Accept", "X-Visitor-Session")
                 .exposedHeaders("Content-Disposition")
                 .allowCredentials(true)
                 .maxAge(3600);

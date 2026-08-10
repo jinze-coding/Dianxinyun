@@ -16,6 +16,7 @@ frontend/logs/
 backend/logs/
 backups/development/dianxinyun-before-*.sql
 backups/development/uploads-before-*.tar.gz
+backups/development/*-before-*.sha256
 
 # Logs
 *.log

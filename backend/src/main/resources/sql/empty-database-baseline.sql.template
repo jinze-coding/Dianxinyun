@@ -20,8 +20,8 @@ CREATE TABLE project_info (
     period          VARCHAR(100) COMMENT '工期',
     phase           VARCHAR(50) COMMENT '当前阶段',
     project_status  VARCHAR(20) DEFAULT 'normal' COMMENT '项目状态: normal/warning/stopped',
-    safety_goal     VARCHAR(200) COMMENT '安全目标',
-    quality_goal    VARCHAR(200) COMMENT '质量目标',
+    safety_goal     VARCHAR(500) COMMENT '安全目标',
+    quality_goal    VARCHAR(500) COMMENT '质量目标',
     manager         VARCHAR(50) COMMENT '项目经理',
     contractor      VARCHAR(200) COMMENT '施工单位',
     description     TEXT COMMENT '项目描述',
@@ -34,6 +34,38 @@ CREATE TABLE project_info (
     district        VARCHAR(64) COMMENT '区县',
     address         VARCHAR(500) COMMENT '详细地址',
     coordinate_type VARCHAR(32) DEFAULT 'BD09' COMMENT '坐标系类型',
+    direct_company VARCHAR(200) COMMENT '直属公司',
+    manager_phone VARCHAR(30) COMMENT '项目经理联系方式',
+    space_capacity VARCHAR(100) COMMENT '空间容量',
+    engineering_type VARCHAR(100) COMMENT '工程类型',
+    actual_start_date DATE COMMENT '实际开工日期',
+    actual_end_date DATE COMMENT '实际竣工日期',
+    owner_unit VARCHAR(200) COMMENT '建设单位',
+    supervision_unit VARCHAR(200) COMMENT '监理单位',
+    design_unit VARCHAR(200) COMMENT '设计单位',
+    contractor_credit_code VARCHAR(32) COMMENT '施工单位统一社会信用代码',
+    contractor_license_number VARCHAR(100) COMMENT '施工单位安全生产许可证号',
+    general_contract_number VARCHAR(100) COMMENT '施工总承包合同编号',
+    project_classification VARCHAR(100) COMMENT '项目分类',
+    investment_entity VARCHAR(100) COMMENT '投资主体',
+    contracting_mode VARCHAR(100) COMMENT '承建模式',
+    contract_amount DECIMAL(18,2) COMMENT '合同金额',
+    building_area DECIMAL(14,2) COMMENT '建筑面积数值',
+    project_scale VARCHAR(100) COMMENT '项目规模',
+    project_target VARCHAR(200) COMMENT '项目目标',
+    land_area DECIMAL(14,2) COMMENT '用地面积',
+    building_height DECIMAL(10,3) COMMENT '建筑高度',
+    project_category VARCHAR(100) COMMENT '项目类别',
+    excavation_depth DECIMAL(10,3) COMMENT '基坑开挖深度',
+    underground_floor_count INT COMMENT '地下层数',
+    aboveground_floor_count INT COMMENT '地上层数',
+    green_construction_goal VARCHAR(500) COMMENT '绿色建造目标',
+    project_level VARCHAR(100) COMMENT '项目级别',
+    management_staff_count INT COMMENT '管理人员数',
+    attendance_count INT COMMENT '考勤人数',
+    party_member_count INT COMMENT '党员人数',
+    fixed_ip_address VARCHAR(45) COMMENT '固定IPv4或IPv6地址',
+    profile_version INT NOT NULL DEFAULT 0 COMMENT '项目档案乐观锁版本',
     deleted         TINYINT DEFAULT 0 COMMENT '删除标记',
     create_time     DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间'
@@ -290,7 +322,8 @@ CREATE TABLE file_resource (
     deleted         TINYINT DEFAULT 0 COMMENT '删除标记',
     create_time     DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    KEY idx_file_business (project_id, business_type, business_id, deleted)
+    KEY idx_file_business (project_id, business_type, business_id, deleted),
+    KEY idx_file_project_profile (project_id, business_type, business_id, status, deleted, create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文件资料表';
 
 -- =============================================
@@ -736,6 +769,7 @@ CREATE TABLE site_visit_invitation (
     travel_mode VARCHAR(20),
     vehicle_plate VARCHAR(20),
     visitor_remark VARCHAR(500),
+    source_profile_id BIGINT,
     privacy_agreed_time DATETIME,
     submitted_time DATETIME,
     void_reason VARCHAR(300),
@@ -753,7 +787,8 @@ CREATE TABLE site_visit_invitation (
     KEY idx_site_visit_project_time (project_id, visit_start_time, deleted),
     KEY idx_site_visit_project_status (project_id, status, visit_end_time, deleted),
     KEY idx_site_visit_host (project_id, host_user_id, visit_start_time),
-    KEY idx_site_visit_vehicle (project_id, vehicle_plate)
+    KEY idx_site_visit_vehicle (project_id, vehicle_plate),
+    KEY idx_site_visit_source_profile (source_profile_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='场内管理单次外访邀请';
 
 CREATE TABLE site_visit_person (
@@ -763,7 +798,7 @@ CREATE TABLE site_visit_person (
     person_type VARCHAR(20) NOT NULL,
     person_name VARCHAR(50) NOT NULL,
     id_card_encrypted VARCHAR(512) NOT NULL,
-    id_card_hash CHAR(64) NOT NULL,
+    id_card_hash CHAR(64) NOT NULL COMMENT '带用途隔离的HMAC-SHA256指纹',
     sort_order INT NOT NULL DEFAULT 1,
     deleted TINYINT NOT NULL DEFAULT 0,
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -786,6 +821,67 @@ CREATE TABLE site_visit_audit_log (
     KEY idx_site_visit_audit_invitation (invitation_id, create_time),
     KEY idx_site_visit_audit_project (project_id, action_type, create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='场内管理外访加密审计';
+
+-- =============================================
+-- 27-29. 外访人员同项目常用资料、逐人明细与加密审计
+-- =============================================
+CREATE TABLE site_visitor_profile (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    profile_code VARCHAR(40) NOT NULL,
+    project_id BIGINT NOT NULL,
+    wechat_app_id VARCHAR(64) NOT NULL,
+    owner_openid_encrypted VARCHAR(512) NOT NULL,
+    owner_openid_hash CHAR(64) NOT NULL,
+    profile_name VARCHAR(100) NOT NULL,
+    visitor_company VARCHAR(200) NOT NULL,
+    contact_name VARCHAR(50) NOT NULL,
+    contact_phone_encrypted VARCHAR(512) NOT NULL,
+    visitor_count INT NOT NULL DEFAULT 1,
+    travel_mode VARCHAR(20) NOT NULL,
+    vehicle_plate VARCHAR(20),
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    privacy_agreed_time DATETIME NOT NULL,
+    last_used_time DATETIME,
+    version INT NOT NULL DEFAULT 0,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_site_visitor_profile_code (profile_code),
+    KEY idx_site_visitor_profile_owner (project_id, wechat_app_id, owner_openid_hash, status, deleted),
+    KEY idx_site_visitor_profile_project (project_id, status, last_used_time, deleted),
+    KEY idx_site_visitor_profile_vehicle (project_id, vehicle_plate, deleted)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='外访人员同项目常用资料';
+
+CREATE TABLE site_visitor_profile_person (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    profile_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    person_type VARCHAR(20) NOT NULL,
+    person_name VARCHAR(50) NOT NULL,
+    id_card_encrypted VARCHAR(512) NOT NULL,
+    id_card_hash CHAR(64) NOT NULL COMMENT '带用途隔离的HMAC-SHA256指纹',
+    sort_order INT NOT NULL DEFAULT 1,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_site_visitor_profile_person (profile_id, deleted, sort_order),
+    KEY idx_site_visitor_profile_person_project (project_id, id_card_hash, deleted)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='常用资料逐人实名明细';
+
+CREATE TABLE site_visitor_profile_audit_log (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    profile_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    action_type VARCHAR(30) NOT NULL,
+    operator_id BIGINT,
+    operator_name VARCHAR(50) NOT NULL,
+    before_snapshot_encrypted LONGTEXT,
+    after_snapshot_encrypted LONGTEXT,
+    comment VARCHAR(500),
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_site_visitor_profile_audit_profile (profile_id, create_time),
+    KEY idx_site_visitor_profile_audit_project (project_id, action_type, create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='常用资料加密审计';
 
 -- =============================================
 -- 初始化单项目演示基础数据
@@ -1233,3 +1329,4 @@ WHERE @baseline_platform_admin_role_id IS NOT NULL
   AND enabled = 1 AND deleted = 0;
 
 INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260808_SEAL_APPLICATION_V1');
+INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260810_SITE_ACCESS_VISITOR_IDENTITY_HMAC_V1');

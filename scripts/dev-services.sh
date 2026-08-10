@@ -2,7 +2,8 @@
 
 set -u
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_PATH="${BASH_SOURCE[0]:-$0}"
+ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 WEB_DIR="$ROOT_DIR/frontend"
 MINIPROGRAM_DIR="$ROOT_DIR/wechat-miniprogram/site-platform-miniprogram"
@@ -21,9 +22,11 @@ WEB_SESSION="dianxinyun-web"
 MINIPROGRAM_SESSION="dianxinyun-miniprogram"
 MINIPROGRAM_H5_SESSION="dianxinyun-miniprogram-h5"
 
+WEB_HOST="${DIANXINYUN_WEB_HOST:-127.0.0.1}"
+MINIPROGRAM_H5_HOST="${DIANXINYUN_H5_HOST:-127.0.0.1}"
 BACKEND_URL="http://127.0.0.1:8080/doc.html"
-WEB_URL="http://127.0.0.1:3002"
-MINIPROGRAM_H5_URL="http://127.0.0.1:3003"
+WEB_URL="http://${WEB_HOST}:3002"
+MINIPROGRAM_H5_URL="http://${MINIPROGRAM_H5_HOST}:3003"
 MINIPROGRAM_APP_JSON="$MINIPROGRAM_DIR/dist/dev/mp-weixin/app.json"
 REDIS_HOST="127.0.0.1"
 REDIS_PORT="${DIANXINYUN_REDIS_PORT:-6380}"
@@ -73,8 +76,108 @@ screen_exists() {
   screen -ls 2>/dev/null | grep -q "[.]$1[[:space:]]"
 }
 
-listener_pid() {
+listener_pids() {
   lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null || true
+}
+
+process_cwd() {
+  lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1
+}
+
+process_owned_by_dir() {
+  local pid="$1"
+  local expected_dir="$2"
+  local cwd
+
+  cwd="$(process_cwd "$pid")"
+  case "$cwd" in
+    "$expected_dir"|"$expected_dir"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+owned_listener_pids() {
+  local port="$1"
+  local expected_dir="$2"
+  local pid
+
+  for pid in $(listener_pids "$port"); do
+    process_owned_by_dir "$pid" "$expected_dir" && printf '%s\n' "$pid"
+  done
+}
+
+validate_bind_host() {
+  local label="$1"
+  local host="$2"
+  local first second third fourth
+
+  case "$host" in
+    localhost|127.0.0.1) return 0 ;;
+  esac
+
+  IFS=. read -r first second third fourth <<EOF
+$host
+EOF
+  if ! [[ "$first" =~ ^[0-9]+$ && "$second" =~ ^[0-9]+$ && "$third" =~ ^[0-9]+$ && "$fourth" =~ ^[0-9]+$ ]]; then
+    fail "$label 只能绑定 localhost、127.0.0.1 或私有 IPv4 地址"
+  fi
+  if [ "$first" -gt 255 ] || [ "$second" -gt 255 ] || [ "$third" -gt 255 ] || [ "$fourth" -gt 255 ]; then
+    fail "$label 包含非法 IPv4 地址：$host"
+  fi
+  if [ "$first" -eq 10 ] \
+    || { [ "$first" -eq 172 ] && [ "$second" -ge 16 ] && [ "$second" -le 31 ]; } \
+    || { [ "$first" -eq 192 ] && [ "$second" -eq 168 ]; }; then
+    return 0
+  fi
+  fail "$label 禁止绑定公网地址或 0.0.0.0：$host"
+}
+
+existing_owned_service_ready() {
+  local label="$1"
+  local url="$2"
+  local port="$3"
+  local expected_dir="$4"
+  local pids
+  local pid
+  local cwd
+
+  pids="$(listener_pids "$port")"
+  [ -z "$pids" ] && return 1
+
+  for pid in $pids; do
+    if ! process_owned_by_dir "$pid" "$expected_dir"; then
+      cwd="$(process_cwd "$pid")"
+      fail "$port 端口由非本项目进程占用（PID $pid，工作目录 ${cwd:-未知}），不会复用或停止"
+    fi
+  done
+
+  if curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
+    info "$label 已由本项目进程运行：$url"
+    return 0
+  fi
+  fail "$label 的本项目进程正在监听 $port，但健康检查失败；请先检查日志或执行 stop"
+}
+
+owned_http_service_state() {
+  local url="$1"
+  local port="$2"
+  local expected_dir="$3"
+  local pids
+  local pid
+
+  pids="$(listener_pids "$port")"
+  [ -z "$pids" ] && { printf '未运行'; return 0; }
+  for pid in $pids; do
+    if ! process_owned_by_dir "$pid" "$expected_dir"; then
+      printf '端口被非本项目进程占用'
+      return 0
+    fi
+  done
+  if curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
+    printf '运行中'
+  else
+    printf '本项目进程未就绪'
+  fi
 }
 
 resolve_lan_ipv4() {
@@ -141,6 +244,8 @@ check_dependencies() {
   require_command mvn
   require_command npm
   resolve_redis_cli
+  validate_bind_host "PC Web" "$WEB_HOST"
+  validate_bind_host "小程序 H5" "$MINIPROGRAM_H5_HOST"
 
   if ! mysqladmin ping -h 127.0.0.1 -u root --silent >/dev/null 2>&1; then
     fail "MySQL 未运行，请先启动本机 MySQL"
@@ -167,13 +272,8 @@ check_dependencies() {
 }
 
 start_backend() {
-  if curl -fsS --max-time 2 "$BACKEND_URL" >/dev/null 2>&1; then
-    info "共享后端已在 8080 端口运行"
+  if existing_owned_service_ready "共享后端" "$BACKEND_URL" 8080 "$BACKEND_DIR"; then
     return 0
-  fi
-
-  if [ -n "$(listener_pid 8080)" ]; then
-    fail "8080 端口已被其它进程占用"
   fi
 
   : > "$LOG_DIR/backend.log"
@@ -183,18 +283,13 @@ start_backend() {
 }
 
 start_web() {
-  if curl -fsS --max-time 2 "$WEB_URL" >/dev/null 2>&1; then
-    info "PC Web 已在 3002 端口运行"
+  if existing_owned_service_ready "PC Web" "$WEB_URL" 3002 "$WEB_DIR"; then
     return 0
-  fi
-
-  if [ -n "$(listener_pid 3002)" ]; then
-    fail "3002 端口已被其它进程占用"
   fi
 
   : > "$LOG_DIR/web.log"
   screen -dmS "$WEB_SESSION" bash -lc \
-    "cd '$WEB_DIR' && exec npm run dev -- --host 0.0.0.0 >> '$LOG_DIR/web.log' 2>&1"
+    "cd '$WEB_DIR' && exec env VITE_DEV_HOST='$WEB_HOST' npm run dev -- --host '$WEB_HOST' >> '$LOG_DIR/web.log' 2>&1"
   wait_for_http "PC Web" "$WEB_URL" 60
 }
 
@@ -226,18 +321,13 @@ start_miniprogram() {
 }
 
 start_miniprogram_h5() {
-  if curl -fsS --max-time 2 "$MINIPROGRAM_H5_URL" >/dev/null 2>&1; then
-    info "小程序 H5 扫码预览已在 3003 端口运行"
+  if existing_owned_service_ready "小程序 H5 扫码预览" "$MINIPROGRAM_H5_URL" 3003 "$MINIPROGRAM_DIR"; then
     return 0
-  fi
-
-  if [ -n "$(listener_pid 3003)" ]; then
-    fail "3003 端口已被其它进程占用"
   fi
 
   : > "$LOG_DIR/miniprogram-h5.log"
   screen -dmS "$MINIPROGRAM_H5_SESSION" bash -lc \
-    "cd '$MINIPROGRAM_DIR' && exec env VITE_USE_MOCK=false npm run dev:h5:real >> '$LOG_DIR/miniprogram-h5.log' 2>&1"
+    "cd '$MINIPROGRAM_DIR' && exec env VITE_USE_MOCK=false VITE_DEV_HOST='$MINIPROGRAM_H5_HOST' npm run dev:h5:real >> '$LOG_DIR/miniprogram-h5.log' 2>&1"
   wait_for_http "小程序 H5 扫码预览" "$MINIPROGRAM_H5_URL" 60
 }
 
@@ -256,26 +346,37 @@ stop_screen() {
   info "$label 已停止"
 }
 
-stop_port() {
+stop_owned_port() {
   local port="$1"
   local label="$2"
+  local expected_dir="$3"
+  local all_pids
   local pids
   local attempt=0
 
-  pids="$(listener_pid "$port")"
-  [ -z "$pids" ] && return 0
+  all_pids="$(listener_pids "$port")"
+  pids="$(owned_listener_pids "$port" "$expected_dir")"
+  if [ -z "$pids" ]; then
+    [ -n "$all_pids" ] && warn "$port 端口由非本项目进程占用，已保留：$all_pids"
+    return 0
+  fi
 
   kill $pids >/dev/null 2>&1 || true
-  while [ "$attempt" -lt 20 ] && [ -n "$(listener_pid "$port")" ]; do
+  while [ "$attempt" -lt 20 ] && [ -n "$(owned_listener_pids "$port" "$expected_dir")" ]; do
     attempt=$((attempt + 1))
     sleep 0.25
   done
 
-  pids="$(listener_pid "$port")"
+  pids="$(owned_listener_pids "$port" "$expected_dir")"
   if [ -n "$pids" ]; then
     kill -9 $pids >/dev/null 2>&1 || true
   fi
-  info "$label 端口 $port 已释放"
+  info "$label 的本项目端口进程已停止（${port}）"
+
+  pids="$(listener_pids "$port")"
+  if [ -n "$pids" ]; then
+    warn "$port 端口仍由非本项目进程占用，已保留：$pids"
+  fi
 }
 
 miniprogram_watcher_pids() {
@@ -315,9 +416,9 @@ stop_all() {
   stop_screen "$BACKEND_SESSION" "共享后端"
 
   # 兼容清理以前从普通终端或临时执行会话启动的本项目服务。
-  stop_port 3002 "PC Web"
-  stop_port 3003 "小程序 H5 扫码预览"
-  stop_port 8080 "共享后端"
+  stop_owned_port 3002 "PC Web" "$WEB_DIR"
+  stop_owned_port 3003 "小程序 H5 扫码预览" "$MINIPROGRAM_DIR"
+  stop_owned_port 8080 "共享后端" "$BACKEND_DIR"
   stop_miniprogram_watchers
 }
 
@@ -329,8 +430,8 @@ show_status() {
   local watcher_pids
   local watcher_count
 
-  curl -fsS --max-time 2 "$BACKEND_URL" >/dev/null 2>&1 && backend_state="运行中"
-  curl -fsS --max-time 2 "$WEB_URL" >/dev/null 2>&1 && web_state="运行中"
+  backend_state="$(owned_http_service_state "$BACKEND_URL" 8080 "$BACKEND_DIR")"
+  web_state="$(owned_http_service_state "$WEB_URL" 3002 "$WEB_DIR")"
   watcher_pids="$(miniprogram_watcher_pids)"
   set -- $watcher_pids
   watcher_count=$#
@@ -339,7 +440,7 @@ show_status() {
   elif [ "$watcher_count" -gt 0 ]; then
     miniprogram_state="存在 ${watcher_count} 个遗留监听"
   fi
-  curl -fsS --max-time 2 "$MINIPROGRAM_H5_URL" >/dev/null 2>&1 && miniprogram_h5_state="运行中"
+  miniprogram_h5_state="$(owned_http_service_state "$MINIPROGRAM_H5_URL" 3003 "$MINIPROGRAM_DIR")"
 
   printf '共享后端：%s  %s\n' "$backend_state" "$BACKEND_URL"
   printf 'PC Web： %s  %s\n' "$web_state" "$WEB_URL"
@@ -429,6 +530,7 @@ usage() {
 EOF
 }
 
+main() {
 case "${1:-status}" in
   start)
     start_all
@@ -452,3 +554,8 @@ case "${1:-status}" in
     exit 1
     ;;
 esac
+}
+
+if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
+  main "$@"
+fi

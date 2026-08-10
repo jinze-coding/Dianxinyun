@@ -1726,6 +1726,11 @@ button.danger {
   opacity: 0.68;
 }
 
+.system-tree-row.unavailable {
+  color: #a86a00;
+  background: #fffaf0;
+}
+
 .system-tree-expand {
   width: 24px;
   height: 24px;
@@ -1742,6 +1747,23 @@ button.danger {
 
 .system-tree-children .system-tree-row {
   padding-left: 28px;
+}
+
+.permission-menu-groups {
+  background: #fff;
+}
+
+.permission-menu-group + .permission-menu-group {
+  border-top: 1px solid #edf2f8;
+}
+
+.system-tree-row.permission-page-row {
+  padding-left: 28px;
+  background: #fbfcfe;
+}
+
+.permission-action-children .system-tree-row {
+  padding-left: 56px;
 }
 
 .permission-tree {

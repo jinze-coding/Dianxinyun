@@ -132,6 +132,65 @@ export interface Project {
   pendingRectificationCount?: number;
 }
 
+export interface ProjectProfileImage {
+  fileId: number;
+  fileName: string;
+  mimeType?: string;
+  fileSize?: number;
+  sortOrder?: number;
+  cover?: boolean;
+}
+
+export interface ProjectProfile {
+  projectId: number;
+  projectName: string;
+  shortName: string;
+  directCompany?: string;
+  manager?: string;
+  managerPhone?: string;
+  spaceCapacity?: string;
+  address?: string;
+  engineeringType?: string;
+  startDate?: string;
+  endDate?: string;
+  actualStartDate?: string;
+  actualEndDate?: string;
+  phase?: string;
+  description?: string;
+  ownerUnit?: string;
+  supervisionUnit?: string;
+  designUnit?: string;
+  contractor?: string;
+  contractorCreditCode?: string;
+  contractorLicenseNumber?: string;
+  generalContractNumber?: string;
+  projectClassification?: string;
+  investmentEntity?: string;
+  contractingMode?: string;
+  contractAmount?: number;
+  buildingArea?: number;
+  projectScale?: string;
+  projectTarget?: string;
+  landArea?: number;
+  buildingHeight?: number;
+  projectCategory?: string;
+  excavationDepth?: number;
+  undergroundFloorCount?: number;
+  abovegroundFloorCount?: number;
+  qualityGoal?: string;
+  safetyGoal?: string;
+  greenConstructionGoal?: string;
+  projectLevel?: string;
+  managementStaffCount?: number;
+  attendanceCount?: number;
+  partyMemberCount?: number;
+  fixedIpAddress?: string;
+  profileVersion: number;
+  updateTime?: string;
+  canEdit: boolean;
+  images: ProjectProfileImage[];
+}
+
 export interface ElectricBox {
   id: number;
   projectId: number;

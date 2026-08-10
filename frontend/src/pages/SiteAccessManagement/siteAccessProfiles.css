@@ -1,0 +1,60 @@
+.site-access-profile-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--sa-border);
+}
+.site-access-profile-toolbar select,
+.site-access-profile-toolbar input {
+  min-height: 34px;
+  border: 1px solid var(--sa-border);
+  border-radius: 6px;
+  padding: 0 10px;
+}
+.site-access-profile-toolbar select { width: 120px; }
+.site-access-profile-toolbar input { min-width: 220px; flex: 1; }
+.site-access-profile-toolbar span {
+  max-width: 320px;
+  color: var(--sa-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.site-access-profile-table { max-height: 480px; overflow: auto; }
+.site-access-profile-table table { width: 100%; border-collapse: collapse; }
+.site-access-profile-table th,
+.site-access-profile-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--sa-border);
+  text-align: left;
+  vertical-align: middle;
+}
+.site-access-profile-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f4f7fa;
+  color: var(--sa-secondary);
+  font-size: 12px;
+}
+.site-access-profile-table td small {
+  display: block;
+  margin-top: 4px;
+  color: var(--sa-muted);
+}
+.site-access-profile-status {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 12px;
+}
+.site-access-profile-status.active { background: #e8f6ee; color: #27704e; }
+.site-access-profile-status.disabled { background: #f1f3f5; color: #75808b; }
+.site-access-profile-people-title { margin: 6px 16px 8px; }
+@media (max-width: 760px) {
+  .site-access-profile-toolbar { align-items: stretch; flex-direction: column; }
+  .site-access-profile-toolbar select,
+  .site-access-profile-toolbar input { width: 100%; min-width: 0; }
+  .site-access-profile-toolbar span { max-width: none; }
+  .site-access-profile-table table { min-width: 820px; }
+}

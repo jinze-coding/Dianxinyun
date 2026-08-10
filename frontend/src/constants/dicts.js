@@ -97,6 +97,7 @@ export const PAGE_IDS = {
   ELECTRIC_INSPECTION: 'electric_inspection',
   PERSONAL_INBOX: 'personal_inbox',
   SYSTEM_MANAGEMENT: 'system_management',
+  PROJECT_INFORMATION: 'project_information',
 };
 
 // 账号密码、微信扫码登录以及已登录会话恢复后的统一首页。

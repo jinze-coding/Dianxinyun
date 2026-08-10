@@ -1,71 +1,213 @@
 package com.example.siteplatform.siteaccess.controller;
 
 import com.example.siteplatform.common.BusinessException;
+import com.example.siteplatform.common.GlobalExceptionHandler;
 import com.example.siteplatform.common.RedisRateLimitService;
-import com.example.siteplatform.siteaccess.dto.PublicSiteVisitResolveRequest;
-import com.example.siteplatform.siteaccess.dto.PublicSiteVisitSubmitRequest;
+import com.example.siteplatform.siteaccess.security.PublicSiteAccessRequestGuardFilter;
 import com.example.siteplatform.siteaccess.service.SiteAccessService;
-import jakarta.servlet.http.HttpServletRequest;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockFilterChain;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.Duration;
 
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @ExtendWith(MockitoExtension.class)
 class PublicSiteAccessControllerRateLimitTest {
+    private static final String CLIENT_IP = "203.0.113.9";
+    private static final String BASE = "/api/v1/public/site-access";
+
     @Mock private SiteAccessService service;
     @Mock private RedisRateLimitService rateLimitService;
-    @Mock private HttpServletRequest httpRequest;
 
-    private PublicSiteAccessController controller;
+    private MockMvc mockMvc;
+    private PublicSiteAccessRequestGuardFilter filter;
 
     @BeforeEach
     void setUp() {
-        controller = new PublicSiteAccessController(service, rateLimitService);
-        when(httpRequest.getRemoteAddr()).thenReturn("203.0.113.9");
+        PublicSiteAccessController controller = new PublicSiteAccessController(service);
+        filter = new PublicSiteAccessRequestGuardFilter(
+                rateLimitService, new ObjectMapper().findAndRegisterModules());
+        mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .addFilters(filter)
+                .build();
     }
 
     @Test
-    void resolveIsRateLimitedBeforeInvitationLookup() {
-        PublicSiteVisitResolveRequest request = new PublicSiteVisitResolveRequest();
-        request.setInviteToken("development-token-value");
+    void existingEndpointsKeepOriginalQuotasBeforeMvcBinding() throws Exception {
+        mockMvc.perform(withClient(post(BASE + "/invitations/resolve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"inviteToken\":\"development-token-value\"}")))
+                .andExpect(status().isOk());
+        mockMvc.perform(withClient(post(BASE + "/invitations/submit")
+                        .contentType(MediaType.APPLICATION_JSON).content("{}")))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(withClient(post(BASE + "/visitor-sessions")
+                        .contentType(MediaType.APPLICATION_JSON).content("{}")))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(withClient(post(BASE + "/visitor-profiles/list")
+                        .header("X-Visitor-Session", "session-token")))
+                .andExpect(status().isOk());
+        mockMvc.perform(withClient(post(BASE + "/visitor-profiles/detail")
+                        .header("X-Visitor-Session", "session-token")
+                        .contentType(MediaType.APPLICATION_JSON).content("{}")))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(withClient(post(BASE + "/visitor-profiles/disable")
+                        .header("X-Visitor-Session", "session-token")
+                        .contentType(MediaType.APPLICATION_JSON).content("{}")))
+                .andExpect(status().isBadRequest());
 
-        controller.resolve(request, httpRequest);
-
-        verify(rateLimitService).check(
-                "public-site-visit-resolve", "203.0.113.9", 60, Duration.ofMinutes(10));
+        verify(rateLimitService).check("public-site-visit-resolve", CLIENT_IP,
+                60, Duration.ofMinutes(10));
+        verify(rateLimitService).check("public-site-visit-submit", CLIENT_IP,
+                10, Duration.ofMinutes(30));
+        verify(rateLimitService).check("public-site-visitor-session", CLIENT_IP,
+                20, Duration.ofMinutes(10));
+        verify(rateLimitService).check("public-site-visitor-profile-list", CLIENT_IP,
+                60, Duration.ofMinutes(10));
+        verify(rateLimitService).check("public-site-visitor-profile-detail", CLIENT_IP,
+                60, Duration.ofMinutes(10));
+        verify(rateLimitService).check("public-site-visitor-profile-disable", CLIENT_IP,
+                10, Duration.ofMinutes(30));
         verify(service).resolvePublic("development-token-value");
     }
 
     @Test
-    void submitIsRateLimitedBeforeLockingInvitation() {
-        PublicSiteVisitSubmitRequest request = new PublicSiteVisitSubmitRequest();
+    void missingVisitorSessionIsRateLimitedThenReturnsHttp401() throws Exception {
+        mockMvc.perform(withClient(post(BASE + "/visitor-profiles/list")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401))
+                .andExpect(jsonPath("$.message").value("外访临时会话无效，请重新打开邀请"));
 
-        controller.submit(request, httpRequest);
-
-        verify(rateLimitService).check(
-                "public-site-visit-submit", "203.0.113.9", 10, Duration.ofMinutes(30));
-        verify(service).submitPublic(request);
+        verify(rateLimitService).check("public-site-visitor-profile-list", CLIENT_IP,
+                60, Duration.ofMinutes(10));
+        verify(service, never()).publicVisitorProfiles(anyString());
     }
 
     @Test
-    void exceededSubmitLimitStopsBeforeBusinessService() {
+    void malformedJsonIsRateLimitedThenReturnsControlledHttp400() throws Exception {
+        mockMvc.perform(withClient(post(BASE + "/invitations/resolve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{not-json")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("请求体格式错误"));
+
+        verify(rateLimitService).check("public-site-visit-resolve", CLIENT_IP,
+                60, Duration.ofMinutes(10));
+        verify(service, never()).resolvePublic(anyString());
+    }
+
+    @Test
+    void wrongMethodIsRateLimitedThenReturnsControlledHttp405() throws Exception {
+        mockMvc.perform(withClient(get(BASE + "/invitations/resolve")))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value(405))
+                .andExpect(jsonPath("$.message").value("请求方法不支持"));
+
+        verify(rateLimitService).check("public-site-visit-resolve", CLIENT_IP,
+                60, Duration.ofMinutes(10));
+    }
+
+    @Test
+    void unsupportedMediaTypeIsRateLimitedThenReturnsControlledHttp415() throws Exception {
+        mockMvc.perform(withClient(post(BASE + "/invitations/resolve")
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .content("{}")))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value(415))
+                .andExpect(jsonPath("$.message").value("请求内容类型不支持"));
+
+        verify(rateLimitService).check("public-site-visit-resolve", CLIENT_IP,
+                60, Duration.ofMinutes(10));
+    }
+
+    @Test
+    void oversizedBodyIsRateLimitedThenRejectedBeforeMvcBinding() throws Exception {
+        byte[] oversized = new byte[64 * 1024 + 1];
+        mockMvc.perform(withClient(post(BASE + "/invitations/resolve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(oversized)))
+                .andExpect(status().isPayloadTooLarge())
+                .andExpect(jsonPath("$.code").value(413))
+                .andExpect(jsonPath("$.message").value("请求体不能超过64KB"));
+
+        verify(rateLimitService).check("public-site-visit-resolve", CLIENT_IP,
+                60, Duration.ofMinutes(10));
+        verify(service, never()).resolvePublic(anyString());
+    }
+
+    @Test
+    void exceededQuotaStopsBeforeMvcAndIsNotChargedTwice() throws Exception {
         doThrow(BusinessException.of(429, "操作过于频繁，请稍后再试"))
-                .when(rateLimitService).check(
-                        "public-site-visit-submit", "203.0.113.9", 10, Duration.ofMinutes(30));
+                .when(rateLimitService).check("public-site-visit-resolve", CLIENT_IP,
+                        60, Duration.ofMinutes(10));
 
-        assertThrows(BusinessException.class,
-                () -> controller.submit(new PublicSiteVisitSubmitRequest(), httpRequest));
+        mockMvc.perform(withClient(post(BASE + "/invitations/resolve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{not-json")))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value(429));
 
-        verify(service, never()).submitPublic(org.mockito.ArgumentMatchers.any());
+        verify(rateLimitService, times(1)).check("public-site-visit-resolve", CLIENT_IP,
+                60, Duration.ofMinutes(10));
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void unavailableRateLimitBackendFailsClosedWithoutLeakingCause() throws Exception {
+        doThrow(new IllegalStateException("redis-password-and-host"))
+                .when(rateLimitService).check("public-site-visit-resolve", CLIENT_IP,
+                        60, Duration.ofMinutes(10));
+
+        mockMvc.perform(withClient(post(BASE + "/invitations/resolve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"inviteToken\":\"development-token-value\"}")))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value(503))
+                .andExpect(jsonPath("$.message").value("请求校验服务暂时不可用"));
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void validCorsPreflightDoesNotConsumeBusinessQuota() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("OPTIONS",
+                BASE + "/invitations/resolve");
+        request.setRemoteAddr(CLIENT_IP);
+        request.addHeader("Origin", "http://127.0.0.1:3003");
+        request.addHeader("Access-Control-Request-Method", "POST");
+
+        filter.doFilter(request, new MockHttpServletResponse(), new MockFilterChain());
+
+        verifyNoInteractions(rateLimitService, service);
+    }
+
+    private MockHttpServletRequestBuilder withClient(MockHttpServletRequestBuilder request) {
+        return request.with(value -> {
+            value.setRemoteAddr(CLIENT_IP);
+            return value;
+        });
     }
 }

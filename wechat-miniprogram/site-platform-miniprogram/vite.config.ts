@@ -51,15 +51,24 @@ function validateMpRealEnvironment(mode: string, env: Record<string, string>) {
   }
 }
 
+function resolveDevelopmentHost(env: Record<string, string>) {
+  const host = env.VITE_DEV_HOST?.trim() || '127.0.0.1';
+  if (host === '0.0.0.0' || !isLocalOrPrivateHost(host)) {
+    throw new Error('VITE_DEV_HOST 只能使用 localhost、127.0.0.1 或私有局域网地址');
+  }
+  return host;
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   validateMpRealEnvironment(mode, env);
+  const developmentHost = resolveDevelopmentHost(env);
 
   return {
     plugins: [uni()],
     server: {
       port: 3003,
-      host: '0.0.0.0',
+      host: developmentHost,
       cors: {
         origin: trustedDevelopmentOrigin,
       },

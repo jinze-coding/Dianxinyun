@@ -28,6 +28,18 @@ export function getSiteVisitMiniCode(id) {
   return get(`/site-access/invitations/${id}/mini-code`);
 }
 
+export function getSiteVisitorProfiles(params = {}) {
+  return get('/site-access/visitor-profiles', params);
+}
+
+export function getSiteVisitorProfile(id) {
+  return get(`/site-access/visitor-profiles/${id}`);
+}
+
+export function disableSiteVisitorProfile(id) {
+  return post(`/site-access/visitor-profiles/${id}/disable`);
+}
+
 export async function exportSiteVisitVisitors(params = {}) {
   try {
     const blob = await apiClient.get('/site-access/visitors/export', {
