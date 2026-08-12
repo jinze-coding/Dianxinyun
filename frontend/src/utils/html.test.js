@@ -13,16 +13,21 @@ test('escapeHtml escapes text and attribute delimiters', () => {
   );
 });
 
-test('normalizeQrImageSource only accepts generated PNG and encoded SVG data URLs', () => {
+test('normalizeQrImageSource only accepts generated PNG, JPEG and encoded SVG data URLs', () => {
   assert.equal(
     normalizeQrImageSource('data:image/png;base64,QUJDRA=='),
     'data:image/png;base64,QUJDRA==',
+  );
+  assert.equal(
+    normalizeQrImageSource('data:image/jpeg;base64,/9j/4AAQSkZJRg=='),
+    'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
   );
   const encodedSvg = normalizeQrImageSource('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
   assert.match(encodedSvg, /^data:image\/svg\+xml;charset=utf-8,/);
   assert.equal(encodedSvg.includes('<svg'), false);
   assert.equal(normalizeQrImageSource('javascript:alert(1)'), '');
   assert.equal(normalizeQrImageSource('data:text/html,<script>alert(1)</script>'), '');
+  assert.equal(normalizeQrImageSource('data:image/jpeg;base64,<script>alert(1)</script>'), '');
   assert.equal(normalizeQrImageSource('data:image/svg+xml;charset=utf-8,<svg onload=alert(1)>'), '');
 });
 

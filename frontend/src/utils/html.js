@@ -16,7 +16,7 @@ export function normalizeQrImageSource(imageContent) {
   if (content.startsWith('<svg')) {
     return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}`;
   }
-  if (/^data:image\/png;base64,[A-Za-z0-9+/=]+$/i.test(content)) {
+  if (/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/=]+$/i.test(content)) {
     return content;
   }
   const svgPrefix = 'data:image/svg+xml;charset=utf-8,';
