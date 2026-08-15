@@ -38,19 +38,39 @@ public class PublicSiteAccessRequestGuardFilter extends OncePerRequestFilter {
     private static final String BASE_PATH = "/api/v1/public/site-access";
     private static final RateLimitRule UNKNOWN_PATH_RULE = new RateLimitRule(
             "public-site-access-invalid", 60, Duration.ofMinutes(10));
-    private static final Map<String, RateLimitRule> RULES = Map.of(
-            BASE_PATH + "/invitations/resolve",
-            new RateLimitRule("public-site-visit-resolve", 60, Duration.ofMinutes(10)),
-            BASE_PATH + "/invitations/submit",
-            new RateLimitRule("public-site-visit-submit", 10, Duration.ofMinutes(30)),
-            BASE_PATH + "/visitor-sessions",
-            new RateLimitRule("public-site-visitor-session", 20, Duration.ofMinutes(10)),
-            BASE_PATH + "/visitor-profiles/list",
-            new RateLimitRule("public-site-visitor-profile-list", 60, Duration.ofMinutes(10)),
-            BASE_PATH + "/visitor-profiles/detail",
-            new RateLimitRule("public-site-visitor-profile-detail", 60, Duration.ofMinutes(10)),
-            BASE_PATH + "/visitor-profiles/disable",
-            new RateLimitRule("public-site-visitor-profile-disable", 10, Duration.ofMinutes(30)));
+    private static final Map<String, RateLimitRule> RULES = Map.ofEntries(
+            Map.entry(BASE_PATH + "/invitations/resolve",
+                    new RateLimitRule("public-site-visit-resolve", 60, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/invitations/submit",
+                    new RateLimitRule("public-site-visit-submit", 10, Duration.ofMinutes(30))),
+            Map.entry(BASE_PATH + "/project-profile",
+                    new RateLimitRule("public-site-project-profile", 60, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/project-profile/images",
+                    new RateLimitRule("public-site-project-profile-image", 120, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/project-location/route-image",
+                    new RateLimitRule("public-site-project-route-image", 120, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/visitor-sessions",
+                    new RateLimitRule("public-site-visitor-session", 20, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/visitor-profiles/list",
+                    new RateLimitRule("public-site-visitor-profile-list", 60, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/visitor-profiles/detail",
+                    new RateLimitRule("public-site-visitor-profile-detail", 60, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/visitor-profiles/disable",
+                    new RateLimitRule("public-site-visitor-profile-disable", 10, Duration.ofMinutes(30))),
+            Map.entry(BASE_PATH + "/guard/session",
+                    new RateLimitRule("public-site-guard-session", 20, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/guard/submit",
+                    new RateLimitRule("public-site-guard-submit", 10, Duration.ofMinutes(30))),
+            Map.entry(BASE_PATH + "/guard/project-profile",
+                    new RateLimitRule("public-site-guard-project-profile", 60, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/guard/project-profile/images",
+                    new RateLimitRule("public-site-guard-project-profile-image", 120, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/guard/profiles/list",
+                    new RateLimitRule("public-site-guard-profile-list", 60, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/guard/profiles/detail",
+                    new RateLimitRule("public-site-guard-profile-detail", 60, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/guard/profiles/disable",
+                    new RateLimitRule("public-site-guard-profile-disable", 10, Duration.ofMinutes(30))));
 
     private final RedisRateLimitService rateLimitService;
     private final ObjectMapper objectMapper;

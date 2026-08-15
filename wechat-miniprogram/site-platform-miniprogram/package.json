@@ -1,6 +1,6 @@
 {
   "name": "site-platform-miniprogram",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "电信云平台现场端小程序",
   "type": "module",
   "scripts": {
@@ -13,8 +13,9 @@
     "build:mp-weixin": "uni build -p mp-weixin",
     "build:mp-weixin:real": "uni build -p mp-weixin --mode mp-real && npm run verify:mp-weixin:real",
     "type-check": "vue-tsc --noEmit",
+    "test:project-location": "node --experimental-strip-types scripts/test-project-map-navigation.mjs",
     "test:visitor-profile": "node --experimental-strip-types scripts/test-visitor-profile-flow.mjs",
-    "test:scan": "node --experimental-strip-types scripts/test-electric-box-scene.mjs && node --experimental-strip-types scripts/test-visitor-invite-scene.mjs && npm run test:visitor-profile && node --experimental-strip-types scripts/test-seal-scene.mjs",
+    "test:scan": "node --experimental-strip-types scripts/test-electric-box-scene.mjs && node --experimental-strip-types scripts/test-visitor-invite-scene.mjs && node --experimental-strip-types scripts/test-guard-visitor-scene.mjs && npm run test:visitor-profile && npm run test:project-location && node --experimental-strip-types scripts/test-seal-scene.mjs",
     "verify:mp-weixin:real": "node scripts/verify-mp-weixin-real.mjs"
   },
   "dependencies": {

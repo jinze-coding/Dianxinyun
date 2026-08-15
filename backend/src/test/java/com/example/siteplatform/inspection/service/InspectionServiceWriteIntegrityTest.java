@@ -132,6 +132,23 @@ class InspectionServiceWriteIntegrityTest {
     }
 
     @Test
+    void rejectsMissingRequiredOuterOrInnerPhotosBeforeDatabaseAccess() {
+        InspectionRecordRequest missingOuter = request();
+        missingOuter.setOuterPhotoFileIds(List.of());
+        BusinessException outerError = assertThrows(BusinessException.class,
+                () -> service.createRecord(missingOuter, operator));
+        InspectionRecordRequest missingInner = request();
+        missingInner.setInnerPhotoFileIds(null);
+        BusinessException innerError = assertThrows(BusinessException.class,
+                () -> service.createRecord(missingInner, operator));
+
+        assertTrue(outerError.getMessage().contains("至少上传一张外观照片"));
+        assertTrue(innerError.getMessage().contains("至少上传一张内部照片"));
+        verify(electricBoxMapper, never()).selectByIdForUpdate(anyLong());
+        verify(recordMapper, never()).insert(any());
+    }
+
+    @Test
     void locksBoxAndUsesServerControlledTemplateAndCanonicalItemNames() {
         when(electricBoxMapper.selectByIdForUpdate(10L)).thenReturn(box());
         InspectionRecordRequest request = request();
@@ -293,6 +310,8 @@ class InspectionServiceWriteIntegrityTest {
         record.setProjectId(1L);
         record.setElectricBoxId(10L);
         record.setInspectorId(7L);
+        record.setOuterPhotoFileIds("11");
+        record.setInnerPhotoFileIds("12");
         when(recordMapper.selectById(100L)).thenReturn(record);
         when(recordMapper.updateById(record)).thenReturn(0);
 
@@ -300,6 +319,23 @@ class InspectionServiceWriteIntegrityTest {
                 () -> service.submitRecord(100L, operator));
 
         assertEquals(409, error.getCode());
+    }
+
+    @Test
+    void compatibleSubmitRejectsRecordWithoutRequiredPhotoGroups() {
+        InspectionRecord record = new InspectionRecord();
+        record.setId(100L);
+        record.setProjectId(1L);
+        record.setElectricBoxId(10L);
+        record.setInspectorId(7L);
+        record.setOuterPhotoFileIds("11");
+        when(recordMapper.selectById(100L)).thenReturn(record);
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.submitRecord(100L, operator));
+
+        assertTrue(error.getMessage().contains("至少上传一张内部照片"));
+        verify(recordMapper, never()).updateById(any());
     }
 
     private InspectionRecordRequest request() {
@@ -310,6 +346,8 @@ class InspectionServiceWriteIntegrityTest {
         request.setSource(InspectionService.SOURCE_ELECTRICIAN_DAILY);
         request.setCheckDate(LocalDate.now());
         request.setRemark("现场正常");
+        request.setOuterPhotoFileIds(List.of(11L));
+        request.setInnerPhotoFileIds(List.of(12L));
         request.setItems(new ArrayList<>(List.of(
                 item("APPEARANCE", "内外观", "NORMAL", null),
                 item("LEAKAGE_PROTECTOR", "漏电保护器", "NORMAL", null),

@@ -54,7 +54,7 @@ class VisitorProfileServiceTest {
     }
 
     @Test
-    void createEncryptsIdentityPhonePeopleAndAuditSnapshot() {
+    void createStoresPhoneButNoPersonIdentity() {
         var context = context();
         when(sessionService.decryptOpenid(context)).thenReturn("external-openid");
         when(projectInfoMapper.selectByIdForUpdate(10L)).thenReturn(project());
@@ -81,10 +81,10 @@ class VisitorProfileServiceTest {
         assertThat(profile.getContactPhoneEncrypted()).startsWith("v1:").doesNotContain("13800000000");
         ArgumentCaptor<SiteVisitorProfilePerson> personCaptor = ArgumentCaptor.forClass(SiteVisitorProfilePerson.class);
         verify(personMapper).insert(personCaptor.capture());
-        assertThat(personCaptor.getValue().getIdCardEncrypted()).startsWith("v1:").doesNotContain("990000200001010011");
-        assertThat(personCaptor.getValue().getIdCardHash())
-                .isEqualTo(crypto.idCardFingerprint("990000200001010011"))
-                .isNotEqualTo(crypto.digest("990000200001010011"));
+        assertThat(personCaptor.getValue().getPersonCompany()).isEqualTo("外访单位");
+        assertThat(crypto.decrypt(personCaptor.getValue().getPhoneEncrypted())).isEqualTo("13800000000");
+        assertThat(personCaptor.getValue().getIdCardEncrypted()).isNull();
+        assertThat(personCaptor.getValue().getIdCardHash()).isNull();
         ArgumentCaptor<SiteVisitorProfileAuditLog> auditCaptor = ArgumentCaptor.forClass(SiteVisitorProfileAuditLog.class);
         verify(auditMapper).insert(auditCaptor.capture());
         assertThat(auditCaptor.getValue().getAfterSnapshotEncrypted()).startsWith("v1:")
@@ -186,6 +186,6 @@ class VisitorProfileServiceTest {
         return new VisitorProfileService.SubmissionData(
                 "外访单位", "外访联系人", "13800000000", "OTHER", null,
                 List.of(new VisitorProfileService.PersonData(
-                        "CONTACT", "外访联系人", "990000200001010011")));
+                        "CONTACT", "外访单位", "外访联系人", "13800000000")));
     }
 }

@@ -24,15 +24,17 @@ import {
   createSiteAccessProfileRequestGuard,
   siteAccessProfileBelongsToProject,
 } from '../../utils/siteAccessProfileRequests';
+import GuardVisitPanel from './GuardVisitPanel';
 import './index.css';
 import './siteAccessExport.css';
 import './siteAccessHostPicker.css';
 import './siteAccessProfiles.css';
+import './guardVisits.css';
 
 const PAGE_SIZE = 20;
 const STATUS_LABELS = {
   PENDING: '待填写',
-  SUBMITTED: '已提交',
+  SUBMITTED: '已登记',
   EXPIRED: '已过期',
   VOIDED: '已作废',
 };
@@ -56,6 +58,21 @@ const responseData = (response, fallback) => {
 };
 const formatDateTime = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '-';
 const inputDateTime = (value) => value ? String(value).slice(0, 16) : '';
+const hasCompanionContent = (person) => Boolean(
+  person.personCompany?.trim() || person.personName?.trim() || person.personPhone?.trim()
+);
+const canViewInvitationQr = (invitation) => {
+  if (!['PENDING', 'SUBMITTED'].includes(invitation?.status)) return false;
+  const visitEndTime = new Date(invitation.visitEndTime).getTime();
+  return Number.isFinite(visitEndTime) && visitEndTime > Date.now();
+};
+const PersonContactFields = ({ person }) => (
+  <div className="site-access-person-contact-fields">
+    <b>单位：{person.personCompany || '-'}</b>
+    <b>姓名：{person.personName || '-'}</b>
+    <b>手机号：{person.personPhone || '-'}</b>
+  </div>
+);
 const defaultTimes = () => {
   const start = new Date();
   start.setMinutes(0, 0, 0);
@@ -77,7 +94,6 @@ const emptyForm = () => ({
   visitorCompany: '',
   contactName: '',
   contactPhone: '',
-  contactIdCard: '',
   companions: [],
   travelMode: 'OTHER',
   vehiclePlate: '',
@@ -233,6 +249,7 @@ function HostCombobox({ hosts, value, onChange }) {
 }
 
 export default function SiteAccessManagementPage({ projectId, theme: T, currentUser }) {
+  const [activeSection, setActiveSection] = useState('INVITATION');
   const today = useMemo(() => formatLocalDate(new Date()), []);
   const [periodMode, setPeriodMode] = useState('DAY');
   const [anchorDate, setAnchorDate] = useState(today);
@@ -377,9 +394,12 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
         visitorCompany: value.visitorCompany || '',
         contactName: value.contactName || contact.personName || '',
         contactPhone: value.contactPhone || '',
-        contactIdCard: contact.idCard || '',
         companions: people.filter((person) => person.personType === 'COMPANION')
-          .map((person) => ({ personName: person.personName || '', idCard: person.idCard || '' })),
+          .map((person) => ({
+            personCompany: person.personCompany || '',
+            personName: person.personName || '',
+            personPhone: person.personPhone || '',
+          })),
         travelMode: value.travelMode || 'OTHER',
         vehiclePlate: value.vehiclePlate || '',
         visitorRemark: value.visitorRemark || '',
@@ -416,16 +436,22 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
         saved = responseData(await createSiteVisitInvitation(payload), '邀请创建失败');
       } else {
         const submitted = editing.value.status === 'SUBMITTED';
+        const companions = form.companions.filter(hasCompanionContent).map((item) => ({
+          personCompany: item.personCompany.trim(),
+          personName: item.personName.trim(),
+          personPhone: item.personPhone.trim(),
+        }));
+        const invalidPhoneIndex = companions.findIndex((item) => item.personPhone
+          && !/^1[3-9]\d{9}$/.test(item.personPhone));
+        if (submitted && invalidPhoneIndex >= 0) {
+          throw new Error(`请填写第${invalidPhoneIndex + 1}位同行人员的正确手机号`);
+        }
         saved = responseData(await updateSiteVisitInvitation(editing.value.id, {
           ...payload,
           visitorCompany: submitted ? form.visitorCompany.trim() : null,
           contactName: submitted ? form.contactName.trim() : null,
           contactPhone: submitted ? form.contactPhone.trim() : null,
-          contactIdCard: submitted ? form.contactIdCard.trim() : null,
-          companions: submitted ? form.companions.map((item) => ({
-            personName: item.personName.trim(),
-            idCard: item.idCard.trim(),
-          })) : [],
+          companions: submitted ? companions : [],
           travelMode: submitted ? form.travelMode : null,
           vehiclePlate: submitted && form.travelMode === 'DRIVING' ? form.vehiclePlate.trim() : null,
           visitorRemark: submitted ? form.visitorRemark.trim() || null : null,
@@ -624,15 +650,27 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
       <section className="site-access-title-card">
         <div>
           <h1>场内管理</h1>
-          <p>创建单次外访邀请，通过免登录小程序提前收集人员和车辆信息。</p>
+          <p>{activeSection === 'INVITATION'
+            ? '创建单次外访邀请，通过免登录小程序提前收集人员和车辆信息。'
+            : '门卫室二维码长期有效；访客无需审批，每次登记生成24小时放行页。'}</p>
         </div>
-        <div className="site-access-head-actions">
+        {activeSection === 'INVITATION' && <div className="site-access-head-actions">
           <button className="secondary" type="button" onClick={openProfiles}>常用资料</button>
           {canExport && <button className="secondary" type="button" disabled={exporting} onClick={openExport}>{exporting ? '导出中...' : '导出外访人员'}</button>}
           {canManage && <button className="primary" type="button" onClick={openCreate}>新建邀请</button>}
-        </div>
+        </div>}
       </section>
 
+      <nav className="site-access-section-tabs" aria-label="场内管理分类">
+        <button type="button" className={activeSection === 'INVITATION' ? 'active' : ''} onClick={() => {
+          setActiveSection('INVITATION'); setDetail(null); setEditing(null); setQrCode(null); setExportFilters(null);
+        }}>预约邀请</button>
+        <button type="button" className={activeSection === 'GUARD' ? 'active' : ''} onClick={() => {
+          setActiveSection('GUARD'); setDetail(null); setEditing(null); setQrCode(null); setExportFilters(null);
+        }}>门卫登记</button>
+      </nav>
+
+      {activeSection === 'INVITATION' ? <>
       <section className="site-access-filter-card">
         <div className="site-access-period-tabs">
           {[['DAY', '日'], ['WEEK', '周'], ['MONTH', '月'], ['CUSTOM', '自定义']].map(([value, label]) => (
@@ -649,7 +687,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
         <select value={status} onChange={(event) => setStatus(event.target.value)}>
           <option value="">全部状态</option>
           <option value="PENDING">待填写</option>
-          <option value="SUBMITTED">已提交</option>
+          <option value="SUBMITTED">已登记</option>
           <option value="EXPIRED">已过期</option>
           <option value="VOIDED">已作废</option>
         </select>
@@ -682,7 +720,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
                   <td>{formatDateTime(item.createTime)}<small>{item.submittedTime ? `提交 ${formatDateTime(item.submittedTime)}` : '尚未提交'}</small></td>
                   <td><div className="site-access-row-actions">
                     <button type="button" onClick={() => openDetail(item.id)}>详情</button>
-                    {canManage && item.status === 'PENDING' && <button type="button" onClick={() => showQr(item.id)}>小程序码</button>}
+                    {canManage && canViewInvitationQr(item) && <button type="button" onClick={() => showQr(item.id)}>小程序码</button>}
                     {canManage && ['PENDING', 'SUBMITTED'].includes(item.status) && <button type="button" onClick={() => openEdit(item.id)}>修改</button>}
                     {canManage && ['PENDING', 'SUBMITTED'].includes(item.status) && <button className="danger" type="button" onClick={() => voidInvitation(item)}>作废</button>}
                     {isPlatformAdmin(currentUser) && <button className="danger" type="button" onClick={() => deleteInvitation(item)}>删除</button>}
@@ -700,6 +738,12 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
           <button type="button" disabled={pageNo >= totalPages || loading} onClick={() => load(pageNo + 1)}>下一页</button>
         </div>
       </section>
+      </> : <GuardVisitPanel
+        projectId={projectId}
+        canManage={canManage}
+        canExport={canExport}
+        onOpenProfiles={openProfiles}
+      />}
 
       {exportFilters && <Modal title="筛选并导出外访人员" onClose={() => !exporting && setExportFilters(null)} width={620}>
         <div className="site-access-export-form">
@@ -718,7 +762,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
           </FormField>}
           <FormField label="导出状态" required>
             <select value={exportFilters.status} onChange={(event) => setExportFilters({ ...exportFilters, status: event.target.value })}>
-              <option value="SUBMITTED">已提交</option>
+              <option value="SUBMITTED">已登记</option>
               <option value="VOIDED">已作废</option>
               <option value="PENDING">待填写</option>
               <option value="EXPIRED">已过期</option>
@@ -730,7 +774,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
           <div className="site-access-export-summary full">
             <strong>{PERIOD_LABELS[exportFilters.periodMode]}</strong>
             <span>{exportRange?.startDate || '-'} 至 {exportRange?.endDate || '-'}</span>
-            <small className={exportRangeError ? 'error' : ''}>{exportRangeError || '日期按计划到场时间计算；一名来访人员一行。默认导出已提交记录，最长可自定义 366 天。'}</small>
+            <small className={exportRangeError ? 'error' : ''}>{exportRangeError || '日期按计划到场时间计算；一名来访人员一行。默认导出已登记记录，最长可自定义 366 天。'}</small>
           </div>
         </div>
         <div className="site-access-modal-actions"><button type="button" disabled={exporting} onClick={() => setExportFilters(null)}>取消</button><button className="primary" type="button" disabled={exporting || Boolean(exportRangeError)} onClick={exportVisitors}>{exporting ? '正在导出...' : '导出 Excel'}</button></div>
@@ -773,7 +817,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
           {[['状态', profileDetail.status === 'ACTIVE' ? '使用中' : '已停用'], ['外访单位', profileDetail.visitorCompany], ['主联系人', `${profileDetail.contactName} ${profileDetail.contactPhone || ''}`], ['出行方式', profileDetail.travelMode === 'DRIVING' ? `驾车 · ${profileDetail.vehiclePlate || '-'}` : '非驾车'], ['最近使用', formatDateTime(profileDetail.lastUsedTime)], ['更新时间', formatDateTime(profileDetail.updateTime)]].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}
         </div>
         <h3 className="site-access-profile-people-title">保存的入场人员（{profileDetail.people?.length || 0}）</h3>
-        <div className="site-access-person-list">{(profileDetail.people || []).map((person, index) => <div key={`${person.personType}-${index}`}><span>{person.personType === 'CONTACT' ? '主联系人' : '同行人员'}</span><b>{person.personName}</b><code>{person.idCard}</code></div>)}</div>
+        <div className="site-access-person-list">{(profileDetail.people || []).map((person, index) => <div key={`${person.personType}-${index}`}><span>{person.personType === 'CONTACT' ? '主联系人' : '同行人员'}</span><PersonContactFields person={person} /></div>)}</div>
         <div className="site-access-modal-actions"><button type="button" onClick={closeProfileDetail}>关闭</button>{canManage && profileDetail.status === 'ACTIVE' && <button className="danger" type="button" onClick={() => disableProfile(profileDetail)}>停用资料</button>}</div>
       </Modal>}
 
@@ -787,16 +831,16 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
           <FormField label="内部备注" full><textarea value={form.internalRemark} maxLength="500" onChange={(event) => setForm({ ...form, internalRemark: event.target.value })} /></FormField>
 
           {editing.value?.status === 'SUBMITTED' && <>
-            <div className="site-access-form-section full">访客已提交信息（修改会写入加密审计）</div>
+            <div className="site-access-form-section full">访客已登记信息（修改会写入加密审计）</div>
             <FormField label="外访单位" required full><input value={form.visitorCompany} onChange={(event) => setForm({ ...form, visitorCompany: event.target.value })} /></FormField>
             <FormField label="主联系人" required><input value={form.contactName} onChange={(event) => setForm({ ...form, contactName: event.target.value })} /></FormField>
             <FormField label="手机号" required><input value={form.contactPhone} maxLength="11" onChange={(event) => setForm({ ...form, contactPhone: event.target.value })} /></FormField>
-            <FormField label="主联系人身份证号" required full><input value={form.contactIdCard} maxLength="18" onChange={(event) => setForm({ ...form, contactIdCard: event.target.value.toUpperCase() })} /></FormField>
             <div className="site-access-companions full">
-              <div className="site-access-companion-head"><strong>同行人员</strong><button type="button" disabled={form.companions.length >= 49} onClick={() => setForm({ ...form, companions: [...form.companions, { personName: '', idCard: '' }] })}>添加同行人</button></div>
+              <div className="site-access-companion-head"><strong>同行人员（单位、姓名、手机号均选填）</strong><button type="button" disabled={form.companions.length >= 49} onClick={() => setForm({ ...form, companions: [...form.companions, { personCompany: '', personName: '', personPhone: '' }] })}>添加同行人</button></div>
               {form.companions.map((item, index) => <div className="site-access-companion-row" key={`companion-${index}`}>
-                <input placeholder="姓名" value={item.personName} onChange={(event) => updateCompanion(index, 'personName', event.target.value)} />
-                <input placeholder="18位身份证号" maxLength="18" value={item.idCard} onChange={(event) => updateCompanion(index, 'idCard', event.target.value.toUpperCase())} />
+                <input placeholder="单位（选填）" maxLength="200" value={item.personCompany} onChange={(event) => updateCompanion(index, 'personCompany', event.target.value)} />
+                <input placeholder="姓名（选填）" maxLength="50" value={item.personName} onChange={(event) => updateCompanion(index, 'personName', event.target.value)} />
+                <input placeholder="手机号（选填）" maxLength="11" value={item.personPhone} onChange={(event) => updateCompanion(index, 'personPhone', event.target.value)} />
                 <button type="button" className="danger" onClick={() => setForm({ ...form, companions: form.companions.filter((_, itemIndex) => itemIndex !== index) })}>移除</button>
               </div>)}
             </div>
@@ -814,7 +858,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
           {[['项目', detail.projectName], ['计划时间', `${formatDateTime(detail.visitStartTime)} 至 ${formatDateTime(detail.visitEndTime)}`], ['来访事由', detail.purpose], ['到访地点', detail.visitLocation], ['接待人', `${detail.hostName || '-'} ${detail.hostPhone || ''}`], ['外访单位', detail.visitorCompany || '-'], ['联系人', `${detail.contactName || '-'} ${detail.contactPhone || ''}`], ['出行方式', detail.travelMode === 'DRIVING' ? `驾车 · ${detail.vehiclePlate || '-'}` : detail.travelMode ? '非驾车' : '-'], ['资料来源', detail.sourceProfileId ? `常用资料 · ${detail.sourceProfileName || detail.sourceProfileId}` : '本次手工填写'], ['内部备注', detail.internalRemark || '-'], ['外访备注', detail.visitorRemark || '-']].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}
         </div>
         <h3>入场人员（{detail.visitors?.length || 0}）</h3>
-        <div className="site-access-person-list">{(detail.visitors || []).map((person) => <div key={person.id}><span>{person.personType === 'CONTACT' ? '主联系人' : '同行人员'}</span><b>{person.personName}</b><code>{person.idCard}</code></div>)}{!detail.visitors?.length && <p>等待访客填写</p>}</div>
+        <div className="site-access-person-list">{(detail.visitors || []).map((person) => <div key={person.id}><span>{person.personType === 'CONTACT' ? '主联系人' : '同行人员'}</span><PersonContactFields person={person} /></div>)}{!detail.visitors?.length && <p>等待访客填写</p>}</div>
         <h3>操作记录</h3>
         <div className="site-access-audit-list">{(detail.auditLogs || []).map((log) => <div key={log.id}><b>{AUDIT_LABELS[log.actionType] || log.actionType}</b><span>{log.operatorName} · {formatDateTime(log.createTime)}</span><p>{log.comment || '-'}</p></div>)}</div>
         {detail.voidReason && <div className="site-access-void-reason">作废原因：{detail.voidReason}</div>}

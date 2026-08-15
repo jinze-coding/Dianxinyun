@@ -249,9 +249,11 @@ public class VisitorProfileService {
             person.setProfileId(profile.getId());
             person.setProjectId(profile.getProjectId());
             person.setPersonType(value.personType());
+            person.setPersonCompany(value.personCompany());
             person.setPersonName(value.personName());
-            person.setIdCardEncrypted(cryptoService.encrypt(value.idCard()));
-            person.setIdCardHash(cryptoService.idCardFingerprint(value.idCard()));
+            person.setPhoneEncrypted(cryptoService.encrypt(value.personPhone()));
+            person.setIdCardEncrypted(null);
+            person.setIdCardHash(null);
             person.setSortOrder(sort++);
             person.setDeleted(0);
             person.setCreateTime(LocalDateTime.now());
@@ -314,10 +316,9 @@ public class VisitorProfileService {
     private SiteVisitorProfilePersonVO toPersonVO(SiteVisitorProfilePerson person) {
         SiteVisitorProfilePersonVO vo = new SiteVisitorProfilePersonVO();
         vo.setPersonType(person.getPersonType());
+        vo.setPersonCompany(person.getPersonCompany());
         vo.setPersonName(person.getPersonName());
-        String idCard = cryptoService.decrypt(person.getIdCardEncrypted());
-        vo.setIdCard(idCard);
-        vo.setMaskedIdCard(maskIdCard(idCard));
+        vo.setPersonPhone(cryptoService.decrypt(person.getPhoneEncrypted()));
         vo.setSortOrder(person.getSortOrder());
         return vo;
     }
@@ -344,8 +345,9 @@ public class VisitorProfileService {
         for (SiteVisitorProfilePerson person : people(profile.getId())) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("personType", person.getPersonType());
+            item.put("personCompany", person.getPersonCompany());
             item.put("personName", person.getPersonName());
-            item.put("idCard", cryptoService.decrypt(person.getIdCardEncrypted()));
+            item.put("personPhone", cryptoService.decrypt(person.getPhoneEncrypted()));
             item.put("sortOrder", person.getSortOrder());
             people.add(item);
         }
@@ -417,11 +419,6 @@ public class VisitorProfileService {
                 ? value.substring(0, 3) + "****" + value.substring(7) : "***";
     }
 
-    private String maskIdCard(String value) {
-        return value != null && value.length() == 18
-                ? value.substring(0, 6) + "********" + value.substring(14) : "***";
-    }
-
     private void requirePermission(SysUser user, Long projectId, String permission) {
         if (user == null || projectId == null) throw BusinessException.of(403, "无权访问常用资料");
         permissionService.requireSystemPermission(user.getId(), projectId, permission);
@@ -448,7 +445,8 @@ public class VisitorProfileService {
         return BusinessException.of(409, message);
     }
 
-    public record PersonData(String personType, String personName, String idCard) {
+    public record PersonData(String personType, String personCompany,
+                             String personName, String personPhone) {
     }
 
     public record SubmissionData(String visitorCompany, String contactName, String contactPhone,

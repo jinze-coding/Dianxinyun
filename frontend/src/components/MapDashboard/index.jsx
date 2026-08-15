@@ -370,6 +370,7 @@ export default function MapDashboard({
         district: locationForm.district.trim(),
         address: locationForm.address.trim(),
         coordinateType: locationForm.coordinateType || 'BD09',
+        expectedVersion: editingProject.profileVersion,
       });
       if (res.code !== 200) {
         setLocationMessage(res.message || '保存失败');

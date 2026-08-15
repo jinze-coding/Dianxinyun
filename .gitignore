@@ -6,6 +6,7 @@ frontend/node_modules/
 dist/
 frontend/dist/
 backend/target/
+release/
 
 # Runtime files
 uploads/
@@ -14,6 +15,7 @@ tunnel-logs/
 logs/
 frontend/logs/
 backend/logs/
+docs/操作手册/
 backups/development/dianxinyun-before-*.sql
 backups/development/uploads-before-*.tar.gz
 backups/development/*-before-*.sha256

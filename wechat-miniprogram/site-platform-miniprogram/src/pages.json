@@ -119,6 +119,10 @@
     {
       "path": "pages/public/visitor-invite",
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "外访登记" }
+    },
+    {
+      "path": "pages/public/guard-visitor-register",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "门卫访客登记" }
     }
   ],
   "subPackages": [],

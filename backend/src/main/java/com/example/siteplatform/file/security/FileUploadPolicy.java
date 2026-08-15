@@ -70,8 +70,9 @@ public final class FileUploadPolicy {
 
     public static void validateBusinessUpload(MultipartFile file, String businessType) {
         String normalized = businessType == null ? "" : businessType.trim().toUpperCase(Locale.ROOT);
-        if ("PROJECT_PROFILE_IMAGE_PENDING".equals(normalized)) {
-            validate(file, PROJECT_PROFILE_IMAGE_EXTENSIONS, MAX_IMAGE_BYTES, "项目效果图");
+        if (Set.of("PROJECT_PROFILE_IMAGE_PENDING", "PROJECT_ROUTE_IMAGE_PENDING").contains(normalized)) {
+            String label = "PROJECT_ROUTE_IMAGE_PENDING".equals(normalized) ? "项目到访路线图" : "项目效果图";
+            validate(file, PROJECT_PROFILE_IMAGE_EXTENSIONS, MAX_IMAGE_BYTES, label);
             return;
         }
         boolean workflowPhoto = (normalized.startsWith("QUALITY_") && !"QUALITY_DOCUMENT".equals(normalized))

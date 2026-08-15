@@ -10,11 +10,15 @@ import com.example.siteplatform.common.PageResult;
 import com.example.siteplatform.log.entity.OperationLog;
 import com.example.siteplatform.log.mapper.OperationLogMapper;
 import com.example.siteplatform.project.dto.ProjectMemberVO;
+import com.example.siteplatform.project.dto.PublicProjectProfileVO;
 import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.entity.SysUserProject;
 import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
 import com.example.siteplatform.project.service.ProjectPermissionService;
+import com.example.siteplatform.project.service.ProjectProfileService;
+import com.example.siteplatform.project.service.ProjectCoordinateConverter;
+import com.example.siteplatform.project.service.ProjectRouteImageService;
 import com.example.siteplatform.siteaccess.dto.PublicSiteVisitSubmitRequest;
 import com.example.siteplatform.siteaccess.dto.PublicVisitorSessionCreateRequest;
 import com.example.siteplatform.siteaccess.dto.SiteVisitInvitationCreateRequest;
@@ -27,6 +31,7 @@ import com.example.siteplatform.siteaccess.mapper.SiteVisitAuditLogMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteVisitInvitationMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteVisitPersonMapper;
 import com.example.siteplatform.siteaccess.vo.PublicSiteVisitInvitationVO;
+import com.example.siteplatform.siteaccess.vo.PublicProjectLocationVO;
 import com.example.siteplatform.siteaccess.vo.PublicVisitorSessionVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitorProfileVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitAuditVO;
@@ -54,16 +59,13 @@ import org.springframework.util.StringUtils;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.security.SecureRandom;
-import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -83,13 +85,10 @@ public class SiteAccessService {
     public static final String PERSON_COMPANION = "COMPANION";
     public static final String TRAVEL_DRIVING = "DRIVING";
     public static final String TRAVEL_OTHER = "OTHER";
-    private static final int MAX_VISITORS = 50;
     private static final int MAX_EXPORT_ROWS = 50_000;
     private static final DateTimeFormatter FILE_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final DateTimeFormatter INVITE_DATE_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
     private static final DateTimeFormatter DISPLAY_DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
-    private static final int[] ID_CARD_WEIGHTS = {7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2};
-    private static final char[] ID_CARD_CHECK = {'1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2'};
 
     private final SiteVisitInvitationMapper invitationMapper;
     private final SiteVisitPersonMapper personMapper;
@@ -98,6 +97,8 @@ public class SiteAccessService {
     private final SysUserMapper userMapper;
     private final SysUserProjectMapper userProjectMapper;
     private final ProjectPermissionService projectPermissionService;
+    private final ProjectProfileService projectProfileService;
+    private final ProjectRouteImageService projectRouteImageService;
     private final VisitorDataCryptoService cryptoService;
     private final WechatPlatformClient wechatPlatformClient;
     private final VisitorSessionService visitorSessionService;
@@ -116,6 +117,8 @@ public class SiteAccessService {
             SysUserMapper userMapper,
             SysUserProjectMapper userProjectMapper,
             ProjectPermissionService projectPermissionService,
+            ProjectProfileService projectProfileService,
+            ProjectRouteImageService projectRouteImageService,
             VisitorDataCryptoService cryptoService,
             WechatPlatformClient wechatPlatformClient,
             VisitorSessionService visitorSessionService,
@@ -131,6 +134,8 @@ public class SiteAccessService {
         this.userMapper = userMapper;
         this.userProjectMapper = userProjectMapper;
         this.projectPermissionService = projectPermissionService;
+        this.projectProfileService = projectProfileService;
+        this.projectRouteImageService = projectRouteImageService;
         this.cryptoService = cryptoService;
         this.wechatPlatformClient = wechatPlatformClient;
         this.visitorSessionService = visitorSessionService;
@@ -234,9 +239,9 @@ public class SiteAccessService {
         copyMeetingFields(invitation, request.getVisitStartTime(), request.getVisitEndTime(),
                 request.getPurpose(), request.getVisitLocation(), host, request.getInternalRemark());
         if (STATUS_SUBMITTED.equals(invitation.getStatus())) {
-            NormalizedSubmission submission = normalizeSubmission(
+            VisitorSubmissionNormalizer.Submission submission = normalizeSubmission(
                     request.getVisitorCompany(), request.getContactName(), request.getContactPhone(),
-                    request.getContactIdCard(), request.getCompanions(), request.getTravelMode(),
+                    request.getCompanions(), request.getTravelMode(),
                     request.getVehiclePlate(), request.getVisitorRemark());
             applySubmissionFields(invitation, submission, false);
             replacePersons(invitation, submission);
@@ -280,8 +285,11 @@ public class SiteAccessService {
     public SiteVisitMiniCodeVO miniCode(Long id, SysUser currentUser) {
         SiteVisitInvitation invitation = requireInvitation(id);
         requirePermission(currentUser, invitation.getProjectId(), SystemPermissionCodes.SITE_ACCESS_MANAGE);
-        if (!STATUS_PENDING.equals(effectiveStatus(invitation))) {
-            throw stateConflict("只有待填写邀请可以生成小程序码");
+        String status = invitation.getStatus();
+        if ((!STATUS_PENDING.equals(status) && !STATUS_SUBMITTED.equals(status))
+                || invitation.getVisitEndTime() == null
+                || !invitation.getVisitEndTime().isAfter(LocalDateTime.now())) {
+            throw stateConflict("只有待填写或仍在计划来访时段内的已登记邀请可以查看小程序码");
         }
         String token = cryptoService.decrypt(invitation.getTokenEncrypted());
         String scene = "V:" + token;
@@ -294,18 +302,27 @@ public class SiteAccessService {
         vo.setCodeType(image == null ? "DEVELOPMENT_SCENE" : "WECHAT_MINI_PROGRAM_CODE");
         vo.setImageMimeType(image == null ? null : "image/png");
         vo.setImageContent(image);
-        vo.setHint(image == null
-                ? "当前环境未配置正式微信小程序凭据，请在开发者工具使用 scene 调试"
-                : "专属单次外访小程序码，可转发给本次来访联系人");
+        String hint;
+        if (image == null) {
+            hint = STATUS_SUBMITTED.equals(status)
+                    ? "当前环境使用 scene 调试；本次来访已登记，再次扫码可展示门卫放行凭证"
+                    : "当前环境未配置正式微信小程序凭据，请在开发者工具使用 scene 调试";
+        } else {
+            hint = STATUS_SUBMITTED.equals(status)
+                    ? "本次来访已登记，再次扫码可展示门卫放行凭证"
+                    : "专属单次外访小程序码，可转发给本次来访联系人";
+        }
+        vo.setHint(hint);
         return vo;
     }
 
     public PublicSiteVisitInvitationVO resolvePublic(String token) {
         SiteVisitInvitation invitation = findByToken(token, false);
         ProjectInfo project = requireProject(invitation.getProjectId());
+        LocalDateTime now = LocalDateTime.now();
         PublicSiteVisitInvitationVO vo = new PublicSiteVisitInvitationVO();
         vo.setInviteNo(invitation.getInviteNo());
-        vo.setStatus(effectiveStatus(invitation));
+        vo.setStatus(publicStatus(invitation, now));
         vo.setProjectName(project.getProjectName());
         vo.setProjectShortName(project.getShortName());
         vo.setVisitStartTime(invitation.getVisitStartTime());
@@ -314,6 +331,14 @@ public class SiteAccessService {
         vo.setVisitLocation(invitation.getVisitLocation());
         vo.setHostName(invitation.getHostName());
         vo.setHostPhone(cryptoService.decrypt(invitation.getHostPhoneEncrypted()));
+        vo.setVisitorCompany(invitation.getVisitorCompany());
+        vo.setContactName(invitation.getContactName());
+        vo.setVisitorCount(invitation.getVisitorCount());
+        vo.setTravelMode(invitation.getTravelMode());
+        vo.setVehiclePlate(invitation.getVehiclePlate());
+        vo.setSubmittedTime(invitation.getSubmittedTime());
+        vo.setServerTime(now);
+        vo.setProjectLocation(publicProjectLocation(invitation, project, now));
         return vo;
     }
 
@@ -324,6 +349,22 @@ public class SiteAccessService {
             throw stateConflict("当前邀请不能获取常用资料");
         }
         return visitorSessionService.issue(request.getWechatCode(), invitation);
+    }
+
+    public PublicProjectProfileVO publicProjectProfile(String inviteToken) {
+        SiteVisitInvitation invitation = requirePublicProjectInvitation(inviteToken);
+        return projectProfileService.getPublicProfile(invitation.getProjectId());
+    }
+
+    public ProjectProfileService.PublicProjectProfileImageContent publicProjectProfileImage(
+            String inviteToken, Integer imageIndex) {
+        SiteVisitInvitation invitation = requirePublicProjectInvitation(inviteToken);
+        return projectProfileService.getPublicProfileImage(invitation.getProjectId(), imageIndex);
+    }
+
+    public ProjectRouteImageService.PublicProjectRouteImageContent publicProjectRouteImage(String inviteToken) {
+        SiteVisitInvitation invitation = requirePublicProjectInvitation(inviteToken);
+        return projectRouteImageService.publicImage(invitation.getProjectId());
     }
 
     public List<SiteVisitorProfileVO> publicVisitorProfiles(String visitorSessionToken) {
@@ -370,9 +411,9 @@ public class SiteAccessService {
         if (STATUS_SUBMITTED.equals(status)) throw stateConflict("本次邀请已经提交，不能重复填写");
         if (STATUS_VOIDED.equals(status)) throw stateConflict("本次邀请已作废");
         if (STATUS_EXPIRED.equals(status)) throw stateConflict("本次邀请已过期");
-        NormalizedSubmission submission = normalizeSubmission(
+        VisitorSubmissionNormalizer.Submission submission = normalizeSubmission(
                 request.getVisitorCompany(), request.getContactName(), request.getContactPhone(),
-                request.getContactIdCard(), request.getCompanions(), request.getTravelMode(),
+                request.getCompanions(), request.getTravelMode(),
                 request.getVehiclePlate(), request.getVisitorRemark());
         if (!Boolean.TRUE.equals(request.getPrivacyAgreed())) throw new BusinessException("请阅读并同意隐私告知");
         Map<String, Object> before = snapshot(invitation);
@@ -474,7 +515,7 @@ public class SiteAccessService {
         target.setInternalRemark(optionalText(internalRemark, 500, "内部备注"));
     }
 
-    private void applySubmissionFields(SiteVisitInvitation invitation, NormalizedSubmission submission,
+    private void applySubmissionFields(SiteVisitInvitation invitation, VisitorSubmissionNormalizer.Submission submission,
                                        boolean firstSubmission) {
         invitation.setVisitorCompany(submission.visitorCompany());
         invitation.setContactName(submission.contactName());
@@ -486,18 +527,20 @@ public class SiteAccessService {
         if (firstSubmission) invitation.setPrivacyAgreedTime(LocalDateTime.now());
     }
 
-    private void replacePersons(SiteVisitInvitation invitation, NormalizedSubmission submission) {
+    private void replacePersons(SiteVisitInvitation invitation, VisitorSubmissionNormalizer.Submission submission) {
         personMapper.delete(new LambdaQueryWrapper<SiteVisitPerson>()
                 .eq(SiteVisitPerson::getInvitationId, invitation.getId()));
         int order = 1;
-        for (NormalizedPerson value : submission.people()) {
+        for (VisitorSubmissionNormalizer.Person value : submission.people()) {
             SiteVisitPerson person = new SiteVisitPerson();
             person.setInvitationId(invitation.getId());
             person.setProjectId(invitation.getProjectId());
             person.setPersonType(value.personType());
+            person.setPersonCompany(value.personCompany());
             person.setPersonName(value.personName());
-            person.setIdCardEncrypted(cryptoService.encrypt(value.idCard()));
-            person.setIdCardHash(cryptoService.idCardFingerprint(value.idCard()));
+            person.setPhoneEncrypted(cryptoService.encrypt(value.personPhone()));
+            person.setIdCardEncrypted(null);
+            person.setIdCardHash(null);
             person.setSortOrder(order++);
             person.setDeleted(0);
             person.setCreateTime(LocalDateTime.now());
@@ -506,62 +549,12 @@ public class SiteAccessService {
         }
     }
 
-    private NormalizedSubmission normalizeSubmission(String company, String contactName, String contactPhone,
-                                                      String contactIdCard, List<SiteVisitPersonRequest> companions,
-                                                      String travelMode, String vehiclePlate, String visitorRemark) {
-        String normalizedCompany = requiredText(company, 200, "外访单位");
-        String normalizedContactName = requiredText(contactName, 50, "主联系人姓名");
-        String normalizedPhone = requiredText(contactPhone, 11, "主联系人手机号");
-        if (!normalizedPhone.matches("^1[3-9]\\d{9}$")) throw new BusinessException("手机号格式不正确");
-        String normalizedTravelMode = requiredText(travelMode, 20, "出行方式").toUpperCase(Locale.ROOT);
-        if (!Set.of(TRAVEL_DRIVING, TRAVEL_OTHER).contains(normalizedTravelMode)) {
-            throw new BusinessException("出行方式不正确");
-        }
-        String normalizedPlate = normalizePlate(vehiclePlate);
-        if (TRAVEL_DRIVING.equals(normalizedTravelMode) && !StringUtils.hasText(normalizedPlate)) {
-            throw new BusinessException("驾车来访必须填写车牌号");
-        }
-        if (TRAVEL_OTHER.equals(normalizedTravelMode)) normalizedPlate = null;
-        List<NormalizedPerson> people = new ArrayList<>();
-        people.add(new NormalizedPerson(PERSON_CONTACT, normalizedContactName,
-                normalizeAndValidateIdCard(contactIdCard)));
-        for (SiteVisitPersonRequest companion : companions == null ? List.<SiteVisitPersonRequest>of() : companions) {
-            if (companion == null) throw new BusinessException("同行人员信息不能为空");
-            people.add(new NormalizedPerson(PERSON_COMPANION,
-                    requiredText(companion.getPersonName(), 50, "同行人员姓名"),
-                    normalizeAndValidateIdCard(companion.getIdCard())));
-        }
-        if (people.size() > MAX_VISITORS) throw new BusinessException("一次来访最多登记50名人员");
-        Set<String> uniqueIds = new LinkedHashSet<>();
-        for (NormalizedPerson person : people) {
-            if (!uniqueIds.add(person.idCard())) throw new BusinessException("同一次来访不能重复登记同一身份证号");
-        }
-        return new NormalizedSubmission(normalizedCompany, normalizedContactName, normalizedPhone,
-                normalizedTravelMode, normalizedPlate, optionalText(visitorRemark, 500, "外访备注"), people);
-    }
-
-    private String normalizeAndValidateIdCard(String raw) {
-        String value = requiredText(raw, 18, "身份证号").toUpperCase(Locale.ROOT);
-        if (!value.matches("^\\d{17}[0-9X]$")) throw new BusinessException("身份证号格式不正确");
-        try {
-            LocalDate.parse(value.substring(6, 14), DateTimeFormatter.BASIC_ISO_DATE);
-        } catch (DateTimeException exception) {
-            throw new BusinessException("身份证号出生日期不正确");
-        }
-        int sum = 0;
-        for (int index = 0; index < 17; index++) {
-            sum += (value.charAt(index) - '0') * ID_CARD_WEIGHTS[index];
-        }
-        if (ID_CARD_CHECK[sum % 11] != value.charAt(17)) throw new BusinessException("身份证号校验失败");
-        return value;
-    }
-
-    private String normalizePlate(String raw) {
-        String value = trimToNull(raw);
-        if (value == null) return null;
-        value = value.replaceAll("\\s+", "").toUpperCase(Locale.ROOT);
-        if (value.length() < 2 || value.length() > 20) throw new BusinessException("车牌号长度不正确");
-        return value;
+    private VisitorSubmissionNormalizer.Submission normalizeSubmission(
+            String company, String contactName, String contactPhone,
+            List<SiteVisitPersonRequest> companions, String travelMode,
+            String vehiclePlate, String visitorRemark) {
+        return VisitorSubmissionNormalizer.normalize(company, contactName, contactPhone,
+                companions, travelMode, vehiclePlate, visitorRemark);
     }
 
     private void validateVisitTime(LocalDateTime start, LocalDateTime end, boolean requireFutureEnd) {
@@ -600,13 +593,25 @@ public class SiteAccessService {
                 || (action != null && !VisitorProfileService.ACTION_NONE.equalsIgnoreCase(action));
     }
 
-    private VisitorProfileService.SubmissionData toProfileSubmission(NormalizedSubmission submission) {
+    private VisitorProfileService.SubmissionData toProfileSubmission(VisitorSubmissionNormalizer.Submission submission) {
         return new VisitorProfileService.SubmissionData(
                 submission.visitorCompany(), submission.contactName(), submission.contactPhone(),
                 submission.travelMode(), submission.vehiclePlate(), submission.people().stream()
                 .map(person -> new VisitorProfileService.PersonData(
-                        person.personType(), person.personName(), person.idCard()))
+                        person.personType(), person.personCompany(), person.personName(), person.personPhone()))
                 .toList());
+    }
+
+    private SiteVisitInvitation requirePublicProjectInvitation(String inviteToken) {
+        SiteVisitInvitation invitation = findByToken(inviteToken, false);
+        String status = invitation.getStatus();
+        if (STATUS_VOIDED.equals(status)
+                || invitation.getVisitEndTime() == null
+                || !invitation.getVisitEndTime().isAfter(LocalDateTime.now())
+                || (!STATUS_PENDING.equals(status) && !STATUS_SUBMITTED.equals(status))) {
+            throw stateConflict("当前邀请不可查看项目信息");
+        }
+        return invitation;
     }
 
     private String normalizeToken(String rawToken) {
@@ -621,6 +626,36 @@ public class SiteAccessService {
                 && invitation.getVisitEndTime() != null
                 && invitation.getVisitEndTime().isBefore(LocalDateTime.now())) return STATUS_EXPIRED;
         return invitation.getStatus();
+    }
+
+    private String publicStatus(SiteVisitInvitation invitation, LocalDateTime now) {
+        if ((STATUS_PENDING.equals(invitation.getStatus()) || STATUS_SUBMITTED.equals(invitation.getStatus()))
+                && invitation.getVisitEndTime() != null
+                && !invitation.getVisitEndTime().isAfter(now)) return STATUS_EXPIRED;
+        return invitation.getStatus();
+    }
+
+    private PublicProjectLocationVO publicProjectLocation(SiteVisitInvitation invitation,
+                                                          ProjectInfo project,
+                                                          LocalDateTime now) {
+        String status = invitation.getStatus();
+        if ((!STATUS_PENDING.equals(status) && !STATUS_SUBMITTED.equals(status))
+                || invitation.getVisitEndTime() == null
+                || !invitation.getVisitEndTime().isAfter(now)) {
+            return null;
+        }
+        PublicProjectLocationVO location = new PublicProjectLocationVO();
+        location.setAddress(project.getAddress());
+        location.setCoordinateType("GCJ02");
+        location.setRouteImageAvailable(projectRouteImageService.hasActiveImage(project.getId()));
+        var converted = ProjectCoordinateConverter.toGcj02(
+                project.getLongitude(), project.getLatitude(), project.getCoordinateType());
+        location.setNavigable(converted.isPresent());
+        converted.ifPresent(coordinate -> {
+            location.setLongitude(coordinate.longitude());
+            location.setLatitude(coordinate.latitude());
+        });
+        return location;
     }
 
     private SiteVisitInvitationVO toVO(SiteVisitInvitation invitation, ProjectInfo project, boolean detail) {
@@ -675,8 +710,9 @@ public class SiteAccessService {
         SiteVisitPersonVO vo = new SiteVisitPersonVO();
         vo.setId(person.getId());
         vo.setPersonType(person.getPersonType());
+        vo.setPersonCompany(person.getPersonCompany());
         vo.setPersonName(person.getPersonName());
-        vo.setIdCard(cryptoService.decrypt(person.getIdCardEncrypted()));
+        vo.setPersonPhone(cryptoService.decrypt(person.getPhoneEncrypted()));
         vo.setSortOrder(person.getSortOrder());
         return vo;
     }
@@ -712,11 +748,15 @@ public class SiteAccessService {
         result.put("vehiclePlate", invitation.getVehiclePlate());
         result.put("visitorRemark", invitation.getVisitorRemark());
         result.put("sourceProfileId", invitation.getSourceProfileId());
-        result.put("visitors", persons(invitation.getId()).stream().map(person -> Map.of(
-                "personType", person.getPersonType(),
-                "personName", person.getPersonName(),
-                "idCard", cryptoService.decrypt(person.getIdCardEncrypted()),
-                "sortOrder", person.getSortOrder())).toList());
+        result.put("visitors", persons(invitation.getId()).stream().map(person -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("personType", person.getPersonType());
+            item.put("personCompany", person.getPersonCompany());
+            item.put("personName", person.getPersonName());
+            item.put("personPhone", cryptoService.decrypt(person.getPhoneEncrypted()));
+            item.put("sortOrder", person.getSortOrder());
+            return item;
+        }).toList());
         return result;
     }
 
@@ -776,7 +816,7 @@ public class SiteAccessService {
     private byte[] buildWorkbook(ProjectInfo project, List<SiteVisitInvitation> invitations,
                                  Map<Long, List<SiteVisitPerson>> peopleByInvitation) {
         String[] headers = {"项目", "邀请编号", "计划到场", "计划离场", "来访事由", "到访地点",
-                "外访单位", "人员类型", "姓名", "身份证号", "主联系人手机号", "出行方式", "车牌号",
+                "单位", "人员类型", "姓名", "手机号", "出行方式", "车牌号",
                 "接待人", "接待人手机号", "状态", "提交时间"};
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet("外访人员");
@@ -805,11 +845,15 @@ public class SiteAccessService {
                             formatDateTime(invitation.getVisitEndTime()),
                             nullToEmpty(invitation.getPurpose()),
                             nullToEmpty(invitation.getVisitLocation()),
-                            nullToEmpty(invitation.getVisitorCompany()),
+                            nullToEmpty(PERSON_CONTACT.equals(person.getPersonType())
+                                    ? preferredOrFallback(person.getPersonCompany(), invitation.getVisitorCompany())
+                                    : person.getPersonCompany()),
                             PERSON_CONTACT.equals(person.getPersonType()) ? "主联系人" : "同行人员",
                             nullToEmpty(person.getPersonName()),
-                            nullToEmpty(cryptoService.decrypt(person.getIdCardEncrypted())),
-                            nullToEmpty(cryptoService.decrypt(invitation.getContactPhoneEncrypted())),
+                            nullToEmpty(PERSON_CONTACT.equals(person.getPersonType())
+                                    ? preferredOrFallback(cryptoService.decrypt(person.getPhoneEncrypted()),
+                                    cryptoService.decrypt(invitation.getContactPhoneEncrypted()))
+                                    : cryptoService.decrypt(person.getPhoneEncrypted())),
                             TRAVEL_DRIVING.equals(invitation.getTravelMode()) ? "驾车" : "非驾车",
                             nullToEmpty(invitation.getVehiclePlate()),
                             nullToEmpty(invitation.getHostName()),
@@ -821,7 +865,7 @@ public class SiteAccessService {
                     }
                 }
             }
-            int[] widths = {24, 20, 18, 18, 28, 22, 24, 12, 14, 22, 18, 12, 16, 14, 18, 12, 18};
+            int[] widths = {24, 20, 18, 18, 28, 22, 24, 12, 14, 18, 12, 16, 14, 18, 12, 18};
             for (int index = 0; index < widths.length; index++) sheet.setColumnWidth(index, widths[index] * 256);
             workbook.write(output);
             return output.toByteArray();
@@ -984,6 +1028,10 @@ public class SiteAccessService {
         return value == null ? "" : value;
     }
 
+    private String preferredOrFallback(String preferred, String fallback) {
+        return preferred == null ? fallback : preferred;
+    }
+
     private String safeFileName(String value) {
         String result = Objects.toString(value, "项目").replaceAll("[\\\\/:*?\"<>|\\r\\n]+", "_").trim();
         return result.isEmpty() ? "项目" : result;
@@ -997,10 +1045,6 @@ public class SiteAccessService {
         return BusinessException.of(409, message);
     }
 
-    private record NormalizedPerson(String personType, String personName, String idCard) {}
-    private record NormalizedSubmission(String visitorCompany, String contactName, String contactPhone,
-                                        String travelMode, String vehiclePlate, String visitorRemark,
-                                        List<NormalizedPerson> people) {}
     private record DateRange(LocalDate start, LocalDate end) {}
     public record ExportFile(String fileName, byte[] content) {}
 }

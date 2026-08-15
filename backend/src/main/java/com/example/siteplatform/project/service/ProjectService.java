@@ -83,6 +83,10 @@ public class ProjectService {
             "site_visit_audit_log",
             "site_visit_invitation",
             "site_visit_person",
+            "site_guard_visit_qr",
+            "site_guard_visit_registration",
+            "site_guard_visit_person",
+            "site_guard_visit_audit_log",
             "site_visitor_profile",
             "site_visitor_profile_audit_log",
             "site_visitor_profile_person",
@@ -114,6 +118,9 @@ public class ProjectService {
 
     @Autowired
     private FileResourceMapper fileResourceMapper;
+
+    @Autowired
+    private ProjectRouteImageService projectRouteImageService;
 
     @Autowired
     private ElectricBoxMapper electricBoxMapper;
@@ -170,24 +177,35 @@ public class ProjectService {
 
     public List<ProjectMapPointVO> getProjectMapPoints(SysUser currentUser) {
         return getProjectList(currentUser).stream()
-                .map(this::buildProjectMapPoint)
+                .map(project -> buildProjectMapPoint(project, false))
                 .toList();
     }
 
     public ProjectMapPointVO getProjectMapDetail(Long projectId, SysUser currentUser) {
         ProjectInfo project = getProjectById(projectId, currentUser);
-        return buildProjectMapPoint(project);
+        return buildProjectMapPoint(project, true);
     }
 
     @Transactional
     public ProjectMapPointVO updateProjectLocation(Long projectId, ProjectLocationUpdateRequest request, SysUser currentUser) {
-        if (!projectPermissionService.canManageProject(currentUser.getId(), projectId)) {
-            throw BusinessException.forbidden("只有平台管理员或项目管理员可以更新项目定位");
+        if (currentUser == null || currentUser.getId() == null
+                || !projectPermissionService.isPlatformAdmin(currentUser.getId())) {
+            throw BusinessException.forbidden("仅平台管理员可以更新项目定位");
+        }
+        if (request == null || request.getExpectedVersion() == null) {
+            throw new BusinessException("项目定位信息和版本号不能为空");
+        }
+        if (request.getExpectedVersion() < 0) {
+            throw new BusinessException("项目档案版本号不能小于0");
         }
 
-        ProjectInfo project = projectMapper.selectById(projectId);
+        ProjectInfo project = projectMapper.selectByIdForUpdate(projectId);
         if (project == null) {
             throw BusinessException.notFound("项目不存在");
+        }
+        int actualVersion = project.getProfileVersion() == null ? 0 : project.getProfileVersion();
+        if (actualVersion != request.getExpectedVersion()) {
+            throw BusinessException.of(409, "项目信息已被其他管理员更新，请重新加载后再保存");
         }
 
         validateLocationRequest(request);
@@ -197,13 +215,16 @@ public class ProjectService {
         project.setProvince(optionalText(request.getProvince(), REGION_MAX_LENGTH, "省份"));
         project.setCity(optionalText(request.getCity(), REGION_MAX_LENGTH, "城市"));
         project.setDistrict(optionalText(request.getDistrict(), REGION_MAX_LENGTH, "区县"));
-        project.setAddress(optionalText(request.getAddress(), ADDRESS_MAX_LENGTH, "详细地址"));
+        project.setAddress(requireText(request.getAddress(), ADDRESS_MAX_LENGTH, "地标及到访说明"));
         project.setCoordinateType(normalizeCoordinateType(request.getCoordinateType()));
+        project.setProfileVersion(actualVersion + 1);
         project.setUpdateTime(LocalDateTime.now());
         requireSingleWrite(projectMapper.updateById(project), "项目定位更新");
 
-        recordLocationUpdateLog(projectId, currentUser);
-        return buildProjectMapPoint(project);
+        String routeImageAction = projectRouteImageService.applyLocationAction(
+                projectId, request.getRouteImageAction(), request.getRouteImageFileId(), currentUser);
+        recordLocationUpdateLog(projectId, currentUser, actualVersion + 1, routeImageAction);
+        return buildProjectMapPoint(project, true);
     }
 
     public PageResult<ProjectInfo> getProjectPage(Integer pageNo, Integer pageSize, SysUser currentUser) {
@@ -274,20 +295,21 @@ public class ProjectService {
         if (!projectPermissionService.isPlatformAdmin(currentUser.getId())) {
             throw BusinessException.of(403, "只有平台管理员才能更新项目");
         }
-        ProjectInfo existing = projectMapper.selectById(projectId);
+        ProjectInfo existing = projectMapper.selectByIdForUpdate(projectId);
         if (existing == null) {
             throw BusinessException.notFound("项目不存在");
         }
         if (project == null) {
             throw new BusinessException("项目信息不能为空");
         }
+        rejectLocationChanges(project, existing);
         copyEditableProjectFields(project, existing, false);
         existing.setUpdateTime(LocalDateTime.now());
         requireSingleWrite(projectMapper.updateById(existing), "项目更新");
         return existing;
     }
 
-    private ProjectMapPointVO buildProjectMapPoint(ProjectInfo project) {
+    private ProjectMapPointVO buildProjectMapPoint(ProjectInfo project, boolean includeRouteImage) {
         ProjectMapPointVO vo = new ProjectMapPointVO();
         vo.setProjectId(project.getId());
         vo.setId(project.getId());
@@ -310,7 +332,9 @@ public class ProjectService {
         vo.setDeviceTotal(countDevices(project.getId(), null));
         vo.setAlarmDeviceCount(countAlarmDevices(project.getId()));
         vo.setFileTotal(countFiles(project.getId()));
+        vo.setProfileVersion(project.getProfileVersion() == null ? 0 : project.getProfileVersion());
         vo.setLastUpdateTime(project.getUpdateTime());
+        if (includeRouteImage) vo.setRouteImage(projectRouteImageService.activeMetadata(project.getId()));
         return vo;
     }
 
@@ -488,12 +512,39 @@ public class ProjectService {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
-    private void recordLocationUpdateLog(Long projectId, SysUser currentUser) {
+    private void rejectLocationChanges(ProjectInfo requested, ProjectInfo existing) {
+        if (differentOptionalText(requested.getProvince(), existing.getProvince())
+                || differentOptionalText(requested.getCity(), existing.getCity())
+                || differentOptionalText(requested.getDistrict(), existing.getDistrict())
+                || differentOptionalText(requested.getAddress(), existing.getAddress())
+                || differentDecimal(requested.getLongitude(), existing.getLongitude())
+                || differentDecimal(requested.getLatitude(), existing.getLatitude())
+                || differentCoordinateType(requested.getCoordinateType(), existing.getCoordinateType())) {
+            throw new BusinessException("请通过项目定位接口同步修改地址与导航点");
+        }
+    }
+
+    private boolean differentOptionalText(String requested, String existing) {
+        return requested != null && !Objects.equals(trimToNull(requested), trimToNull(existing));
+    }
+
+    private boolean differentDecimal(BigDecimal requested, BigDecimal existing) {
+        return requested != null && (existing == null || requested.compareTo(existing) != 0);
+    }
+
+    private boolean differentCoordinateType(String requested, String existing) {
+        if (requested == null) return false;
+        return !Objects.equals(normalizeCoordinateType(requested), normalizeCoordinateType(existing));
+    }
+
+    private void recordLocationUpdateLog(Long projectId, SysUser currentUser, int profileVersion,
+                                         String routeImageAction) {
         OperationLog log = new OperationLog();
         log.setUserId(currentUser.getId());
         log.setUsername(currentUser.getUsername());
         log.setOperationType("UPDATE_PROJECT_LOCATION");
-        log.setOperationDesc("更新项目定位信息");
+        log.setOperationDesc("更新项目定位信息，项目档案版本 " + profileVersion
+                + "，到访路线图操作 " + routeImageAction);
         log.setBusinessType("PROJECT");
         log.setBusinessId(projectId);
         log.setCreateTime(LocalDateTime.now());
@@ -516,26 +567,28 @@ public class ProjectService {
         if (source.getDescription() != null) target.setDescription(optionalText(source.getDescription(), DESCRIPTION_MAX_LENGTH, "项目描述"));
         if (source.getStartDate() != null) target.setStartDate(source.getStartDate());
         if (source.getEndDate() != null) target.setEndDate(source.getEndDate());
-        if (source.getLongitude() != null || source.getLatitude() != null) {
-            ProjectLocationUpdateRequest location = new ProjectLocationUpdateRequest();
-            location.setLongitude(source.getLongitude() == null ? target.getLongitude() : source.getLongitude());
-            location.setLatitude(source.getLatitude() == null ? target.getLatitude() : source.getLatitude());
-            location.setCoordinateType(source.getCoordinateType() == null ? target.getCoordinateType() : source.getCoordinateType());
-            validateLocationRequest(location);
-            target.setLongitude(location.getLongitude());
-            target.setLatitude(location.getLatitude());
-            target.setCoordinateType(location.getCoordinateType());
-        } else if (source.getCoordinateType() != null) {
-            String coordinateType = normalizeCoordinateType(source.getCoordinateType());
-            if (!SUPPORTED_COORDINATE_TYPES.contains(coordinateType)) {
-                throw new BusinessException("坐标系类型必须是 BD09、GCJ02、WGS84 之一");
+        if (requireName) {
+            if (source.getLongitude() != null || source.getLatitude() != null) {
+                ProjectLocationUpdateRequest location = new ProjectLocationUpdateRequest();
+                location.setLongitude(source.getLongitude());
+                location.setLatitude(source.getLatitude());
+                location.setCoordinateType(source.getCoordinateType());
+                validateLocationRequest(location);
+                target.setLongitude(location.getLongitude());
+                target.setLatitude(location.getLatitude());
+                target.setCoordinateType(location.getCoordinateType());
+            } else if (source.getCoordinateType() != null) {
+                String coordinateType = normalizeCoordinateType(source.getCoordinateType());
+                if (!SUPPORTED_COORDINATE_TYPES.contains(coordinateType)) {
+                    throw new BusinessException("坐标系类型必须是 BD09、GCJ02、WGS84 之一");
+                }
+                target.setCoordinateType(coordinateType);
             }
-            target.setCoordinateType(coordinateType);
+            if (source.getProvince() != null) target.setProvince(optionalText(source.getProvince(), REGION_MAX_LENGTH, "省份"));
+            if (source.getCity() != null) target.setCity(optionalText(source.getCity(), REGION_MAX_LENGTH, "城市"));
+            if (source.getDistrict() != null) target.setDistrict(optionalText(source.getDistrict(), REGION_MAX_LENGTH, "区县"));
+            if (source.getAddress() != null) target.setAddress(optionalText(source.getAddress(), ADDRESS_MAX_LENGTH, "详细地址"));
         }
-        if (source.getProvince() != null) target.setProvince(optionalText(source.getProvince(), REGION_MAX_LENGTH, "省份"));
-        if (source.getCity() != null) target.setCity(optionalText(source.getCity(), REGION_MAX_LENGTH, "城市"));
-        if (source.getDistrict() != null) target.setDistrict(optionalText(source.getDistrict(), REGION_MAX_LENGTH, "区县"));
-        if (source.getAddress() != null) target.setAddress(optionalText(source.getAddress(), ADDRESS_MAX_LENGTH, "详细地址"));
         if (target.getProjectStatus() == null) target.setProjectStatus("normal");
         if (target.getStartDate() != null && target.getEndDate() != null
                 && target.getEndDate().isBefore(target.getStartDate())) {

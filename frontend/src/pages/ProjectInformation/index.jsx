@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getProjectProfile, updateProjectProfile } from '../../services/project';
+import { getProjectMapDetail, getProjectProfile, updateProjectProfile } from '../../services/project';
 import { deleteFile, previewFile, uploadFile } from '../../services/file';
 import { getApiErrorMessage } from '../../services/api';
 import { profilePayload, validateProjectProfile } from './projectProfile';
+import ProjectLocationEditor from './ProjectLocationEditor';
 import './index.css';
 
 const GROUPS = [
@@ -23,7 +24,7 @@ const GROUPS = [
     fields: [
       ['startDate', '计划开工日期', 'date', true], ['endDate', '计划竣工日期', 'date', true],
       ['actualStartDate', '实际开工日期', 'date'], ['actualEndDate', '实际竣工日期', 'date'],
-      ['address', '项目地点', 'text', true, 'wide'], ['fixedIpAddress', '固定 IP'],
+      ['address', '地标及到访说明', 'text', true, 'wide'], ['fixedIpAddress', '固定 IP'],
     ],
   },
   {
@@ -78,6 +79,7 @@ function Value({ value }) {
 function ProfileField({ config, value, editing, error, onChange }) {
   const [key, label, type = 'text', required = false, width = ''] = config;
   const inputType = type === 'integer' || type === 'number' ? 'number' : type;
+  const locationLocked = editing && key === 'address';
   return (
     <div className={`project-profile-field ${editing ? 'editing' : 'viewing'} ${width}`}>
       <label htmlFor={`profile-${key}`}>{label}{required && <em> *</em>}</label>
@@ -86,9 +88,11 @@ function ProfileField({ config, value, editing, error, onChange }) {
           <textarea id={`profile-${key}`} value={value ?? ''} onChange={(event) => onChange(key, event.target.value)} />
         ) : (
           <input id={`profile-${key}`} type={inputType} step={type === 'integer' ? '1' : type === 'number' ? 'any' : undefined}
-            value={value ?? ''} onChange={(event) => onChange(key, event.target.value)} />
+            value={value ?? ''} readOnly={locationLocked} aria-readonly={locationLocked || undefined}
+            onChange={(event) => !locationLocked && onChange(key, event.target.value)} />
         )
       ) : <Value value={value} />}
+      {locationLocked && <span className="project-profile-field-hint">位置说明需在上方“项目位置与导航点”中修改，确保公开说明、地图坐标和路线图同步。</span>}
       {editing && error && <span className="project-profile-field-error">{error}</span>}
     </div>
   );
@@ -96,8 +100,10 @@ function ProfileField({ config, value, editing, error, onChange }) {
 
 export default function ProjectInformationPage({ projectId, onBack, onSaved }) {
   const [profile, setProfile] = useState(null);
+  const [projectLocation, setProjectLocation] = useState(null);
   const [draft, setDraft] = useState(null);
   const [editing, setEditing] = useState(false);
+  const [locationEditorState, setLocationEditorState] = useState({ dirty: false, busy: false });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -109,6 +115,7 @@ export default function ProjectInformationPage({ projectId, onBack, onSaved }) {
   const [previewIndex, setPreviewIndex] = useState(null);
   const pendingIdsRef = useRef(new Set());
   const objectUrlsRef = useRef(new Set());
+  const locationEditorRef = useRef(null);
   const mountedRef = useRef(true);
 
   const releaseObjectUrls = useCallback(() => {
@@ -142,14 +149,23 @@ export default function ProjectInformationPage({ projectId, onBack, onSaved }) {
     setEditing(false);
     setErrors({});
     try {
-      const result = await getProjectProfile(projectId);
+      const [result, mapResult] = await Promise.all([
+        getProjectProfile(projectId),
+        getProjectMapDetail(projectId).catch(() => null),
+      ]);
       if (Number(result?.code) !== 200 || !result?.data) throw new Error(result?.message || '项目信息加载失败');
       const normalized = normalizeProfile(result.data);
+      const mapLocation = Number(mapResult?.code) === 200 && mapResult?.data ? mapResult.data : null;
       setProfile(normalized);
+      setProjectLocation(mapLocation ? {
+        ...mapLocation,
+        profileVersion: Math.max(Number(mapLocation.profileVersion) || 0, Number(normalized.profileVersion) || 0),
+      } : null);
       setDraft(normalized);
       await loadImageUrls(normalized.images);
     } catch (requestError) {
       setProfile(null);
+      setProjectLocation(null);
       setDraft(null);
       setError(getApiErrorMessage(requestError, '项目信息加载失败'));
     } finally {
@@ -174,6 +190,15 @@ export default function ProjectInformationPage({ projectId, onBack, onSaved }) {
   };
 
   const cancel = async () => {
+    if (saving || uploading || locationEditorState.busy) {
+      setError('文件或定位信息正在处理中，请稍后再取消');
+      return false;
+    }
+    const locationDiscarded = await locationEditorRef.current?.discardChanges?.();
+    if (locationDiscarded === false) {
+      setError('定位信息正在保存或上传，请稍后再取消');
+      return false;
+    }
     const ids = [...pendingIdsRef.current];
     pendingIdsRef.current.clear();
     await Promise.allSettled(ids.map((id) => deleteFile(id)));
@@ -183,10 +208,11 @@ export default function ProjectInformationPage({ projectId, onBack, onSaved }) {
     setError('');
     setNotice('已取消本次修改');
     await loadImageUrls(profile?.images || []);
+    return true;
   };
 
   const handleBack = async () => {
-    if (editing) await cancel();
+    if (editing && !(await cancel())) return;
     onBack?.();
   };
 
@@ -195,6 +221,27 @@ export default function ProjectInformationPage({ projectId, onBack, onSaved }) {
     pendingIdsRef.current.clear();
     await Promise.allSettled(ids.map((id) => deleteFile(id)));
     await load();
+  };
+
+  const handleLocationSaved = async (updatedLocation) => {
+    if (updatedLocation) {
+      const nextVersion = updatedLocation.profileVersion;
+      const nextAddress = updatedLocation.address ?? '';
+      setProjectLocation(updatedLocation);
+      setProfile((current) => current ? {
+        ...current,
+        address: nextAddress,
+        profileVersion: nextVersion ?? current.profileVersion,
+        updateTime: updatedLocation.lastUpdateTime ?? current.updateTime,
+      } : current);
+      setDraft((current) => current ? {
+        ...current,
+        address: nextAddress,
+        profileVersion: nextVersion ?? current.profileVersion,
+      } : current);
+    }
+    setNotice('项目地址与导航点已保存');
+    await onSaved?.();
   };
 
   const uploadImages = async (event) => {
@@ -255,6 +302,10 @@ export default function ProjectInformationPage({ projectId, onBack, onSaved }) {
   };
 
   const save = async () => {
+    if (locationEditorState.dirty) {
+      setError('项目位置或路线图还有未保存的修改，请先在位置区域保存或撤销');
+      return;
+    }
     const validation = validateProjectProfile(draft);
     setErrors(validation);
     if (Object.keys(validation).length) {
@@ -270,6 +321,12 @@ export default function ProjectInformationPage({ projectId, onBack, onSaved }) {
       pendingIdsRef.current.clear();
       const normalized = normalizeProfile(result.data);
       setProfile(normalized);
+      setProjectLocation((current) => current ? {
+        ...current,
+        address: normalized.address,
+        profileVersion: normalized.profileVersion,
+        lastUpdateTime: normalized.updateTime ?? current.lastUpdateTime,
+      } : current);
       setDraft(normalized);
       setEditing(false);
       setNotice('项目信息已保存');
@@ -348,9 +405,10 @@ export default function ProjectInformationPage({ projectId, onBack, onSaved }) {
           </div>
           {!loading && profile && <div className="project-profile-actions">
             {editing ? <>
-              <button type="button" onClick={cancel} disabled={saving || uploading}>取消</button>
-              <button type="button" className="primary" onClick={save} disabled={saving || uploading}>{saving ? '保存中…' : '保存修改'}</button>
-            </> : profile.canEdit && <button type="button" className="primary" onClick={() => { setDraft(normalizeProfile(profile)); setEditing(true); setNotice(''); setReloadRequired(false); }}>编辑项目信息</button>}
+              <button type="button" onClick={cancel} disabled={saving || uploading || locationEditorState.busy}>取消</button>
+              <button type="button" className="primary" onClick={save} disabled={saving || uploading || locationEditorState.busy}>{saving ? '保存中…' : '保存修改'}</button>
+            </> : profile.canEdit && <button type="button" className="primary"
+              onClick={() => { setDraft(normalizeProfile(profile)); setEditing(true); setNotice(''); setReloadRequired(false); }}>编辑项目信息</button>}
           </div>}
         </header>
 
@@ -371,9 +429,11 @@ export default function ProjectInformationPage({ projectId, onBack, onSaved }) {
               </div>}
             </div> : <div className="project-profile-empty-gallery">未上传项目效果图</div>}
           </section>
+          <ProjectLocationEditor ref={locationEditorRef} projectId={projectId} profile={profile} location={projectLocation}
+            editing={editing} onStateChange={setLocationEditorState} onSaved={handleLocationSaved} onReload={reloadProfile} />
           <div className="project-profile-sections">
             {GROUPS.map((group, index) => <section className={`project-profile-card project-profile-info-card ${group.layout || ''}`} key={group.title}>
-              <div className="project-profile-section-title"><div><span className="project-profile-section-index">{String(index + 2).padStart(2, '0')}</span><h2>{group.title}</h2></div></div>
+              <div className="project-profile-section-title"><div><span className="project-profile-section-index">{String(index + 3).padStart(2, '0')}</span><h2>{group.title}</h2></div></div>
               <div className="project-profile-grid">
                 {group.fields.map((config) => <ProfileField key={config[0]} config={config} value={(editing ? draft : profile)?.[config[0]]}
                   editing={editing} error={errors[config[0]]} onChange={setField} />)}

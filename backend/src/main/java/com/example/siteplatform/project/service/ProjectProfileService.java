@@ -6,16 +6,22 @@ import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.file.constant.FileStatus;
 import com.example.siteplatform.file.entity.FileResource;
 import com.example.siteplatform.file.mapper.FileResourceMapper;
+import com.example.siteplatform.file.security.FileUploadPolicy;
+import com.example.siteplatform.file.storage.FileStorageManager;
 import com.example.siteplatform.log.entity.OperationLog;
 import com.example.siteplatform.log.mapper.OperationLogMapper;
 import com.example.siteplatform.project.dto.ProjectProfileDetailVO;
 import com.example.siteplatform.project.dto.ProjectProfileImageVO;
 import com.example.siteplatform.project.dto.ProjectProfileUpdateRequest;
+import com.example.siteplatform.project.dto.PublicProjectProfileImageVO;
+import com.example.siteplatform.project.dto.PublicProjectProfileVO;
 import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.system.service.SystemPermissionService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.core.io.Resource;
+import org.springframework.http.MediaType;
 
 import java.math.BigDecimal;
 import java.net.Inet6Address;
@@ -41,17 +47,20 @@ public class ProjectProfileService {
     private final ProjectPermissionService projectPermissionService;
     private final SystemPermissionService systemPermissionService;
     private final OperationLogMapper operationLogMapper;
+    private final FileStorageManager storageManager;
 
     public ProjectProfileService(ProjectInfoMapper projectMapper,
                                  FileResourceMapper fileMapper,
                                  ProjectPermissionService projectPermissionService,
                                  SystemPermissionService systemPermissionService,
-                                 OperationLogMapper operationLogMapper) {
+                                 OperationLogMapper operationLogMapper,
+                                 FileStorageManager storageManager) {
         this.projectMapper = projectMapper;
         this.fileMapper = fileMapper;
         this.projectPermissionService = projectPermissionService;
         this.systemPermissionService = systemPermissionService;
         this.operationLogMapper = operationLogMapper;
+        this.storageManager = storageManager;
     }
 
     public ProjectProfileDetailVO getProfile(Long projectId, SysUser currentUser) {
@@ -59,6 +68,63 @@ public class ProjectProfileService {
         ProjectInfo project = projectMapper.selectById(projectId);
         if (project == null) throw BusinessException.notFound("项目不存在");
         return toDetail(project, currentUser);
+    }
+
+    public PublicProjectProfileVO getPublicProfile(Long projectId) {
+        ProjectInfo project = projectMapper.selectById(projectId);
+        if (project == null) throw BusinessException.notFound("项目不存在");
+        PublicProjectProfileVO vo = new PublicProjectProfileVO();
+        vo.setProjectName(project.getProjectName());
+        vo.setShortName(project.getShortName());
+        vo.setPhase(project.getPhase());
+        vo.setAddress(project.getAddress());
+        vo.setEngineeringType(project.getEngineeringType());
+        vo.setStartDate(project.getStartDate());
+        vo.setEndDate(project.getEndDate());
+        vo.setActualStartDate(project.getActualStartDate());
+        vo.setActualEndDate(project.getActualEndDate());
+        vo.setDescription(project.getDescription());
+        vo.setDirectCompany(project.getDirectCompany());
+        vo.setOwnerUnit(project.getOwnerUnit());
+        vo.setSupervisionUnit(project.getSupervisionUnit());
+        vo.setDesignUnit(project.getDesignUnit());
+        vo.setContractor(project.getContractor());
+        vo.setBuildingArea(project.getBuildingArea());
+        vo.setLandArea(project.getLandArea());
+        vo.setBuildingHeight(project.getBuildingHeight());
+        vo.setExcavationDepth(project.getExcavationDepth());
+        vo.setUndergroundFloorCount(project.getUndergroundFloorCount());
+        vo.setAbovegroundFloorCount(project.getAbovegroundFloorCount());
+        vo.setProjectScale(project.getProjectScale());
+        vo.setProjectClassification(project.getProjectClassification());
+        vo.setProjectLevel(project.getProjectLevel());
+        vo.setProjectTarget(project.getProjectTarget());
+        vo.setQualityGoal(project.getQualityGoal());
+        vo.setSafetyGoal(project.getSafetyGoal());
+        vo.setGreenConstructionGoal(project.getGreenConstructionGoal());
+        List<FileResource> images = finalImages(projectId, true);
+        List<PublicProjectProfileImageVO> imageVos = new ArrayList<>();
+        for (int index = 0; index < images.size(); index++) {
+            FileResource image = images.get(index);
+            MediaType mediaType = FileUploadPolicy.responseMediaType(
+                    image.getOriginalFileName(), image.getFileName(), image.getFilePath());
+            imageVos.add(new PublicProjectProfileImageVO(index, mediaType.toString(), index == 0));
+        }
+        vo.setImages(imageVos);
+        return vo;
+    }
+
+    public PublicProjectProfileImageContent getPublicProfileImage(Long projectId, Integer imageIndex) {
+        if (imageIndex == null || imageIndex < 0) throw BusinessException.notFound("项目效果图不存在");
+        List<FileResource> images = finalImages(projectId, true);
+        if (imageIndex >= images.size()) throw BusinessException.notFound("项目效果图不存在");
+        FileResource image = images.get(imageIndex);
+        String extension = image.getFileExtension() == null ? "" : image.getFileExtension().toLowerCase();
+        if (!IMAGE_EXTENSIONS.contains(extension)) throw BusinessException.notFound("项目效果图不存在");
+        MediaType mediaType = FileUploadPolicy.responseMediaType(
+                image.getOriginalFileName(), image.getFileName(), image.getFilePath());
+        return new PublicProjectProfileImageContent(
+                storageManager.load(image), mediaType, extension, image.getFileSize());
     }
 
     @Transactional
@@ -74,6 +140,11 @@ public class ProjectProfileService {
         int actualVersion = project.getProfileVersion() == null ? 0 : project.getProfileVersion();
         if (actualVersion != request.getExpectedVersion()) {
             throw BusinessException.of(409, "项目信息已被其他管理员更新，请重新加载后再保存");
+        }
+        String requestedAddress = required(request.getAddress(), 500, "项目地点");
+        String currentAddress = trimForComparison(project.getAddress());
+        if (!Objects.equals(currentAddress, requestedAddress)) {
+            throw new BusinessException("请通过项目定位接口同步修改地址与导航点");
         }
 
         List<Long> imageIds = validateImageIds(request.getImageFileIds());
@@ -186,7 +257,6 @@ public class ProjectProfileService {
         assign(p::getManager, p::setManager, required(r.getManager(), 50, "项目经理"), "项目经理", changed);
         assign(p::getManagerPhone, p::setManagerPhone, required(r.getManagerPhone(), 30, "经理联系方式"), "经理联系方式", changed);
         assign(p::getSpaceCapacity, p::setSpaceCapacity, optional(r.getSpaceCapacity(), 100, "空间容量"), "空间容量", changed);
-        assign(p::getAddress, p::setAddress, required(r.getAddress(), 500, "项目地点"), "项目地点", changed);
         assign(p::getEngineeringType, p::setEngineeringType, required(r.getEngineeringType(), 100, "工程类型"), "工程类型", changed);
         assign(p::getStartDate, p::setStartDate, r.getStartDate(), "计划开工日期", changed);
         assign(p::getEndDate, p::setEndDate, r.getEndDate(), "计划竣工日期", changed);
@@ -315,6 +385,10 @@ public class ProjectProfileService {
         return normalized;
     }
 
+    private String trimForComparison(String value) {
+        return value == null ? null : value.trim();
+    }
+
     private void requireNonNegative(BigDecimal value, String label, boolean required) {
         if (value == null) {
             if (required) throw new BusinessException(label + "不能为空");
@@ -357,5 +431,9 @@ public class ProjectProfileService {
 
     private void requireSingleWrite(int affected, String action) {
         if (affected != 1) throw BusinessException.of(409, action + "失败，数据状态已变化");
+    }
+
+    public record PublicProjectProfileImageContent(Resource resource, MediaType mediaType,
+                                                   String extension, Long fileSize) {
     }
 }

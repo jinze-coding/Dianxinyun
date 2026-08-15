@@ -5,9 +5,11 @@ import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.file.constant.FileStatus;
 import com.example.siteplatform.file.entity.FileResource;
 import com.example.siteplatform.file.mapper.FileResourceMapper;
+import com.example.siteplatform.file.storage.FileStorageManager;
 import com.example.siteplatform.log.mapper.OperationLogMapper;
 import com.example.siteplatform.project.dto.ProjectProfileDetailVO;
 import com.example.siteplatform.project.dto.ProjectProfileUpdateRequest;
+import com.example.siteplatform.project.dto.PublicProjectProfileVO;
 import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.system.service.SystemPermissionService;
@@ -20,9 +22,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import org.springframework.core.io.ByteArrayResource;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
@@ -35,13 +41,14 @@ class ProjectProfileServiceTest {
     @Mock private ProjectPermissionService permissionService;
     @Mock private SystemPermissionService systemPermissionService;
     @Mock private OperationLogMapper operationLogMapper;
+    @Mock private FileStorageManager storageManager;
     private ProjectProfileService service;
     private SysUser user;
 
     @BeforeEach
     void setUp() {
         service = new ProjectProfileService(projectMapper, fileMapper, permissionService,
-                systemPermissionService, operationLogMapper);
+                systemPermissionService, operationLogMapper, storageManager);
         user = new SysUser();
         user.setId(9L);
         user.setUsername("operator");
@@ -75,6 +82,71 @@ class ProjectProfileServiceTest {
     }
 
     @Test
+    void publicProfileContainsAllowlistedFieldsWithoutInternalIdentifiersOrSensitiveData() throws Exception {
+        ProjectInfo project = new ProjectInfo();
+        project.setId(3L);
+        project.setProjectName("公开项目");
+        project.setShortName("项目简称");
+        project.setPhase("建设中");
+        project.setAddress("项目地址");
+        project.setManager("内部经理");
+        project.setManagerPhone("13800000000");
+        project.setContractAmount(BigDecimal.valueOf(100));
+        project.setFixedIpAddress("192.0.2.1");
+        project.setBuildingArea(BigDecimal.valueOf(123.45));
+        project.setProjectClassification("公开分类");
+        project.setProjectCategory("内部类别");
+        FileResource image = new FileResource();
+        image.setId(77L);
+        image.setProjectId(3L);
+        image.setBusinessId(3L);
+        image.setBusinessType(ProjectProfileService.FINAL_IMAGE_TYPE);
+        image.setStatus(FileStatus.UPLOADED);
+        image.setFileName("效果图.jpg");
+        image.setOriginalFileName("效果图.jpg");
+        image.setFileExtension("jpg");
+        when(projectMapper.selectById(3L)).thenReturn(project);
+        when(fileMapper.selectList(any())).thenReturn(List.of(image));
+
+        PublicProjectProfileVO result = service.getPublicProfile(3L);
+
+        assertThat(result.getProjectName()).isEqualTo("公开项目");
+        assertThat(result.getBuildingArea()).isEqualByComparingTo("123.45");
+        assertThat(result.getProjectClassification()).isEqualTo("公开分类");
+        assertThat(result.getImages()).singleElement().satisfies(item -> {
+            assertThat(item.getImageIndex()).isZero();
+            assertThat(item.getMimeType()).isEqualTo("image/jpeg");
+        });
+        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(result);
+        assertThat(json).doesNotContain("projectId", "fileId", "managerPhone", "contractAmount", "fixedIpAddress", "projectCategory");
+        assertThat(json).doesNotContain("13800000000", "192.0.2.1", "77", "内部类别");
+    }
+
+    @Test
+    void publicImageUsesOnlyActiveProjectProfileImageByIndex() {
+        FileResource image = new FileResource();
+        image.setId(77L);
+        image.setProjectId(3L);
+        image.setBusinessId(3L);
+        image.setBusinessType(ProjectProfileService.FINAL_IMAGE_TYPE);
+        image.setStatus(FileStatus.UPLOADED);
+        image.setFileName("效果图.webp");
+        image.setOriginalFileName("效果图.webp");
+        image.setFileExtension("webp");
+        image.setFileSize(3L);
+        ByteArrayResource resource = new ByteArrayResource(new byte[]{1, 2, 3});
+        when(fileMapper.selectList(any())).thenReturn(List.of(image));
+        when(storageManager.load(image)).thenReturn(resource);
+
+        var result = service.getPublicProfileImage(3L, 0);
+
+        assertThat(result.resource()).isSameAs(resource);
+        assertThat(result.mediaType().toString()).isEqualTo("image/webp");
+        assertThat(result.fileSize()).isEqualTo(3L);
+        assertThrows(BusinessException.class, () -> service.getPublicProfileImage(3L, 1));
+    }
+
+    @Test
     void nonAdminCannotUpdate() {
         doThrow(BusinessException.forbidden("仅平台管理员"))
                 .when(systemPermissionService).requirePlatformAdmin(user);
@@ -103,6 +175,7 @@ class ProjectProfileServiceTest {
         ProjectInfo project = new ProjectInfo();
         project.setId(3L);
         project.setProfileVersion(0);
+        project.setAddress("项目地址");
         FileResource image = new FileResource();
         image.setId(11L);
         image.setProjectId(3L);
@@ -129,6 +202,7 @@ class ProjectProfileServiceTest {
         ProjectInfo project = new ProjectInfo();
         project.setId(3L);
         project.setProfileVersion(0);
+        project.setAddress("项目地址");
         ProjectProfileUpdateRequest request = completeRequest();
         request.setShortName(" ");
         request.setBuildingArea(BigDecimal.valueOf(-1));
@@ -197,10 +271,44 @@ class ProjectProfileServiceTest {
         assertEquals(409, exception.getCode());
     }
 
+    @Test
+    void profileUpdateCannotChangeAddressOutsideLocationEndpoint() {
+        ProjectInfo project = projectWithVersion(0);
+        ProjectProfileUpdateRequest request = completeRequest();
+        request.setAddress("另一处地址");
+        when(projectMapper.selectByIdForUpdate(3L)).thenReturn(project);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.updateProfile(3L, request, user));
+
+        assertEquals(400, exception.getCode());
+        assertEquals("请通过项目定位接口同步修改地址与导航点", exception.getMessage());
+        verify(fileMapper, org.mockito.Mockito.never()).selectByIdsForUpdate(any());
+        verify(projectMapper, org.mockito.Mockito.never()).updateById(any());
+    }
+
+    @Test
+    void profileUpdateAcceptsAddressWithEquivalentOuterWhitespace() {
+        ProjectInfo project = projectWithVersion(0);
+        project.setAddress("  项目地址  ");
+        FileResource image = pendingImage(11L, 3L);
+        when(projectMapper.selectByIdForUpdate(3L)).thenReturn(project);
+        when(fileMapper.selectByIdsForUpdate(List.of(11L))).thenReturn(List.of(image));
+        when(projectMapper.updateById(project)).thenReturn(1);
+        when(fileMapper.bindPendingProjectProfileImage(11L, 3L)).thenReturn(1);
+        when(operationLogMapper.insert(any())).thenReturn(1);
+
+        service.updateProfile(3L, completeRequest(), user);
+
+        assertEquals("  项目地址  ", project.getAddress());
+        verify(projectMapper).updateById(project);
+    }
+
     private ProjectInfo projectWithVersion(int version) {
         ProjectInfo project = new ProjectInfo();
         project.setId(3L);
         project.setProfileVersion(version);
+        project.setAddress("项目地址");
         return project;
     }
 

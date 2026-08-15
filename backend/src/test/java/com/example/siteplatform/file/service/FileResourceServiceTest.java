@@ -241,6 +241,44 @@ class FileResourceServiceTest {
                 user(9L), 2L, "PROJECT_PROFILE_IMAGE_PENDING", null));
     }
 
+    @Test
+    void onlyPlatformAdminCanUploadAndCancelPendingRouteImage() {
+        when(permissionService.canManageProject(9L, 2L)).thenReturn(true);
+        when(permissionService.isPlatformAdmin(9L)).thenReturn(false);
+
+        BusinessException denied = assertThrows(BusinessException.class, () -> service.authorizeUpload(
+                user(9L), 2L, " project_route_image_pending ", null));
+        assertEquals(403, denied.getCode());
+
+        FileResource file = file(11L, 2L, 9L, "PROJECT_ROUTE_IMAGE_PENDING", null);
+        assertThrows(BusinessException.class, () -> service.checkTemporaryDelete(user(9L), file));
+
+        when(permissionService.isPlatformAdmin(9L)).thenReturn(true);
+        assertEquals("PROJECT_ROUTE_IMAGE_PENDING", service.authorizeUpload(
+                user(9L), 2L, " project_route_image_pending ", null));
+        service.checkTemporaryDelete(user(9L), file);
+    }
+
+    @Test
+    void routeImageFinalTypeCannotBeUploadedOrModifiedThroughGenericFileApi() {
+        assertThrows(BusinessException.class, () -> service.authorizeUpload(
+                user(9L), 2L, "PROJECT_ROUTE_IMAGE", null));
+
+        FileResource file = file(11L, 2L, 9L, "PROJECT_ROUTE_IMAGE", 2L);
+        assertThrows(BusinessException.class, () -> service.checkWrite(user(9L), file));
+    }
+
+    @Test
+    void projectManagerCannotOpenRouteImageUploadChannel() {
+        when(permissionService.canManageProject(9L, 2L)).thenReturn(true);
+        when(permissionService.isPlatformAdmin(9L)).thenReturn(false);
+
+        BusinessException error = assertThrows(BusinessException.class, () -> service.authorizeUpload(
+                user(9L), 2L, "PROJECT_ROUTE_IMAGE_PENDING", null));
+
+        assertEquals(403, error.getCode());
+    }
+
     private SysUser user(Long id) {
         SysUser user = new SysUser();
         user.setId(id);

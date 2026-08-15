@@ -1,1 +1,1 @@
-export const MINI_PROGRAM_BUILD_ID = '0.1.3-20260810-seal-visitor';
+export const MINI_PROGRAM_BUILD_ID = '0.1.4-20260814-site-access-guard';

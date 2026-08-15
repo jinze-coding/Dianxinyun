@@ -51,10 +51,24 @@
 .site-access-profile-status.active { background: #e8f6ee; color: #27704e; }
 .site-access-profile-status.disabled { background: #f1f3f5; color: #75808b; }
 .site-access-profile-people-title { margin: 6px 16px 8px; }
+.site-access-person-list > div { grid-template-columns: 90px 1fr; }
+.site-access-person-contact-fields {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(100px, .7fr) minmax(140px, .8fr);
+  gap: 8px 16px;
+}
+.site-access-person-contact-fields b { overflow-wrap: anywhere; }
+.site-access-companion-row {
+  display: grid;
+  grid-template-columns: 1.2fr .8fr .9fr auto;
+}
 @media (max-width: 760px) {
   .site-access-profile-toolbar { align-items: stretch; flex-direction: column; }
   .site-access-profile-toolbar select,
   .site-access-profile-toolbar input { width: 100%; min-width: 0; }
   .site-access-profile-toolbar span { max-width: none; }
   .site-access-profile-table table { min-width: 820px; }
+  .site-access-person-list > div { grid-template-columns: 1fr; }
+  .site-access-person-contact-fields { grid-template-columns: 1fr; }
+  .site-access-companion-row { grid-template-columns: 1fr; }
 }

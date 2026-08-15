@@ -87,6 +87,17 @@ function safeRequestUrl(requestUrl: string) {
   return requestUrl.split(/[?#]/, 1)[0];
 }
 
+function isPrivateDevelopmentUrl(requestUrl: string) {
+  try {
+    const hostname = new URL(requestUrl).hostname;
+    return hostname === 'localhost' || hostname === '127.0.0.1'
+      || /^10\./.test(hostname) || /^192\.168\./.test(hostname)
+      || /^172\.(?:1[6-9]|2\d|3[01])\./.test(hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function request<T>(url: string, options: RequestOptions = {}): Promise<T> {
   const token = getToken();
   const requestUrl = `${API_BASE_URL}${url}`;
@@ -123,7 +134,9 @@ export function request<T>(url: string, options: RequestOptions = {}): Promise<T
           runtime: runtimeLabel
         });
         const message = normalizedErrMsg.includes('url not in domain')
-          ? `微信未授权请求地址：${safeRequestUrl(requestUrl)}\n运行版本：${runtimeLabel}`
+          ? isPrivateDevelopmentUrl(requestUrl)
+            ? `本地真机调试尚未授权。请先让手机连接电脑所在的同一 Wi-Fi，再从小程序右上角“…”进入“开发调试”并打开调试，然后重新扫码。\n请求地址：${safeRequestUrl(requestUrl)}\n运行版本：${runtimeLabel}`
+            : `微信未授权请求地址：${safeRequestUrl(requestUrl)}。请在微信公众平台配置 HTTPS request 合法域名。\n运行版本：${runtimeLabel}`
           : normalizedErrMsg.includes('timeout')
           ? '请求超时，请检查网络后重试'
           : errMsg

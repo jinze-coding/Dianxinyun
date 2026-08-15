@@ -40,6 +40,20 @@ class FileUploadPolicyTest {
     }
 
     @Test
+    void projectRouteImageUsesTheSameFifteenMegabyteSafeRasterPolicy() {
+        MockMultipartFile webp = new MockMultipartFile(
+                "file", "路线图.webp", "image/webp",
+                new byte[]{0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50});
+        MockMultipartFile gif = new MockMultipartFile(
+                "file", "路线图.gif", "image/gif", "GIF89a".getBytes());
+
+        assertDoesNotThrow(() ->
+                FileUploadPolicy.validateBusinessUpload(webp, "PROJECT_ROUTE_IMAGE_PENDING"));
+        assertThrows(BusinessException.class, () ->
+                FileUploadPolicy.validateBusinessUpload(gif, "PROJECT_ROUTE_IMAGE_PENDING"));
+    }
+
+    @Test
     void rejectsPdfDisguisedAsWorkflowPhoto() {
         MockMultipartFile fakePhoto = new MockMultipartFile(
                 "file", "现场照片.jpg", "image/jpeg", "%PDF-1.7".getBytes());

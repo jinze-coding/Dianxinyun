@@ -26,5 +26,7 @@ public class ProjectMapPointVO {
     private Long deviceTotal;
     private Long alarmDeviceCount;
     private Long fileTotal;
+    private Integer profileVersion;
     private LocalDateTime lastUpdateTime;
+    private ProjectRouteImageVO routeImage;
 }

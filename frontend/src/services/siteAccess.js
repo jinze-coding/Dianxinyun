@@ -60,3 +60,60 @@ export async function exportSiteVisitVisitors(params = {}) {
     throw error;
   }
 }
+
+export function getGuardVisitQr(projectId) {
+  return get('/site-access/guard/qr', { projectId });
+}
+
+export function createGuardVisitQr(projectId) {
+  return post(`/site-access/guard/qr?projectId=${encodeURIComponent(projectId)}`);
+}
+
+export function updateGuardVisitQrStatus(id, data) {
+  return post(`/site-access/guard/qr/${id}/status`, data);
+}
+
+export function rotateGuardVisitQr(id, version) {
+  return post(`/site-access/guard/qr/${id}/rotate`, { version });
+}
+
+export function getGuardVisitMiniCode(id) {
+  return get(`/site-access/guard/qr/${id}/mini-code`);
+}
+
+export function getGuardVisitRegistrations(params = {}) {
+  return get('/site-access/guard/registrations', params);
+}
+
+export function getGuardVisitRegistration(id) {
+  return get(`/site-access/guard/registrations/${id}`);
+}
+
+export function updateGuardVisitRegistration(id, data) {
+  return put(`/site-access/guard/registrations/${id}`, data);
+}
+
+export function voidGuardVisitRegistration(id, reason) {
+  return post(`/site-access/guard/registrations/${id}/void`, { reason });
+}
+
+export async function exportGuardVisitRegistrations(params = {}) {
+  try {
+    const blob = await apiClient.get('/site-access/guard/registrations/export', {
+      params,
+      responseType: 'blob',
+    });
+    return ensureFileBlob(blob, '门卫访客登记导出失败');
+  } catch (error) {
+    const errorBlob = error?.response?.data;
+    if (errorBlob instanceof Blob && String(errorBlob.type || '').toLowerCase().includes('json')) {
+      try {
+        const result = JSON.parse(await errorBlob.text());
+        throw new Error(result.message || '门卫访客登记导出失败');
+      } catch (parseError) {
+        if (!(parseError instanceof SyntaxError)) throw parseError;
+      }
+    }
+    throw error;
+  }
+}

@@ -16,4 +16,12 @@ public class PublicSiteVisitInvitationVO {
     private String visitLocation;
     private String hostName;
     private String hostPhone;
+    private String visitorCompany;
+    private String contactName;
+    private Integer visitorCount;
+    private String travelMode;
+    private String vehiclePlate;
+    private LocalDateTime submittedTime;
+    private LocalDateTime serverTime;
+    private PublicProjectLocationVO projectLocation;
 }

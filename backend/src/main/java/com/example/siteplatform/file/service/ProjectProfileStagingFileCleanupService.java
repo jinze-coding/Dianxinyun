@@ -4,6 +4,7 @@ import com.example.siteplatform.file.entity.FileResource;
 import com.example.siteplatform.file.mapper.FileResourceMapper;
 import com.example.siteplatform.file.storage.FileStorageManager;
 import com.example.siteplatform.project.service.ProjectProfileService;
+import com.example.siteplatform.project.service.ProjectRouteImageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -59,7 +60,8 @@ public class ProjectProfileStagingFileCleanupService {
 
     private boolean eligible(FileResource file, LocalDateTime cutoff) {
         return file != null && file.getId() != null && file.getBusinessId() == null
-                && ProjectProfileService.PENDING_IMAGE_TYPE.equals(file.getBusinessType())
+                && (ProjectProfileService.PENDING_IMAGE_TYPE.equals(file.getBusinessType())
+                || ProjectRouteImageService.PENDING_IMAGE_TYPE.equals(file.getBusinessType()))
                 && file.getCreateTime() != null && file.getCreateTime().isBefore(cutoff)
                 && (file.getDeleted() == null || file.getDeleted() == 0 || file.getDeleted() == 1);
     }

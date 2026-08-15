@@ -239,7 +239,11 @@ public class AdministrativeDeletionService {
                 + count("site_visit_audit_log", "project_id", id)
                 + count("site_visitor_profile", "project_id", id)
                 + count("site_visitor_profile_person", "project_id", id)
-                + count("site_visitor_profile_audit_log", "project_id", id);
+                + count("site_visitor_profile_audit_log", "project_id", id)
+                + count("site_guard_visit_qr", "project_id", id)
+                + count("site_guard_visit_registration", "project_id", id)
+                + count("site_guard_visit_person", "project_id", id)
+                + count("site_guard_visit_audit_log", "project_id", id);
         add(impact, "siteAccess", "外访邀请、常用资料、人员与审计", siteAccessCount);
         if (siteAccessCount > 0) {
             throw BusinessException.of(409, "项目存在需长期保留的外访数据，禁止物理删除；请停用项目并保留审计");
@@ -494,7 +498,11 @@ public class AdministrativeDeletionService {
                 + count("site_visit_audit_log", "project_id", projectId)
                 + count("site_visitor_profile", "project_id", projectId)
                 + count("site_visitor_profile_person", "project_id", projectId)
-                + count("site_visitor_profile_audit_log", "project_id", projectId);
+                + count("site_visitor_profile_audit_log", "project_id", projectId)
+                + count("site_guard_visit_qr", "project_id", projectId)
+                + count("site_guard_visit_registration", "project_id", projectId)
+                + count("site_guard_visit_person", "project_id", projectId)
+                + count("site_guard_visit_audit_log", "project_id", projectId);
         if (siteAccessCount > 0) {
             throw BusinessException.of(409, "项目存在需长期保留的外访数据，禁止物理删除；请停用项目并保留审计");
         }
@@ -759,6 +767,10 @@ public class AdministrativeDeletionService {
                 + count("seal_application_log", "operator_id", userId)
                 + count("site_visit_audit_log", "operator_id", userId)
                 + count("site_visitor_profile_audit_log", "operator_id", userId)
+                + count("site_guard_visit_qr", "created_by_id", userId)
+                + count("site_guard_visit_qr", "updated_by_id", userId)
+                + count("site_guard_visit_registration", "voided_by_id", userId)
+                + count("site_guard_visit_audit_log", "operator_id", userId)
                 + count("workflow_approval_instance", "initiator_id", userId)
                 + count("workflow_approval_instance", "decision_user_id", userId)
                 + count("workflow_approval_task", "assignee_user_id", userId)

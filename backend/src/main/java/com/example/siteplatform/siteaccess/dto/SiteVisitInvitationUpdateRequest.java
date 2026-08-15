@@ -36,8 +36,6 @@ public class SiteVisitInvitationUpdateRequest {
     private String contactName;
     @Pattern(regexp = "^(?:|1[3-9]\\d{9})$", message = "手机号格式不正确")
     private String contactPhone;
-    @Size(max = 18)
-    private String contactIdCard;
     @Valid
     @Size(max = 49)
     private List<SiteVisitPersonRequest> companions = new ArrayList<>();

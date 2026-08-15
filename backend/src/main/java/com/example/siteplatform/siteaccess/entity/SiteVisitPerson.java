@@ -16,7 +16,9 @@ public class SiteVisitPerson {
     private Long invitationId;
     private Long projectId;
     private String personType;
+    private String personCompany;
     private String personName;
+    private String phoneEncrypted;
     private String idCardEncrypted;
     private String idCardHash;
     private Integer sortOrder;

@@ -28,6 +28,8 @@ public class FileResourceService {
     private static final String BUSINESS_QUALITY_REVIEW = "QUALITY_REVIEW";
     private static final String BUSINESS_PROJECT_PROFILE_PENDING = "PROJECT_PROFILE_IMAGE_PENDING";
     private static final String BUSINESS_PROJECT_PROFILE = "PROJECT_PROFILE_IMAGE";
+    private static final String BUSINESS_PROJECT_ROUTE_PENDING = "PROJECT_ROUTE_IMAGE_PENDING";
+    private static final String BUSINESS_PROJECT_ROUTE = "PROJECT_ROUTE_IMAGE";
     private static final Set<String> QUALITY_STAGING_TYPES = Set.of(
             BUSINESS_QUALITY_PENDING,
             BUSINESS_QUALITY_RECTIFICATION_PENDING,
@@ -69,6 +71,10 @@ public class FileResourceService {
                 && !Objects.equals(file.getUploaderId(), currentUser.getId())) {
             throw BusinessException.forbidden("无项目效果图暂存文件访问权限");
         }
+        if (BUSINESS_PROJECT_ROUTE_PENDING.equals(businessType)
+                && !permissionService.isPlatformAdmin(currentUser.getId())) {
+            throw BusinessException.forbidden("无项目到访路线图暂存文件访问权限");
+        }
         permissionService.checkProjectPermission(currentUser.getId(), file.getProjectId());
         requireBusinessRead(currentUser, file.getProjectId(), file.getBusinessType());
     }
@@ -79,11 +85,21 @@ public class FileResourceService {
         if (BUSINESS_PROJECT_PROFILE.equals(businessType)) {
             throw BusinessException.forbidden("项目效果图请在项目信息编辑页归档或调整");
         }
+        if (BUSINESS_PROJECT_ROUTE.equals(businessType)) {
+            throw BusinessException.forbidden("项目到访路线图请通过项目定位接口归档或调整");
+        }
         if (BUSINESS_PROJECT_PROFILE_PENDING.equals(businessType)) {
             if (!permissionService.isPlatformAdmin(currentUser.getId())) {
                 throw BusinessException.forbidden("仅平台管理员可以管理项目效果图");
             }
             if (file.getBusinessId() != null) throw BusinessException.of(409, "项目效果图状态已变化");
+            return;
+        }
+        if (BUSINESS_PROJECT_ROUTE_PENDING.equals(businessType)) {
+            if (!permissionService.isPlatformAdmin(currentUser.getId())) {
+                throw BusinessException.forbidden("仅平台管理员可以管理项目到访路线图");
+            }
+            if (file.getBusinessId() != null) throw BusinessException.of(409, "项目到访路线图状态已变化");
             return;
         }
         if (businessType.startsWith("QUALITY_")) {
@@ -173,11 +189,21 @@ public class FileResourceService {
         if (BUSINESS_PROJECT_PROFILE.equals(normalized)) {
             throw new BusinessException("项目效果图必须先上传暂存类型，再由项目信息保存绑定");
         }
+        if (BUSINESS_PROJECT_ROUTE.equals(normalized)) {
+            throw new BusinessException("项目到访路线图必须先上传暂存类型，再由项目定位保存绑定");
+        }
         if (BUSINESS_PROJECT_PROFILE_PENDING.equals(normalized)) {
             if (!permissionService.isPlatformAdmin(currentUser.getId())) {
                 throw BusinessException.forbidden("仅平台管理员可以上传项目效果图");
             }
             if (businessId != null) throw new BusinessException("项目效果图上传时不能直接指定业务记录");
+            return normalized;
+        }
+        if (BUSINESS_PROJECT_ROUTE_PENDING.equals(normalized)) {
+            if (!permissionService.isPlatformAdmin(currentUser.getId())) {
+                throw BusinessException.forbidden("仅平台管理员可以上传项目到访路线图");
+            }
+            if (businessId != null) throw new BusinessException("项目到访路线图上传时不能直接指定业务记录");
             return normalized;
         }
         if (BUSINESS_PROJECT_DOCUMENT.equals(normalized)) {

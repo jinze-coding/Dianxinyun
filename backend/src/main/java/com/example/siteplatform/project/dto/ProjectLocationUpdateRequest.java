@@ -13,4 +13,7 @@ public class ProjectLocationUpdateRequest {
     private String district;
     private String address;
     private String coordinateType;
+    private Integer expectedVersion;
+    private String routeImageAction;
+    private Long routeImageFileId;
 }

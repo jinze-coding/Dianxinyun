@@ -6,7 +6,8 @@ import lombok.Data;
 public class SiteVisitPersonVO {
     private Long id;
     private String personType;
+    private String personCompany;
     private String personName;
-    private String idCard;
+    private String personPhone;
     private Integer sortOrder;
 }

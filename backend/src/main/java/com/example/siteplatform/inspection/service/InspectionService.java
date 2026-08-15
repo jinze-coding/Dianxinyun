@@ -343,6 +343,8 @@ public class InspectionService {
                 && !projectPermissionService.hasInspectionPermission(currentUser.getId(), record.getProjectId(), InspectionPermissionCodes.INSPECTION_RECORD_VIEW)) {
             throw BusinessException.forbidden("只能提交自己的检查记录");
         }
+        validateRequiredStoredPhotoIds(record.getOuterPhotoFileIds(), "外观照片");
+        validateRequiredStoredPhotoIds(record.getInnerPhotoFileIds(), "内部照片");
         markCompleted(record);
         requireSingleWrite(inspectionRecordMapper.updateById(record), "巡检记录提交");
         return toRecordVO(record, null, false);
@@ -2058,8 +2060,8 @@ public class InspectionService {
         if (request.getItems() == null || request.getItems().size() != REQUIRED_ITEM_CODES.size()) {
             throw new BusinessException("六项检查结果必须完整填写");
         }
-        validatePhotoFileIds(request.getOuterPhotoFileIds(), "外观照片");
-        validatePhotoFileIds(request.getInnerPhotoFileIds(), "内部照片");
+        validateRequiredPhotoFileIds(request.getOuterPhotoFileIds(), "外观照片");
+        validateRequiredPhotoFileIds(request.getInnerPhotoFileIds(), "内部照片");
         String remark = trimToNull(request.getRemark());
         validateLength(remark, REMARK_MAX_LENGTH, "巡检备注");
         request.setRemark(remark);
@@ -2114,6 +2116,19 @@ public class InspectionService {
             if (fileId == null || fileId <= 0 || !distinct.add(fileId)) {
                 throw new BusinessException(fieldName + "包含重复或无效文件ID");
             }
+        }
+    }
+
+    private void validateRequiredPhotoFileIds(List<Long> fileIds, String fieldName) {
+        if (fileIds == null || fileIds.isEmpty()) {
+            throw new BusinessException("请至少上传一张" + fieldName);
+        }
+        validatePhotoFileIds(fileIds, fieldName);
+    }
+
+    private void validateRequiredStoredPhotoIds(String fileIds, String fieldName) {
+        if (countIds(fileIds) == 0) {
+            throw new BusinessException("请至少上传一张" + fieldName);
         }
     }
 

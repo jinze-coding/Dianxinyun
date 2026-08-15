@@ -7,7 +7,14 @@ import com.example.siteplatform.common.Result;
 import com.example.siteplatform.siteaccess.dto.SiteVisitInvitationCreateRequest;
 import com.example.siteplatform.siteaccess.dto.SiteVisitInvitationUpdateRequest;
 import com.example.siteplatform.siteaccess.dto.SiteVisitVoidRequest;
+import com.example.siteplatform.siteaccess.dto.SiteGuardVisitQrRotateRequest;
+import com.example.siteplatform.siteaccess.dto.SiteGuardVisitQrStatusRequest;
+import com.example.siteplatform.siteaccess.dto.SiteGuardVisitRegistrationUpdateRequest;
+import com.example.siteplatform.siteaccess.service.GuardVisitService;
 import com.example.siteplatform.siteaccess.service.SiteAccessService;
+import com.example.siteplatform.siteaccess.vo.SiteGuardVisitMiniCodeVO;
+import com.example.siteplatform.siteaccess.vo.SiteGuardVisitQrVO;
+import com.example.siteplatform.siteaccess.vo.SiteGuardVisitRegistrationVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitHostOptionVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitInvitationVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitMiniCodeVO;
@@ -36,10 +43,13 @@ import java.util.List;
 @RequestMapping("/api/v1/site-access")
 public class SiteAccessController {
     private final SiteAccessService service;
+    private final GuardVisitService guardVisitService;
     private final AuthService authService;
 
-    public SiteAccessController(SiteAccessService service, AuthService authService) {
+    public SiteAccessController(SiteAccessService service, GuardVisitService guardVisitService,
+                                AuthService authService) {
         this.service = service;
+        this.guardVisitService = guardVisitService;
         this.authService = authService;
     }
 
@@ -144,5 +154,99 @@ public class SiteAccessController {
             @PathVariable Long id,
             @RequestHeader(value = "Authorization", required = false) String token) {
         return Result.success(service.disableVisitorProfile(id, authService.getCurrentUser(token)));
+    }
+
+    @GetMapping("/guard/qr")
+    public Result<SiteGuardVisitQrVO> guardQr(
+            @RequestParam Long projectId,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(guardVisitService.currentQr(projectId, authService.getCurrentUser(token)));
+    }
+
+    @PostMapping("/guard/qr")
+    public Result<SiteGuardVisitQrVO> createGuardQr(
+            @RequestParam Long projectId,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(guardVisitService.createQr(projectId, authService.getCurrentUser(token)));
+    }
+
+    @PostMapping("/guard/qr/{id}/status")
+    public Result<SiteGuardVisitQrVO> changeGuardQrStatus(
+            @PathVariable Long id,
+            @Valid @RequestBody SiteGuardVisitQrStatusRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(guardVisitService.changeStatus(id, request.getEnabled(), request.getVersion(),
+                authService.getCurrentUser(token)));
+    }
+
+    @PostMapping("/guard/qr/{id}/rotate")
+    public Result<SiteGuardVisitQrVO> rotateGuardQr(
+            @PathVariable Long id,
+            @Valid @RequestBody SiteGuardVisitQrRotateRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(guardVisitService.rotate(id, request.getVersion(), authService.getCurrentUser(token)));
+    }
+
+    @GetMapping("/guard/qr/{id}/mini-code")
+    public Result<SiteGuardVisitMiniCodeVO> guardMiniCode(
+            @PathVariable Long id,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(guardVisitService.miniCode(id, authService.getCurrentUser(token)));
+    }
+
+    @GetMapping("/guard/registrations")
+    public Result<PageResult<SiteGuardVisitRegistrationVO>> guardRegistrations(
+            @RequestParam Long projectId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(defaultValue = "1") Integer pageNo,
+            @RequestParam(defaultValue = "20") Integer pageSize,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(guardVisitService.page(projectId, status, keyword, startDate, endDate,
+                pageNo, pageSize, authService.getCurrentUser(token)));
+    }
+
+    @GetMapping("/guard/registrations/{id}")
+    public Result<SiteGuardVisitRegistrationVO> guardRegistrationDetail(
+            @PathVariable Long id,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(guardVisitService.detail(id, authService.getCurrentUser(token)));
+    }
+
+    @PutMapping("/guard/registrations/{id}")
+    public Result<SiteGuardVisitRegistrationVO> updateGuardRegistration(
+            @PathVariable Long id,
+            @Valid @RequestBody SiteGuardVisitRegistrationUpdateRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(guardVisitService.update(id, request, authService.getCurrentUser(token)));
+    }
+
+    @PostMapping("/guard/registrations/{id}/void")
+    public Result<SiteGuardVisitRegistrationVO> voidGuardRegistration(
+            @PathVariable Long id,
+            @Valid @RequestBody SiteVisitVoidRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(guardVisitService.voidRegistration(
+                id, request.getReason(), authService.getCurrentUser(token)));
+    }
+
+    @GetMapping("/guard/registrations/export")
+    public ResponseEntity<byte[]> exportGuardRegistrations(
+            @RequestParam Long projectId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String keyword,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        GuardVisitService.ExportFile file = guardVisitService.export(
+                projectId, status, keyword, startDate, endDate, authService.getCurrentUser(token));
+        String fileName = URLEncoder.encode(file.fileName(), StandardCharsets.UTF_8).replace("+", "%20");
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + fileName)
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(file.content());
     }
 }

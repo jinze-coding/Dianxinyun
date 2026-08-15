@@ -28,6 +28,7 @@ BACKEND_URL="http://127.0.0.1:8080/doc.html"
 WEB_URL="http://${WEB_HOST}:3002"
 MINIPROGRAM_H5_URL="http://${MINIPROGRAM_H5_HOST}:3003"
 MINIPROGRAM_APP_JSON="$MINIPROGRAM_DIR/dist/dev/mp-weixin/app.json"
+MINIPROGRAM_REQUEST_JS="$MINIPROGRAM_DIR/dist/dev/mp-weixin/api/request.js"
 REDIS_HOST="127.0.0.1"
 REDIS_PORT="${DIANXINYUN_REDIS_PORT:-6380}"
 REDIS_CLI_BIN="${REDIS_CLI_BIN:-}"
@@ -199,6 +200,14 @@ resolve_lan_ipv4() {
   return 1
 }
 
+miniprogram_api_matches_lan() {
+  local lan_ip="$1"
+  local expected_api_url="http://${lan_ip}:8080/api/v1"
+
+  [ -s "$MINIPROGRAM_REQUEST_JS" ] || return 1
+  grep -Fq "$expected_api_url" "$MINIPROGRAM_REQUEST_JS"
+}
+
 wait_for_http() {
   local name="$1"
   local url="$2"
@@ -298,20 +307,24 @@ start_miniprogram() {
   local watcher_count
   local lan_ip
 
+  lan_ip="$(resolve_lan_ipv4)" || fail "无法识别局域网 IPv4；请设置 DIANXINYUN_LAN_IP 后重试"
+
   if screen_exists "$MINIPROGRAM_SESSION"; then
     watcher_pids="$(miniprogram_watcher_pids)"
     set -- $watcher_pids
     watcher_count=$#
-    if [ "$watcher_count" -eq 1 ]; then
+    if [ "$watcher_count" -eq 1 ] && miniprogram_api_matches_lan "$lan_ip"; then
       info "小程序微信编译监听已运行"
       return 0
     fi
-    warn "检测到 $watcher_count 个小程序编译监听，将清理后重新启动"
+    if [ "$watcher_count" -eq 1 ]; then
+      warn "电脑局域网 IP 已变化或预览包地址过期，将重新生成小程序开发包"
+    else
+      warn "检测到 $watcher_count 个小程序编译监听，将清理后重新启动"
+    fi
     stop_screen "$MINIPROGRAM_SESSION" "小程序微信编译监听"
     stop_miniprogram_watchers
   fi
-
-  lan_ip="$(resolve_lan_ipv4)" || fail "无法识别局域网 IPv4；请设置 DIANXINYUN_LAN_IP 后重试"
 
   : > "$LOG_DIR/miniprogram.log"
   rm -f "$MINIPROGRAM_APP_JSON"
@@ -429,6 +442,7 @@ show_status() {
   local miniprogram_h5_state="未运行"
   local watcher_pids
   local watcher_count
+  local lan_ip
 
   backend_state="$(owned_http_service_state "$BACKEND_URL" 8080 "$BACKEND_DIR")"
   web_state="$(owned_http_service_state "$WEB_URL" 3002 "$WEB_DIR")"
@@ -437,6 +451,12 @@ show_status() {
   watcher_count=$#
   if screen_exists "$MINIPROGRAM_SESSION"; then
     miniprogram_state="编译监听中（${watcher_count} 个进程）"
+    if [ "$watcher_count" -eq 1 ]; then
+      lan_ip="$(resolve_lan_ipv4 2>/dev/null || true)"
+      if [ -n "$lan_ip" ] && ! miniprogram_api_matches_lan "$lan_ip"; then
+        miniprogram_state="编译监听中（API 地址已过期，请执行 start 或 restart）"
+      fi
+    fi
   elif [ "$watcher_count" -gt 0 ]; then
     miniprogram_state="存在 ${watcher_count} 个遗留监听"
   fi

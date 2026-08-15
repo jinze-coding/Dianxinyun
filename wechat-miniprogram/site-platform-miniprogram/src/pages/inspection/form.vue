@@ -46,6 +46,7 @@ const resultOptions: Array<{ label: string; value: CheckResult }> = [
 ];
 
 const completedPhotos = computed(() => outerPhotos.value.length + innerPhotos.value.length);
+const requiredPhotosComplete = computed(() => outerPhotos.value.length > 0 && innerPhotos.value.length > 0);
 const completedItems = computed(() => items.value.filter((item) => item.result).length);
 const abnormalCount = computed(() => items.value.filter((item) => item.result === 'ABNORMAL').length);
 const normalCount = computed(() => items.value.filter((item) => item.result === 'NORMAL').length);
@@ -102,7 +103,7 @@ function goBack() { getCurrentPages().length > 1 ? uni.navigateBack() : switchTa
 function returnToInspectionHome() { switchTab('/pages/inspection/index'); }
 
 function addPhoto(type: 'outer' | 'inner') {
-  if (readOnly.value || choosingPhoto.value) return;
+  if (readOnly.value || submitting.value || choosingPhoto.value) return;
   const target = type === 'outer' ? outerPhotos : innerPhotos;
   if (target.value.length >= PHOTO_MAX) { showToast(`最多上传${PHOTO_MAX}张`); return; }
   if (import.meta.env.VITE_USE_MOCK === 'true') {
@@ -122,7 +123,7 @@ function addPhoto(type: 'outer' | 'inner') {
 }
 
 function removePhoto(type: 'outer' | 'inner', index: number) {
-  if (readOnly.value) return;
+  if (readOnly.value || submitting.value) return;
   const target = type === 'outer' ? outerPhotos : innerPhotos;
   target.value = target.value.filter((_, currentIndex) => currentIndex !== index);
 }
@@ -221,6 +222,8 @@ function applyExistingRecord(record: InspectionRecord) {
 async function requestSubmit() {
   if (!box.value || submitting.value || readOnly.value) return;
   if (box.value.status !== 'ACTIVE') { showToast(box.value.status === 'REMOVED' ? '已拆除电箱不可提交日检' : '停用电箱不可提交日检'); return; }
+  if (!outerPhotos.value.length) { showToast('请拍摄并上传至少1张外观照片'); return; }
+  if (!innerPhotos.value.length) { showToast('请拍摄并上传至少1张内部照片'); return; }
   if (items.value.some((item) => !item.result)) { showToast('请完成六项检查结果'); return; }
   const missingDescription = items.value.find((item) => item.result === 'ABNORMAL' && !item.description?.trim());
   if (missingDescription) { showToast(`${missingDescription.itemName}异常时请填写说明`); return; }
@@ -236,25 +239,31 @@ async function requestSubmit() {
 
 async function confirmSubmit() {
   if (!box.value || submitting.value) return;
+  if (!outerPhotos.value.length) { showConfirm.value = false; showToast('请拍摄并上传至少1张外观照片'); return; }
+  if (!innerPhotos.value.length) { showConfirm.value = false; showToast('请拍摄并上传至少1张内部照片'); return; }
   showConfirm.value = false;
   submitting.value = true;
   const uploadedFileIds: number[] = [];
+  const outerPhotoPaths = [...outerPhotos.value];
+  const innerPhotoPaths = [...innerPhotos.value];
   try {
     let outerPhotoFileIds: number[] = [];
     try {
-      outerPhotoFileIds = await uploadPhotoIds(outerPhotos.value, 'INSPECTION_OUTER_PHOTO', { projectId: box.value.projectId, businessType: 'inspection_record' });
+      outerPhotoFileIds = await uploadPhotoIds(outerPhotoPaths, 'INSPECTION_OUTER_PHOTO', { projectId: box.value.projectId, businessType: 'inspection_record' });
+      uploadedFileIds.push(...outerPhotoFileIds);
+      if (outerPhotoFileIds.length !== outerPhotoPaths.length) throw new Error('部分照片未上传成功');
     } catch (error) {
       throw new Error(`外观照片上传失败：${error instanceof Error ? error.message : '请检查网络后重试'}`);
     }
-    uploadedFileIds.push(...outerPhotoFileIds);
     let innerPhotoFileIds: number[] = [];
     try {
-      innerPhotoFileIds = await uploadPhotoIds(innerPhotos.value, 'INSPECTION_INNER_PHOTO', { projectId: box.value.projectId, businessType: 'inspection_record' });
+      innerPhotoFileIds = await uploadPhotoIds(innerPhotoPaths, 'INSPECTION_INNER_PHOTO', { projectId: box.value.projectId, businessType: 'inspection_record' });
+      uploadedFileIds.push(...innerPhotoFileIds);
+      if (innerPhotoFileIds.length !== innerPhotoPaths.length) throw new Error('部分照片未上传成功');
     } catch (error) {
       throw new Error(`内部照片上传失败：${error instanceof Error ? error.message : '请检查网络后重试'}`);
     }
-    uploadedFileIds.push(...innerPhotoFileIds);
-    await submitInspectionRecord({ projectId: box.value.projectId, electricBoxId: box.value.id, boxCode: box.value.boxCode, checkDate: checkDate.value, remark: remark.value, outerPhotoFileIds, innerPhotoFileIds, outerPhotos: outerPhotos.value, innerPhotos: innerPhotos.value, items: items.value, assigneeId: abnormalCount.value > 0 ? selectedAssignee.value?.userId : undefined, requirement: abnormalCount.value > 0 ? '请按异常说明完成整改并上传现场照片' : undefined, deadline: abnormalCount.value > 0 ? rectificationDeadline.value : undefined });
+    await submitInspectionRecord({ projectId: box.value.projectId, electricBoxId: box.value.id, boxCode: box.value.boxCode, checkDate: checkDate.value, remark: remark.value, outerPhotoFileIds, innerPhotoFileIds, outerPhotos: outerPhotoPaths, innerPhotos: innerPhotoPaths, items: items.value, assigneeId: abnormalCount.value > 0 ? selectedAssignee.value?.userId : undefined, requirement: abnormalCount.value > 0 ? '请按异常说明完成整改并上传现场照片' : undefined, deadline: abnormalCount.value > 0 ? rectificationDeadline.value : undefined });
     resetDraft();
     showToast('巡检已完成');
     setTimeout(() => switchTab('/pages/inspection/index'), 450);
@@ -299,8 +308,8 @@ async function confirmSubmit() {
 
           <view v-if="readOnly" class="readonly-banner flow-card"><text class="readonly-icon">✓</text><view><text>今日巡检已完成</text><text>{{ duplicateDailyRecord?.inspectorName || '巡检员' }} · {{ duplicateDailyRecord?.inspectedAt?.replace('T', ' ').slice(0, 16) || checkDate }}</text></view></view>
 
-          <SafetyPhotoUploader title="外观照片" :photos="outerPhotos" :max="PHOTO_MAX" :required="false" :readonly="readOnly" :hint="readOnly ? '巡检记录照片' : '选填，拍摄箱体整体'" @add="addPhoto('outer')" @remove="removePhoto('outer', $event)" />
-          <SafetyPhotoUploader title="内部照片" :photos="innerPhotos" :max="PHOTO_MAX" :required="false" :readonly="readOnly" :hint="readOnly ? '巡检记录照片' : '选填，拍摄内部接线'" @add="addPhoto('inner')" @remove="removePhoto('inner', $event)" />
+          <SafetyPhotoUploader title="外观照片" :photos="outerPhotos" :max="PHOTO_MAX" :required="!readOnly" :readonly="readOnly || submitting" :hint="readOnly ? '巡检记录照片' : '必填，至少1张，拍摄箱体整体'" @add="addPhoto('outer')" @remove="removePhoto('outer', $event)" />
+          <SafetyPhotoUploader title="内部照片" :photos="innerPhotos" :max="PHOTO_MAX" :required="!readOnly" :readonly="readOnly || submitting" :hint="readOnly ? '巡检记录照片' : '必填，至少1张，拍摄内部接线'" @add="addPhoto('inner')" @remove="removePhoto('inner', $event)" />
 
           <view class="check-card flow-card">
             <view class="section-heading"><view><text>检查项</text><text>六项均需确认</text></view><text>{{ completedItems }}/{{ items.length }}</text></view>
@@ -336,7 +345,7 @@ async function confirmSubmit() {
       </view>
     </scroll-view>
 
-    <view v-if="box && !readOnly" class="bottom-bar"><view class="completion"><text>已上传照片 {{ completedPhotos }} 张（选填）</text><text>检查项 {{ completedItems }}/{{ items.length }}</text></view><button class="submit-button pressable" :disabled="submitting || checkingDuplicate" @tap="requestSubmit">{{ submitting ? '提交中' : '完成巡检' }}</button></view>
+    <view v-if="box && !readOnly" class="bottom-bar"><view class="completion"><text>必填照片 {{ requiredPhotosComplete ? '已完成' : `待补充（共${completedPhotos}张）` }}</text><text>检查项 {{ completedItems }}/{{ items.length }}</text></view><button class="submit-button pressable" :disabled="submitting || checkingDuplicate" @tap="requestSubmit">{{ submitting ? '提交中' : '完成巡检' }}</button></view>
 
     <view v-if="showConfirm" class="flow-overlay" @tap="showConfirm = false"><view class="flow-sheet" @tap.stop><text class="flow-sheet-title">确认完成巡检？</text><text class="flow-sheet-desc">{{ box?.boxCode }} · {{ checkDate }}</text><view class="confirm-summary"><text>外观照片 {{ outerPhotos.length }} 张</text><text>内部照片 {{ innerPhotos.length }} 张</text><text>正常 {{ normalCount }} 项</text><text class="danger-text">异常 {{ abnormalCount }} 项</text><text>不适用 {{ naCount }} 项</text><template v-if="abnormalCount > 0"><text>整改人 {{ selectedAssignee?.displayName }}</text><text>期限 {{ rectificationDeadline }}</text></template></view><view class="flow-sheet-actions"><button class="flow-sheet-cancel" @tap="showConfirm = false">再检查一下</button><button class="flow-sheet-confirm" @tap="confirmSubmit">确认完成</button></view></view></view>
   </view>
