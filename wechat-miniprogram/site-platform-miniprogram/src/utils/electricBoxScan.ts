@@ -105,7 +105,7 @@ async function decodeQrImage(path: string) {
   context.drawImage(image, 0, 0, width, height);
   const imageData = context.getImageData(0, 0, width, height);
   const result = jsQR(imageData.data, width, height, { inversionAttempts: 'attemptBoth' });
-  if (!result?.data) throw new Error('图片中未识别到二维码，请选择清晰完整的电箱二维码');
+  if (!result?.data) throw new Error('图片中未识别到二维码，请选择清晰完整的巡检二维码');
   return result.data;
 }
 
@@ -114,7 +114,7 @@ async function startWechatDevtoolsImageScan() {
   if (!imagePath) return;
   const decoded = await decodeQrImage(imagePath);
   const scene = extractElectricBoxScene(decoded);
-  if (!scene) throw new Error('所选图片不是有效的电箱巡检二维码');
+  if (!scene) throw new Error('所选图片不是有效的巡检二维码');
   // 开发者工具关闭本机文件选择器并完成离屏画布解码后，需要先把渲染线程
   // 交还给模拟器。随后重启到中转页，避免文件选择器留下失活的空白 WebView。
   await waitForUiRelease(450);
@@ -142,8 +142,8 @@ async function runElectricBoxScan(projectId: number) {
         const scene = extractElectricBoxSceneFromScanResult(scanResult);
         if (!scene) {
           reject(new Error(String(scanResult.scanType || '').toUpperCase() === 'WX_CODE'
-            ? '该小程序码不是电箱巡检码，请扫描电箱台账生成的统一巡检码'
-            : '未识别到有效的电箱巡检码'));
+            ? '该小程序码不是有效的巡检码'
+            : '未识别到有效的巡检二维码'));
           return;
         }
         try {

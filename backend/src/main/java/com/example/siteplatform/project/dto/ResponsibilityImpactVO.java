@@ -11,13 +11,18 @@ public class ResponsibilityImpactVO {
     private long safetyManagedElectricBoxCount;
     private long pendingInspectionReviewCount;
     private long openRectificationCount;
+    private long pendingGeneralInspectionTaskCount;
+    private long openGeneralRectificationCount;
+    private long pendingGeneralReviewCount;
     private long openQualityIssueCount;
     private long pendingSealApprovalCount;
     private long sealApprovalConfigCount;
 
     public long getTotalCount() {
         return responsibleElectricBoxCount + safetyManagedElectricBoxCount
-                + pendingInspectionReviewCount + openRectificationCount + openQualityIssueCount
+                + pendingInspectionReviewCount + openRectificationCount
+                + pendingGeneralInspectionTaskCount + openGeneralRectificationCount + pendingGeneralReviewCount
+                + openQualityIssueCount
                 + pendingSealApprovalCount + sealApprovalConfigCount;
     }
 }

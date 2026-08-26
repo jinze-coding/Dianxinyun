@@ -20,6 +20,17 @@ public class UserNotificationService {
     /** Deduplication is enforced by the unique dedup_key index; a retry is a successful no-op. */
     public void notify(Long userId, Long projectId, String businessType, Long businessId,
                        String eventCode, String title, String summary, String dedupKey) {
+        notify(userId, projectId, businessType, businessId, eventCode, title, summary, dedupKey,
+                "SEAL_APPLICATION_DETAIL", "{\"applicationId\":" + businessId + "}");
+    }
+
+    /**
+     * Generic persisted notification entry. Route codes remain server-controlled and are
+     * allowlisted again by the work-center clients before navigation.
+     */
+    public void notify(Long userId, Long projectId, String businessType, Long businessId,
+                       String eventCode, String title, String summary, String dedupKey,
+                       String routeCode, String routeParamsJson) {
         if (userId == null) return;
         LocalDateTime now = LocalDateTime.now(BUSINESS_ZONE);
         UserNotification notification = new UserNotification();
@@ -30,8 +41,8 @@ public class UserNotificationService {
         notification.setEventCode(eventCode);
         notification.setTitle(title);
         notification.setSummary(summary);
-        notification.setRouteCode("SEAL_APPLICATION_DETAIL");
-        notification.setRouteParamsJson("{\"applicationId\":" + businessId + "}");
+        notification.setRouteCode(routeCode);
+        notification.setRouteParamsJson(routeParamsJson);
         notification.setIsRead(0);
         notification.setDedupKey(dedupKey);
         notification.setCreateTime(now);

@@ -352,7 +352,7 @@ export interface RectificationTask {
   canAssign?: boolean;
 }
 
-export type TodoType = 'INSPECTION' | 'REVIEW' | 'RECTIFICATION' | 'RECHECK' | 'SEAL_APPROVAL';
+export type TodoType = 'INSPECTION' | 'GENERAL_INSPECTION' | 'GENERAL_INSPECTION_ASSIGN' | 'REVIEW' | 'RECTIFICATION' | 'RECTIFICATION_ASSIGN' | 'RECHECK' | 'RECHECK_ASSIGN' | 'SEAL_APPROVAL';
 
 export interface TodoItem {
   id: number;

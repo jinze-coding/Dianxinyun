@@ -2,11 +2,12 @@
 import { ref } from 'vue';
 import { onLoad, onReady, onUnload } from '@dcloudio/uni-app';
 import { resolveUnifiedCode } from '@/api/electricBox';
+import { resolveGeneralInspectionScan } from '@/api/generalInspection';
 import { getToken } from '@/api/request';
 import type { UnifiedElectricBoxScan } from '@/types';
 import { extractElectricBoxScene } from '@/utils/electricBoxScan';
 
-const message = ref('正在识别电箱巡检码');
+const message = ref('正在识别巡检码');
 const detail = ref('识别成功后将直接进入对应页面');
 const failed = ref(false);
 let pendingScene = '';
@@ -54,6 +55,23 @@ async function beginRouting() {
     return;
   }
   try {
+    if (/^P:/i.test(pendingScene)) {
+      if (!getToken()) {
+        await openTarget(`/pages/public/general-inspection-monthly?publicCode=${encodeURIComponent(pendingScene.replace(/^P:/i, ''))}`);
+        return;
+      }
+      const general = await resolveGeneralInspectionScan(pendingScene);
+      if (!general.eligibleTasks?.length) {
+        showFailure(general.reason || '当前没有分配给你的待执行任务');
+        return;
+      }
+      if (general.eligibleTasks.length === 1) {
+        await openTarget(`/pages/inspection/general-form?id=${general.eligibleTasks[0].id}&scene=${encodeURIComponent(pendingScene)}`);
+        return;
+      }
+      await openTarget(`/pages/inspection/general-tasks?scene=${encodeURIComponent(pendingScene)}`);
+      return;
+    }
     const result = await resolveUnifiedCode(pendingScene);
     await routeByScanResult(result);
   } catch (error) {

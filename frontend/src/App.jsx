@@ -40,6 +40,7 @@ import PersonalInboxPage from './pages/PersonalInbox';
 import SystemManagementPage from './pages/SystemManagement';
 import SiteAccessManagementPage from './pages/SiteAccessManagement';
 import ProjectInformationPage from './pages/ProjectInformation';
+import GeneralInspectionManagement from './pages/GeneralInspectionManagement';
 import { getPersonalTodoSummary, getUnreadNotificationCount } from './services/personalInbox';
 import { canAccessPage, collectProjectMenuCodes, hasProjectPermission, isPlatformAdmin } from './utils/permissions';
 import { pageMenuAllowed } from './utils/roleAuthorization';
@@ -3351,6 +3352,7 @@ const ELECTRIC_INSPECTION_TABS = [
   { id: 'ledger', label: '电箱台账', menuCode: 'INSPECTION_LEDGER' },
   { id: 'records', label: '巡检记录', menuCode: 'INSPECTION_RECORDS' },
   { id: 'rectification', label: '整改闭环', menuCode: 'INSPECTION_RECTIFICATIONS' },
+  { id: 'general', label: '巡检配置', menuCode: 'INSPECTION_CONFIG' },
 ];
 
 const BOX_STATUS_TEXT = { ACTIVE: '启用', INACTIVE: '停用', REMOVED: '已拆除' };
@@ -6855,6 +6857,8 @@ function ElectricInspectionPage({ projectId, theme: T, currentUser, businessTarg
         ? 'records'
         : businessTarget?.routeCode === 'INSPECTION_FORM'
           ? 'ledger'
+          : businessTarget?.routeCode?.startsWith('GENERAL_INSPECTION_')
+            ? 'general'
           : '';
     if (targetTab) {
       setActiveTab(targetTab);
@@ -6903,7 +6907,9 @@ function ElectricInspectionPage({ projectId, theme: T, currentUser, businessTarg
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {activeTab
-          ? <InspectionBackendPanel projectId={projectId} theme={T} activeTab={activeTab} currentUser={currentUser} onTabChange={setActiveTab} businessTarget={businessTarget} />
+          ? activeTab === 'general'
+            ? <GeneralInspectionManagement projectId={projectId} theme={T} currentUser={currentUser} businessTarget={businessTarget} />
+            : <InspectionBackendPanel projectId={projectId} theme={T} activeTab={activeTab} currentUser={currentUser} onTabChange={setActiveTab} businessTarget={businessTarget} />
           : <div style={{ padding: 24, color: T.textMuted }}>当前角色没有可访问的巡检页签</div>}
       </div>
     </div>

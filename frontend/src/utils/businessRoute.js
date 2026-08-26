@@ -4,6 +4,9 @@ const ROUTE_PARAM_KEYS = Object.freeze({
   INSPECTION_FORM: ['boxId', 'electricBoxId', 'id'],
   INSPECTION_RECORD_DETAIL: ['recordId', 'inspectionRecordId', 'id'],
   INSPECTION_RECTIFICATION_DETAIL: ['rectificationId', 'id'],
+  GENERAL_INSPECTION_TASK_DETAIL: ['taskId', 'id'],
+  GENERAL_INSPECTION_RECTIFICATION_DETAIL: ['rectificationId', 'id'],
+  GENERAL_INSPECTION_EXPORT: ['exportJobId', 'id'],
 });
 
 function positiveInteger(value) {

@@ -11,6 +11,9 @@ describe('resolveBusinessRoute', () => {
     assert.equal(resolveBusinessRoute({ routeCode: 'INSPECTION_FORM', routeParams: { boxId: 13 } }).id, 13);
     assert.equal(resolveBusinessRoute({ routeCode: 'INSPECTION_RECORD_DETAIL', routeParams: JSON.stringify({ recordId: 14 }) }).id, 14);
     assert.equal(resolveBusinessRoute({ routeCode: 'INSPECTION_RECTIFICATION_DETAIL', routeParams: { rectificationId: 15 } }).id, 15);
+    assert.equal(resolveBusinessRoute({ routeCode: 'GENERAL_INSPECTION_TASK_DETAIL', routeParams: { taskId: 17 } }).id, 17);
+    assert.equal(resolveBusinessRoute({ routeCode: 'GENERAL_INSPECTION_RECTIFICATION_DETAIL', routeParams: { rectificationId: 18 } }).id, 18);
+    assert.equal(resolveBusinessRoute({ routeCode: 'GENERAL_INSPECTION_EXPORT', routeParams: { exportJobId: 19 } }).id, 19);
   });
 
   it('keeps targetId as a compatibility fallback for a whitelisted route', () => {

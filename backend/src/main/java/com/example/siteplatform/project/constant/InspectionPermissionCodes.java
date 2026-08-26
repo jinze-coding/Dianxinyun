@@ -20,6 +20,7 @@ public final class InspectionPermissionCodes {
     public static final String BOX_QR_MANAGE = "BOX_QR_MANAGE";
     public static final String BOX_PUBLIC_ACCESS = "BOX_PUBLIC_ACCESS";
     public static final String INSPECTION_DAILY_SUBMIT = "INSPECTION_DAILY_SUBMIT";
+    public static final String CUSTOM_INSPECTION_SUBMIT = "CUSTOM_INSPECTION_SUBMIT";
     public static final String INSPECTION_REVIEW = "INSPECTION_REVIEW";
     public static final String INSPECTION_RECORD_VIEW = "INSPECTION_RECORD_VIEW";
     public static final String RECTIFICATION_VIEW = "RECTIFICATION_VIEW";
@@ -34,6 +35,7 @@ public final class InspectionPermissionCodes {
             BOX_QR_MANAGE,
             BOX_PUBLIC_ACCESS,
             INSPECTION_DAILY_SUBMIT,
+            CUSTOM_INSPECTION_SUBMIT,
             INSPECTION_REVIEW,
             INSPECTION_RECORD_VIEW,
             RECTIFICATION_VIEW,
@@ -49,6 +51,7 @@ public final class InspectionPermissionCodes {
             BOX_QR_MANAGE,
             BOX_PUBLIC_ACCESS,
             INSPECTION_DAILY_SUBMIT,
+            CUSTOM_INSPECTION_SUBMIT,
             INSPECTION_RECORD_VIEW,
             SUMMARY_VIEW,
             SUMMARY_EXPORT,

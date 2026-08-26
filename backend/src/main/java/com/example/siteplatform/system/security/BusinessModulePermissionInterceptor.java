@@ -29,6 +29,7 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
     static final String PROJECT_DOCUMENTS = "/api/v1/project-documents";
     static final String DOCUMENT_FOLDERS = "/api/v1/document-folders";
     static final String INSPECTION = "/api/v1/inspection";
+    static final String GENERAL_INSPECTIONS = "/api/v1/general-inspections";
     static final String ELECTRIC_BOXES = "/api/v1/electric-boxes";
     static final String FILES = "/api/v1/files";
     static final String QUALITY_ISSUES = "/api/v1/quality/issues";
@@ -119,6 +120,28 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
             }
             return SystemPermissionCodes.INSPECTION_MANAGE;
         }
+        if (matchesModule(normalizedPath, GENERAL_INSPECTIONS)) {
+            if (normalizedPath.equals(GENERAL_INSPECTIONS + "/exports")
+                    || normalizedPath.startsWith(GENERAL_INSPECTIONS + "/exports/")) {
+                return SystemPermissionCodes.INSPECTION_EXPORT;
+            }
+            // 通用巡检读取同时包含配置查看、本人任务、本人整改、管理记录和看板，
+            // 所需权限不同，统一交由各服务按项目和记录级 ACL 校验。
+            if (read) return null;
+            if (normalizedPath.matches(GENERAL_INSPECTIONS + "/tasks/[^/]+/(scan|submit)")) {
+                return SystemPermissionCodes.INSPECTION_SUBMIT;
+            }
+            if (normalizedPath.equals(GENERAL_INSPECTIONS + "/scan/resolve")) {
+                return SystemPermissionCodes.INSPECTION_SUBMIT;
+            }
+            if (normalizedPath.matches(GENERAL_INSPECTIONS + "/rectifications/[^/]+/complete")) {
+                return SystemPermissionCodes.INSPECTION_RECTIFY;
+            }
+            if (normalizedPath.matches(GENERAL_INSPECTIONS + "/rectifications/[^/]+/(close|reject)")) {
+                return SystemPermissionCodes.INSPECTION_REVIEW;
+            }
+            return SystemPermissionCodes.INSPECTION_MANAGE;
+        }
         if (matchesModule(normalizedPath, ELECTRIC_BOXES)) {
             return read ? SystemPermissionCodes.INSPECTION_VIEW : SystemPermissionCodes.INSPECTION_MANAGE;
         }
@@ -165,6 +188,7 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
             else permissionCode = SystemPermissionCodes.QUALITY_MANAGE;
         } else if (normalizedType.startsWith("INSPECTION_")) {
             if (read) permissionCode = SystemPermissionCodes.INSPECTION_VIEW;
+            else if ("INSPECTION_CUSTOM_POINT_PENDING".equals(normalizedType)) permissionCode = SystemPermissionCodes.INSPECTION_MANAGE;
             else if (normalizedType.contains("RECTIFICATION")) permissionCode = SystemPermissionCodes.INSPECTION_RECTIFY;
             else permissionCode = SystemPermissionCodes.INSPECTION_SUBMIT;
         }

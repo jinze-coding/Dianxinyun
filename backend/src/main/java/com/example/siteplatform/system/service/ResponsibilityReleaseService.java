@@ -51,6 +51,19 @@ public class ResponsibilityReleaseService {
                 SELECT COUNT(*) FROM inspection_rectification
                 WHERE project_id = ? AND assignee_id = ? AND deleted = 0 AND status <> 'CLOSED'
                 """, projectId, userId));
+        impact.setPendingGeneralInspectionTaskCount(count("""
+                SELECT COUNT(*) FROM general_inspection_task
+                WHERE project_id = ? AND assignee_id = ? AND status = 'PENDING'
+                """, projectId, userId));
+        impact.setOpenGeneralRectificationCount(count("""
+                SELECT COUNT(*) FROM general_inspection_rectification
+                WHERE project_id = ? AND assignee_id = ?
+                  AND status IN ('UNASSIGNED', 'PENDING', 'REJECTED')
+                """, projectId, userId));
+        impact.setPendingGeneralReviewCount(count("""
+                SELECT COUNT(*) FROM general_inspection_rectification
+                WHERE project_id = ? AND reviewer_id = ? AND status = 'COMPLETED'
+                """, projectId, userId));
         impact.setOpenQualityIssueCount(count("""
                 SELECT COUNT(*) FROM quality_issue
                 WHERE project_id = ? AND assignee_id = ? AND deleted = 0
@@ -75,6 +88,9 @@ public class ResponsibilityReleaseService {
         clearSafetyManager(projectId, userId);
         clearInspectionReviewer(projectId, userId);
         clearRectification(projectId, userId);
+        clearGeneralInspectionTask(projectId, userId);
+        clearGeneralRectificationAssignee(projectId, userId);
+        clearGeneralRectificationReviewer(projectId, userId);
         clearQuality(projectId, userId);
         removeSealApprovalConfiguration(projectId, userId);
         cancelSealApprovalTasksAndNotify(projectId, userId);
@@ -88,15 +104,22 @@ public class ResponsibilityReleaseService {
                 SystemPermissionCodes.INSPECTION_SUBMIT)) {
             clearElectrician(projectId, userId);
         }
+        if (!permissionService.hasProjectPermission(userId, projectId, SystemPermissionCodes.INSPECTION_SUBMIT)
+                || !permissionService.hasProjectPermission(userId, projectId,
+                InspectionPermissionCodes.CUSTOM_INSPECTION_SUBMIT)) {
+            clearGeneralInspectionTask(projectId, userId);
+        }
         if (!hasAny(userId, projectId,
                 InspectionPermissionCodes.INSPECTION_REVIEW,
                 SystemPermissionCodes.INSPECTION_MANAGE)) {
             clearSafetyManager(projectId, userId);
             clearInspectionReviewer(projectId, userId);
+            clearGeneralRectificationReviewer(projectId, userId);
         }
         if (!hasAny(userId, projectId,
                 SystemPermissionCodes.INSPECTION_RECTIFY)) {
             clearRectification(projectId, userId);
+            clearGeneralRectificationAssignee(projectId, userId);
         }
         if (!permissionService.hasProjectPermission(userId, projectId,
                 SystemPermissionCodes.QUALITY_RECTIFY)) {
@@ -142,6 +165,32 @@ public class ResponsibilityReleaseService {
                 UPDATE inspection_rectification SET assignee_id = NULL,
                     assignee_name = NULL, update_time = NOW()
                 WHERE project_id = ? AND assignee_id = ? AND deleted = 0 AND status <> 'CLOSED'
+                """, projectId, userId);
+    }
+
+    private void clearGeneralInspectionTask(Long projectId, Long userId) {
+        jdbc.update("""
+                UPDATE general_inspection_task SET assignee_id = NULL,
+                    assignee_name = NULL, version = version + 1, update_time = NOW()
+                WHERE project_id = ? AND assignee_id = ? AND status = 'PENDING'
+                """, projectId, userId);
+    }
+
+    private void clearGeneralRectificationAssignee(Long projectId, Long userId) {
+        jdbc.update("""
+                UPDATE general_inspection_rectification SET assignee_id = NULL,
+                    assignee_name = NULL, status = 'UNASSIGNED',
+                    version = version + 1, update_time = NOW()
+                WHERE project_id = ? AND assignee_id = ?
+                  AND status IN ('UNASSIGNED', 'PENDING', 'REJECTED')
+                """, projectId, userId);
+    }
+
+    private void clearGeneralRectificationReviewer(Long projectId, Long userId) {
+        jdbc.update("""
+                UPDATE general_inspection_rectification SET reviewer_id = NULL,
+                    reviewer_name = NULL, version = version + 1, update_time = NOW()
+                WHERE project_id = ? AND reviewer_id = ? AND status = 'COMPLETED'
                 """, projectId, userId);
     }
 

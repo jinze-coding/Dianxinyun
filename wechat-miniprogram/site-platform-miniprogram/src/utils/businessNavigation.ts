@@ -43,6 +43,18 @@ export function openBusinessRoute(target: BusinessRouteTarget) {
     const id = numericParam(target, 'rectificationId', 'id');
     if (id) { navigateTo(`/pages/rectification/detail?id=${id}`); return true; }
   }
+  if (routeCode === 'GENERAL_INSPECTION_TASK_DETAIL') {
+    const id = numericParam(target, 'taskId', 'id');
+    if (id) { navigateTo(`/pages/inspection/general-form?id=${id}`); return true; }
+  }
+  if (routeCode === 'GENERAL_INSPECTION_RECTIFICATION_DETAIL') {
+    const id = numericParam(target, 'rectificationId', 'id');
+    if (id) { navigateTo(`/pages/rectification/general-detail?id=${id}`); return true; }
+  }
+  if (routeCode === 'GENERAL_INSPECTION_EXPORT') {
+    navigateTo('/pages/inspection/general-tasks');
+    return true;
+  }
 
   // 仅兼容旧巡检待办；新统一工作台必须由服务端下发 routeCode/routeParams。
   const legacyId = numericParam(target, 'id');

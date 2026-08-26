@@ -9,12 +9,12 @@ export function extractElectricBoxScene(rawValue: string) {
   if (!raw) return '';
   try {
     const decoded = decodeURIComponent(raw);
-    if (/^B:/i.test(decoded)) return decoded;
+    if (/^[BP]:/i.test(decoded)) return decoded;
 
     const sceneMatch = decoded.match(/[?&]scene=([^&#]+)/i);
     if (sceneMatch?.[1]) {
       const scene = decodeURIComponent(sceneMatch[1]);
-      return /^B:/i.test(scene) ? scene : `B:${scene}`;
+      return /^[BP]:/i.test(scene) ? scene : `B:${scene}`;
     }
 
     const publicCodeMatch = decoded.match(/[?&]publicCode=([^&#]+)/i);
@@ -23,11 +23,14 @@ export function extractElectricBoxScene(rawValue: string) {
     const pageMatch = decoded.match(/pages\/scan-entry\/index\?(?:[^#]*&)?scene=([^&#]+)/i);
     if (pageMatch?.[1]) {
       const scene = decodeURIComponent(pageMatch[1]);
-      return /^B:/i.test(scene) ? scene : `B:${scene}`;
+      return /^[BP]:/i.test(scene) ? scene : `B:${scene}`;
     }
 
     const publicPathMatch = decoded.match(/\/public\/electric-boxes\/([^/?#]+)\/(?:summary|monthly-records)/i);
     if (publicPathMatch?.[1]) return `B:${decodeURIComponent(publicPathMatch[1])}`;
+
+    const generalPathMatch = decoded.match(/\/public\/general-inspection-points\/([^/?#]+)\/monthly-records/i);
+    if (generalPathMatch?.[1]) return `P:${decodeURIComponent(generalPathMatch[1])}`;
 
     if (/^PUB[-_]/i.test(decoded)) return `B:${decoded}`;
   } catch (error) {

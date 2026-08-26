@@ -2,7 +2,11 @@ import { getMockTodos } from '@/mock/runtime';
 import type { PageResult, TodoItem, TodoSummary, UserNotification } from '@/types';
 import { USE_MOCK, request } from './request';
 
-const TODO_TYPES: TodoItem['type'][] = ['INSPECTION', 'REVIEW', 'RECTIFICATION', 'RECHECK', 'SEAL_APPROVAL'];
+const TODO_TYPES: TodoItem['type'][] = [
+  'INSPECTION', 'GENERAL_INSPECTION', 'GENERAL_INSPECTION_ASSIGN',
+  'REVIEW', 'RECTIFICATION', 'RECTIFICATION_ASSIGN', 'RECHECK', 'RECHECK_ASSIGN',
+  'SEAL_APPROVAL'
+];
 const TODO_PRIORITIES: NonNullable<TodoItem['priority']>[] = ['normal', 'warning', 'danger'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -48,6 +52,10 @@ function normalizePriority(value: unknown): TodoItem['priority'] {
 
 function fallbackTitle(type: TodoItem['type'], marker: string) {
   if (type === 'SEAL_APPROVAL') return `${marker || '用印申请'} 待审批`;
+  if (type === 'GENERAL_INSPECTION') return `${marker || '通用巡检'} 待执行`;
+  if (type === 'GENERAL_INSPECTION_ASSIGN') return `${marker || '通用巡检'} 待改派`;
+  if (type === 'RECTIFICATION_ASSIGN') return `${marker || '巡检异常'} 待分派`;
+  if (type === 'RECHECK_ASSIGN') return `${marker || '巡检异常'} 复查待改派`;
   if (type === 'REVIEW') return `${marker} 待安全复核`;
   if (type === 'RECTIFICATION') return `${marker} 异常整改`;
   if (type === 'RECHECK') return `${marker} 整改完成待复查`;
@@ -141,6 +149,7 @@ function matchesTodoType(item: TodoItem, type?: string) {
   if (normalized === 'SEAL' || normalized === 'SEAL_APPLICATION') return businessType === 'SEAL_APPLICATION';
   if (normalized === 'QUALITY' || normalized === 'QUALITY_ISSUE') return businessType === 'QUALITY_ISSUE';
   if (normalized === 'INSPECTION_RECORD') return businessType === 'INSPECTION_RECORD';
+  if (normalized === 'GENERAL_INSPECTION' || normalized === 'GENERAL_INSPECTION_TASK') return businessType === 'GENERAL_INSPECTION_TASK';
   return toText(item.taskType || item.type).toUpperCase() === normalized;
 }
 

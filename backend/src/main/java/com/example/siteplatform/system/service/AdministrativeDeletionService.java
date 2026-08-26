@@ -193,6 +193,18 @@ public class AdministrativeDeletionService {
                 SELECT COUNT(*) FROM inspection_rectification
                 WHERE deleted = 0 AND assignee_id = ? AND status <> 'CLOSED'
                 """, id));
+        add(impact, "pendingGeneralInspections", "将转为待改派的通用巡检任务", countSql("""
+                SELECT COUNT(*) FROM general_inspection_task
+                WHERE assignee_id = ? AND status = 'PENDING'
+                """, id));
+        add(impact, "openGeneralRectifications", "将转为待分派的通用巡检整改", countSql("""
+                SELECT COUNT(*) FROM general_inspection_rectification
+                WHERE assignee_id = ? AND status IN ('UNASSIGNED', 'PENDING', 'REJECTED')
+                """, id));
+        add(impact, "pendingGeneralReviews", "将转为待改派的通用巡检复查", countSql("""
+                SELECT COUNT(*) FROM general_inspection_rectification
+                WHERE reviewer_id = ? AND status = 'COMPLETED'
+                """, id));
         add(impact, "openQualityIssues", "将转为待分配的质量整改", countSql("""
                 SELECT COUNT(*) FROM quality_issue
                 WHERE deleted = 0 AND assignee_id = ? AND status NOT IN ('CLOSED', 'VOIDED')
@@ -227,6 +239,8 @@ public class AdministrativeDeletionService {
         add(impact, "boxes", "电箱与二维码", count("electric_box", "project_id", id));
         add(impact, "inspections", "巡检与整改", count("inspection_record", "project_id", id)
                 + count("inspection_rectification", "project_id", id));
+        add(impact, "generalInspections", "通用巡检配置、任务、整改与审计",
+                generalInspectionProjectDataCount(id));
         add(impact, "quality", "质量周检、问题与日志",
                 count("quality_weekly_inspection", "project_id", id)
                         + count("quality_weekly_inspection_draft_item", "project_id", id)
@@ -300,6 +314,9 @@ public class AdministrativeDeletionService {
         long reviews = 0;
         long rectifications = 0;
         long quality = 0;
+        long generalTasks = 0;
+        long generalRectifications = 0;
+        long generalReviews = 0;
         for (Map<String, Object> assignment : assignments) {
             var responsibility = responsibilityReleaseService.impact(
                     number(assignment.get("project_id")), number(assignment.get("user_id")));
@@ -308,11 +325,17 @@ public class AdministrativeDeletionService {
             reviews += responsibility.getPendingInspectionReviewCount();
             rectifications += responsibility.getOpenRectificationCount();
             quality += responsibility.getOpenQualityIssueCount();
+            generalTasks += responsibility.getPendingGeneralInspectionTaskCount();
+            generalRectifications += responsibility.getOpenGeneralRectificationCount();
+            generalReviews += responsibility.getPendingGeneralReviewCount();
         }
         add(impact, "responsibleBoxes", "可能解除的电箱责任", boxes);
         add(impact, "pendingReviews", "可能转待分配的巡检复核", reviews);
         add(impact, "openRectifications", "可能转待分配的巡检整改", rectifications);
         add(impact, "openQualityIssues", "可能转待分配的质量整改", quality);
+        add(impact, "pendingGeneralInspections", "可能转待改派的通用巡检任务", generalTasks);
+        add(impact, "openGeneralRectifications", "可能转待分派的通用巡检整改", generalRectifications);
+        add(impact, "pendingGeneralReviews", "可能转待改派的通用巡检复查", generalReviews);
     }
 
     private void registrationApplicationImpact(DeletionImpactVO impact, Long id) {
@@ -471,11 +494,18 @@ public class AdministrativeDeletionService {
                     WHERE responsible_electrician_id = ? OR safety_manager_id = ?
                 UNION SELECT project_id FROM inspection_record WHERE assigned_reviewer_id = ?
                 UNION SELECT project_id FROM inspection_rectification WHERE assignee_id = ?
+                UNION SELECT project_id FROM general_inspection_task
+                    WHERE assignee_id = ? AND status = 'PENDING'
+                UNION SELECT project_id FROM general_inspection_rectification
+                    WHERE assignee_id = ? AND status IN ('UNASSIGNED', 'PENDING', 'REJECTED')
+                UNION SELECT project_id FROM general_inspection_rectification
+                    WHERE reviewer_id = ? AND status = 'COMPLETED'
                 UNION SELECT project_id FROM quality_issue WHERE assignee_id = ?
                 UNION SELECT project_id FROM workflow_approval_config_user WHERE user_id = ?
                 UNION SELECT project_id FROM workflow_approval_task
                     WHERE assignee_user_id = ? AND business_code = 'SEAL_APPLICATION' AND status = 'PENDING'
-                """, List.of(userId, userId, userId, userId, userId, userId, userId, userId)));
+                """, List.of(userId, userId, userId, userId, userId, userId, userId,
+                        userId, userId, userId, userId)));
         projectIds.stream().filter(Objects::nonNull).forEach(projectId ->
                 responsibilityReleaseService.releaseAll(projectId, userId));
 
@@ -545,9 +575,25 @@ public class AdministrativeDeletionService {
         update("DELETE FROM inspection_record_item WHERE record_id IN "
                 + "(SELECT id FROM inspection_record WHERE project_id = ?)", projectId);
 
+        update("DELETE FROM general_inspection_task_item WHERE task_id IN "
+                + "(SELECT id FROM general_inspection_task WHERE project_id = ?)", projectId);
+        update("DELETE FROM general_inspection_rectification WHERE project_id = ?", projectId);
+        update("DELETE FROM general_inspection_task WHERE project_id = ?", projectId);
+        update("DELETE FROM general_inspection_plan_version WHERE plan_id IN "
+                + "(SELECT id FROM general_inspection_plan WHERE project_id = ?)", projectId);
+        update("DELETE FROM general_inspection_plan WHERE project_id = ?", projectId);
+        update("DELETE FROM general_inspection_template_item WHERE template_id IN "
+                + "(SELECT id FROM general_inspection_template WHERE project_id = ?)", projectId);
+        update("DELETE FROM general_inspection_template_version WHERE template_id IN "
+                + "(SELECT id FROM general_inspection_template WHERE project_id = ?)", projectId);
+
         for (String table : List.of(
                 "quality_issue_log", "quality_issue", "quality_weekly_inspection_draft_item",
                 "quality_weekly_inspection", "inspection_rectification", "inspection_record",
+                "general_inspection_action_log", "general_inspection_export_job",
+                "general_inspection_event_outbox", "general_inspection_point",
+                "general_inspection_point_category", "general_inspection_template",
+                "general_inspection_project_setting",
                 "electric_box_inspection_scope", "electric_box_qr_log", "project_inspection_setting",
                 "project_document", "document_folder", "person_certificate", "person_entry_exit_log",
                 "safety_education_batch", "temporary_person", "video_access_log", "video_layout_config",
@@ -767,6 +813,7 @@ public class AdministrativeDeletionService {
                 + count("electric_box_inspection_scope", "operator_id", userId)
                 + count("inspection_review_log", "operator_id", userId)
                 + count("inspection_rectification_review_log", "operator_id", userId)
+                + count("general_inspection_action_log", "operator_id", userId)
                 + count("quality_issue_log", "operator_id", userId)
                 + count("person_entry_exit_log", "operator_id", userId)
                 + count("video_access_log", "user_id", userId)
@@ -784,6 +831,39 @@ public class AdministrativeDeletionService {
                 + count("workflow_approval_instance", "decision_user_id", userId)
                 + count("workflow_approval_task", "assignee_user_id", userId)
                 + count("workflow_approval_task", "decision_user_id", userId);
+    }
+
+    private long generalInspectionProjectDataCount(Long projectId) {
+        return count("general_inspection_project_setting", "project_id", projectId)
+                + count("general_inspection_template", "project_id", projectId)
+                + countSql("""
+                    SELECT COUNT(*) FROM general_inspection_template_version version
+                    INNER JOIN general_inspection_template template ON template.id = version.template_id
+                    WHERE template.project_id = ?
+                    """, projectId)
+                + countSql("""
+                    SELECT COUNT(*) FROM general_inspection_template_item item
+                    INNER JOIN general_inspection_template template ON template.id = item.template_id
+                    WHERE template.project_id = ?
+                    """, projectId)
+                + count("general_inspection_point_category", "project_id", projectId)
+                + count("general_inspection_point", "project_id", projectId)
+                + count("general_inspection_plan", "project_id", projectId)
+                + countSql("""
+                    SELECT COUNT(*) FROM general_inspection_plan_version version
+                    INNER JOIN general_inspection_plan plan ON plan.id = version.plan_id
+                    WHERE plan.project_id = ?
+                    """, projectId)
+                + count("general_inspection_task", "project_id", projectId)
+                + countSql("""
+                    SELECT COUNT(*) FROM general_inspection_task_item item
+                    INNER JOIN general_inspection_task task ON task.id = item.task_id
+                    WHERE task.project_id = ?
+                    """, projectId)
+                + count("general_inspection_rectification", "project_id", projectId)
+                + count("general_inspection_action_log", "project_id", projectId)
+                + count("general_inspection_export_job", "project_id", projectId)
+                + count("general_inspection_event_outbox", "project_id", projectId);
     }
 
     private long sealProjectDataCount(Long projectId) {

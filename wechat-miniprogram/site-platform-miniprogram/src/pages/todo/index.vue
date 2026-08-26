@@ -82,7 +82,7 @@ onShow(async () => {
 });
 
 function todoFilterType(value: BusinessKey) {
-  if (value === 'INSPECTION') return 'INSPECTION_RECORD';
+  if (value === 'INSPECTION') return 'INSPECTION_ALL';
   if (value === 'QUALITY') return 'QUALITY';
   if (value === 'SEAL') return 'SEAL';
   return 'ALL';
@@ -217,6 +217,10 @@ function typeLabel(todo: TodoItem) {
   if (todo.type === 'RECTIFICATION') return '巡检整改';
   if (todo.type === 'RECHECK') return '巡检复查';
   if (todo.type === 'REVIEW') return '巡检复核';
+  if (todo.type === 'GENERAL_INSPECTION') return '通用巡检';
+  if (todo.type === 'GENERAL_INSPECTION_ASSIGN') return '通用巡检待改派';
+  if (todo.type === 'RECTIFICATION_ASSIGN') return '巡检待分派';
+  if (todo.type === 'RECHECK_ASSIGN') return '巡检复查待改派';
   return '待巡检';
 }
 

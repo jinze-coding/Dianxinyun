@@ -25,6 +25,8 @@ public class WebCorsConfig implements WebMvcConfigurer {
                         "/api/v1/document-folders/**",
                         "/api/v1/inspection",
                         "/api/v1/inspection/**",
+                        "/api/v1/general-inspections",
+                        "/api/v1/general-inspections/**",
                         "/api/v1/electric-boxes",
                         "/api/v1/electric-boxes/**",
                         "/api/v1/quality/issues",

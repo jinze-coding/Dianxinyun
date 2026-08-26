@@ -28,6 +28,7 @@ export const BUSINESS_MENU_DEFINITIONS = [
       { menuCode: 'INSPECTION_LEDGER', label: '电箱台账' },
       { menuCode: 'INSPECTION_RECORDS', label: '巡检记录' },
       { menuCode: 'INSPECTION_RECTIFICATIONS', label: '整改闭环' },
+      { menuCode: 'INSPECTION_CONFIG', label: '巡检配置' },
     ],
   },
   {
@@ -77,6 +78,8 @@ const ACTION_DEFINITIONS = [
   { key: 'inspection.summary.export', label: '导出巡检汇总', group: '巡检管理 · 巡检记录', menuCodes: ['INSPECTION_RECORDS'], primaryCodes: ['SUMMARY_EXPORT'], codes: ['SUMMARY_EXPORT', 'SUMMARY_VIEW', 'inspection.export', 'inspection.view'], requiresActions: ['inspection.summary.view'] },
   { key: 'inspection.rectify', label: '提交分配给自己的巡检整改', group: '巡检管理 · 整改闭环', menuCodes: ['INSPECTION_RECTIFICATIONS'], primaryCodes: ['inspection.rectify'], codes: ['inspection.rectify', 'inspection.view'] },
   { key: 'inspection.review', label: '复查、退回和改派巡检整改', group: '巡检管理 · 整改闭环', menuCodes: ['INSPECTION_RECTIFICATIONS'], primaryCodes: ['inspection.review'], codes: ['inspection.review', 'inspection.view'] },
+  { key: 'inspection.general.manage', label: '配置通用巡检模板、点位、计划及纠错', group: '巡检管理 · 巡检配置', menuCodes: ['INSPECTION_CONFIG'], primaryCodes: ['inspection.manage'], codes: ['inspection.manage', 'inspection.view'] },
+  { key: 'inspection.general.submit', label: '执行分配给自己的通用巡检任务', group: '巡检管理 · 巡检配置', menuCodes: ['INSPECTION_CONFIG'], primaryCodes: ['CUSTOM_INSPECTION_SUBMIT'], codes: ['CUSTOM_INSPECTION_SUBMIT', 'inspection.submit', 'inspection.view'] },
 
   { key: 'quality.view', label: '查看质量周检、问题和质量资料', group: '质量周检 · 通用操作', menuCodes: ['QUALITY_ISSUES', 'QUALITY_DOCUMENTS'], primaryCodes: ['quality.view'], codes: ['quality.view'] },
   { key: 'quality.manage', label: '编辑提交周检、改派及管理质量资料', group: '质量周检 · 通用操作', menuCodes: ['QUALITY_ISSUES', 'QUALITY_DOCUMENTS'], primaryCodes: ['quality.manage'], codes: ['quality.manage', 'quality.view'], requiresActions: ['quality.view'] },
@@ -268,7 +271,7 @@ export function buildPermissionActions(permissions = []) {
     let menuCodes = [module];
     let group = `${permission.moduleCode || '其他'} · 其他操作`;
     if (module === 'WEB_DOCUMENT') menuCodes = ['DOCUMENT_LIBRARY', 'DOCUMENT_RECYCLE'];
-    if (module === 'WEB_INSPECTION') menuCodes = ['INSPECTION_LEDGER', 'INSPECTION_RECORDS'];
+    if (module === 'WEB_INSPECTION') menuCodes = ['INSPECTION_LEDGER', 'INSPECTION_RECORDS', 'INSPECTION_CONFIG'];
     if (module === 'WEB_QUALITY') menuCodes = ['QUALITY_ISSUES', 'QUALITY_DOCUMENTS'];
     actions.push({
       key: `custom:${normalizedCode}`,

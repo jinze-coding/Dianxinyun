@@ -85,6 +85,14 @@
       "style": { "navigationStyle": "custom" }
     },
     {
+      "path": "pages/inspection/general-tasks",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "我的通用巡检" }
+    },
+    {
+      "path": "pages/inspection/general-form",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "通用巡检" }
+    },
+    {
       "path": "pages/inspection/records",
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "巡检记录" }
     },
@@ -105,6 +113,10 @@
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "整改详情" }
     },
     {
+      "path": "pages/rectification/general-detail",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "通用巡检整改" }
+    },
+    {
       "path": "pages/seal/entry",
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "扫码用印" }
     },
@@ -123,6 +135,10 @@
     {
       "path": "pages/public/box-monthly",
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "电箱月度检查表" }
+    },
+    {
+      "path": "pages/public/general-inspection-monthly",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "点位月度巡检" }
     },
     {
       "path": "pages/public/visitor-invite",

@@ -81,6 +81,13 @@ class BusinessModulePermissionInterceptorTest {
                 Arguments.of("POST", "/api/v1/inspection/rectifications/8/close", SystemPermissionCodes.INSPECTION_REVIEW),
                 Arguments.of("POST", "/api/v1/inspection/rectifications/8/reject", SystemPermissionCodes.INSPECTION_REVIEW),
                 Arguments.of("PUT", "/api/v1/inspection/settings/2", SystemPermissionCodes.INSPECTION_MANAGE),
+                Arguments.of("GET", "/api/v1/general-inspections/tasks", null),
+                Arguments.of("POST", "/api/v1/general-inspections/tasks/8/scan", SystemPermissionCodes.INSPECTION_SUBMIT),
+                Arguments.of("POST", "/api/v1/general-inspections/tasks/8/submit", SystemPermissionCodes.INSPECTION_SUBMIT),
+                Arguments.of("POST", "/api/v1/general-inspections/rectifications/8/complete", SystemPermissionCodes.INSPECTION_RECTIFY),
+                Arguments.of("POST", "/api/v1/general-inspections/rectifications/8/close", SystemPermissionCodes.INSPECTION_REVIEW),
+                Arguments.of("POST", "/api/v1/general-inspections/points", SystemPermissionCodes.INSPECTION_MANAGE),
+                Arguments.of("POST", "/api/v1/general-inspections/exports", SystemPermissionCodes.INSPECTION_EXPORT),
                 Arguments.of("GET", "/api/v1/electric-boxes/7", SystemPermissionCodes.INSPECTION_VIEW),
                 Arguments.of("POST", "/api/v1/electric-boxes/import", SystemPermissionCodes.INSPECTION_MANAGE),
                 Arguments.of("GET", "/api/v1/quality/issues", SystemPermissionCodes.QUALITY_VIEW),
@@ -199,6 +206,7 @@ class BusinessModulePermissionInterceptorTest {
     @Test
     void publicAndAuthenticationPathsHaveNoModulePermissionMapping() {
         assertThat(interceptor.resolveStaticPermission("GET", "/api/v1/public/electric-boxes/X/summary")).isNull();
+        assertThat(interceptor.resolveStaticPermission("GET", "/api/v1/public/general-inspection-points/X/monthly-records")).isNull();
         assertThat(interceptor.resolveStaticPermission("GET", "/api/v1/scan/electric-boxes/X")).isNull();
         assertThat(interceptor.resolveStaticPermission("POST", "/api/v1/auth/login")).isNull();
         assertThat(interceptor.resolveStaticPermission("POST", "/api/v1/registration-applications")).isNull();

@@ -67,6 +67,7 @@ public class InspectionPermissionTemplateService {
                 )),
                 new InspectionPermissionCatalogGroupVO("INSPECTION", "巡检", List.of(
                         item(InspectionPermissionCodes.INSPECTION_DAILY_SUBMIT, "日检提交", "提交当前项目任意纳入巡检范围电箱的日检记录"),
+                        item(InspectionPermissionCodes.CUSTOM_INSPECTION_SUBMIT, "通用巡检提交", "执行分配给自己的临边及其他通用巡检任务"),
                         item(InspectionPermissionCodes.INSPECTION_RECORD_VIEW, "检查记录查看", "查看项目检查记录明细")
                 )),
                 new InspectionPermissionCatalogGroupVO("SUMMARY", "汇总", List.of(

@@ -8,6 +8,7 @@ import WorkspaceAreaSwitcher from '@/components/workspace/WorkspaceAreaSwitcher.
 import WorkspaceMetricStrip, { type WorkspaceMetric } from '@/components/workspace/WorkspaceMetricStrip.vue';
 import { WORKSPACE_THEME } from '@/constants/workspaceTheme';
 import { getTodoItems } from '@/api/todo';
+import { getGeneralInspectionTasks, type GeneralInspectionTask } from '@/api/generalInspection';
 import { useProjectStore } from '@/stores/project';
 import { useAuthStore } from '@/stores/auth';
 import type { TodoItem } from '@/types';
@@ -20,6 +21,7 @@ const TINT = WORKSPACE_THEME.tint;
 const projectStore = useProjectStore();
 const authStore = useAuthStore();
 const todos = ref<TodoItem[]>([]);
+const generalTasks = ref<GeneralInspectionTask[]>([]);
 const loading = ref(false);
 const errorMessage = ref('');
 const scanBusy = ref(false);
@@ -42,6 +44,12 @@ const canSubmit = computed(() => Boolean(currentProject.value)
     'inspection.submit',
     'INSPECTION_DAILY_SUBMIT'
   ));
+const canSubmitGeneral = computed(() => Boolean(currentProject.value)
+  && authStore.hasProjectPermission(
+    currentProject.value!.id,
+    'inspection.submit',
+    'CUSTOM_INSPECTION_SUBMIT'
+  ));
 const canRectify = computed(() => Boolean(currentProject.value)
   && authStore.hasProjectPermission(currentProject.value!.id, 'inspection.rectify'));
 const canReviewRectification = computed(() => Boolean(currentProject.value)
@@ -53,11 +61,20 @@ const rectificationTodos = computed(() => todos.value.filter((todo) => todo.type
 const recheckTodos = computed(() => todos.value.filter((todo) => todo.type === 'RECHECK'
   && (!todo.projectId || todo.projectId === currentProject.value?.id)));
 const checkedCount = computed(() => currentProject.value?.todayInspectionCount || 0);
-const requiredCount = computed(() => checkedCount.value + inspectionTodos.value.length);
+const pendingGeneralTasks = computed(() => generalTasks.value.filter((task) => task.status === 'PENDING'));
+const todayText = computed(() => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+});
+const todayGeneralTasks = computed(() => generalTasks.value.filter((task) => task.occurrenceDate === todayText.value));
+const pendingTodayGeneralCount = computed(() => todayGeneralTasks.value.filter((task) => task.status === 'PENDING').length);
+const checkedGeneralCount = computed(() => todayGeneralTasks.value.filter((task) => task.status !== 'PENDING' && task.status !== 'CANCELLED').length);
+const requiredCount = computed(() => checkedCount.value + inspectionTodos.value.length
+  + todayGeneralTasks.value.filter((task) => task.status !== 'CANCELLED').length);
 const metrics = computed<WorkspaceMetric[]>(() => [
   { label: '今日应检', value: requiredCount.value, tone: 'amber' },
-  { label: '今日已检', value: checkedCount.value, tone: 'green' },
-  { label: '今日未检', value: inspectionTodos.value.length, tone: inspectionTodos.value.length ? 'red' : 'green' }
+  { label: '今日已检', value: checkedCount.value + checkedGeneralCount.value, tone: 'green' },
+  { label: '今日未检', value: inspectionTodos.value.length + pendingTodayGeneralCount.value, tone: inspectionTodos.value.length + pendingTodayGeneralCount.value ? 'red' : 'green' }
 ]);
 
 function hideNativeTabBar() {
@@ -77,12 +94,24 @@ async function refresh() {
     await projectStore.loadProjects();
     if (currentProject.value && !canView.value) {
       todos.value = [];
+      generalTasks.value = [];
       errorMessage.value = '当前项目无巡检查看权限，可切换到其他施工区域';
       return;
     }
-    todos.value = currentProject.value ? await getTodoItems(currentProject.value.id) : [];
+    if (currentProject.value) {
+      const [todoResult, generalResult] = await Promise.all([
+        getTodoItems(currentProject.value.id),
+        getGeneralInspectionTasks({ projectId: currentProject.value.id, mine: true }).catch(() => [])
+      ]);
+      todos.value = todoResult;
+      generalTasks.value = generalResult;
+    } else {
+      todos.value = [];
+      generalTasks.value = [];
+    }
   } catch (error) {
     todos.value = [];
+    generalTasks.value = [];
     errorMessage.value = error instanceof Error ? error.message : '巡检任务加载失败';
   } finally {
     loading.value = false;
@@ -121,6 +150,12 @@ function startInspection(todo: TodoItem) {
   }
   navigateTo(`/pages/inspection/form?boxId=${todo.targetId}`);
 }
+
+function startGeneralInspection(task: GeneralInspectionTask) {
+  if (!canSubmitGeneral.value) { showToast('当前项目无通用巡检提交权限'); return; }
+  if (task.qrRequired && !task.scanVerified) { showToast('该点位必须先扫码核验'); return; }
+  navigateTo(`/pages/inspection/general-form?id=${task.id}`);
+}
 </script>
 
 <template>
@@ -154,7 +189,7 @@ function startInspection(todo: TodoItem) {
               <image src="/static/design-preview-icons/safety-scan.png" mode="aspectFit" />
             </view>
             <view class="scan-copy">
-              <text>{{ scanBusy ? '正在读取二维码' : '扫描电箱二维码' }}</text>
+              <text>{{ scanBusy ? '正在读取二维码' : '扫描巡检二维码' }}</text>
               <text>开发者工具选择本地图片，真机调起微信扫码</text>
             </view>
             <text class="scan-arrow"></text>
@@ -181,6 +216,22 @@ function startInspection(todo: TodoItem) {
                 <text class="empty-title">今日巡检已完成</text>
                 <text class="empty-desc">当前区域没有待巡检电箱</text>
               </view>
+            </view>
+          </view>
+
+          <view v-if="generalTasks.length || canSubmitGeneral" class="section-block task-section">
+            <view class="section-head">
+              <view><text class="section-title">通用巡检</text><text class="section-subtitle">临边等项目自定义巡检 · {{ pendingGeneralTasks.length }} 项待处理</text></view>
+              <button class="all-link" @tap="navigateTo('/pages/inspection/general-tasks')">全部</button>
+            </view>
+            <view class="plain-list">
+              <button v-for="task in pendingGeneralTasks.slice(0, 5)" :key="task.id" class="plain-row task-row" :disabled="!canSubmitGeneral" @tap="startGeneralInspection(task)">
+                <view class="task-code-box">{{ (task.pointCode || '').slice(-3) }}</view>
+                <view class="plain-copy"><text class="task-code">{{ task.pointCode }} · {{ task.slotName }}</text><text class="plain-title">{{ task.pointName }}</text><text class="plain-meta">{{ task.overdue ? '逾期未检，可补检' : `截止 ${task.dueTime}` }}{{ task.qrRequired ? ' · 必须扫码' : '' }}</text></view>
+                <text class="task-action">{{ task.qrRequired && !task.scanVerified ? '请扫码' : '去巡检' }}</text>
+                <text class="row-arrow"></text>
+              </button>
+              <view v-if="!pendingGeneralTasks.length" class="empty-state compact-empty"><text class="empty-title">当前没有待执行的通用巡检</text></view>
             </view>
           </view>
 
@@ -245,4 +296,7 @@ function startInspection(todo: TodoItem) {
 .records-copy text:first-child { font-size: 23rpx; font-weight: 750; }
 .records-copy text:last-child { margin-top: 4rpx; color: #98a2b3; font-size: 19rpx; }
 .rectification-entry { margin-top: 14rpx; }.rectification-icon { color: var(--inspection-primary-deep); font-size: 22rpx; font-weight: 850; }
+.all-link { min-width: 90rpx; height: 54rpx; margin: 0; padding: 0 14rpx; border: 0; background: transparent; color: var(--inspection-primary-deep); font-size: 20rpx; line-height: 54rpx; }
+.all-link::after { border: 0; }
+.compact-empty { min-height: 120rpx; }
 </style>

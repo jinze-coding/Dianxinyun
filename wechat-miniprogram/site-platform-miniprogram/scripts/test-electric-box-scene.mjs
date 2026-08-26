@@ -5,6 +5,7 @@ import {
 } from '../src/utils/electricBoxScene.ts';
 
 assert.equal(extractElectricBoxScene('B:DEMO-PUBLIC-001'), 'B:DEMO-PUBLIC-001');
+assert.equal(extractElectricBoxScene('P:EDGE-POINT-001'), 'P:EDGE-POINT-001');
 assert.equal(
   extractElectricBoxScene('pages/scan-entry/index?scene=B%3ADEMO-PUBLIC-001'),
   'B:DEMO-PUBLIC-001'
@@ -16,6 +17,14 @@ assert.equal(
     path: 'pages/scan-entry/index?scene=B%3ADEMO-PUBLIC-001'
   }),
   'B:DEMO-PUBLIC-001'
+);
+assert.equal(
+  extractElectricBoxScene('pages/scan-entry/index?scene=P%3AEDGE-POINT-001'),
+  'P:EDGE-POINT-001'
+);
+assert.equal(
+  extractElectricBoxScene('https://zhihuiyz.xyz/public/general-inspection-points/EDGE-POINT-001/monthly-records'),
+  'P:EDGE-POINT-001'
 );
 assert.equal(
   extractElectricBoxSceneFromScanResult({

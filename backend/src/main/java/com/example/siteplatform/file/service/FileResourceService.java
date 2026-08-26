@@ -5,10 +5,13 @@ import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.file.entity.FileResource;
 import com.example.siteplatform.file.mapper.FileResourceMapper;
+import com.example.siteplatform.inspection.general.entity.GeneralInspectionProjectSetting;
+import com.example.siteplatform.inspection.general.mapper.GeneralInspectionProjectSettingMapper;
 import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.service.ProjectPermissionService;
 import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -35,6 +38,17 @@ public class FileResourceService {
     private static final String BUSINESS_PROJECT_PROFILE = "PROJECT_PROFILE_IMAGE";
     private static final String BUSINESS_PROJECT_ROUTE_PENDING = "PROJECT_ROUTE_IMAGE_PENDING";
     private static final String BUSINESS_PROJECT_ROUTE = "PROJECT_ROUTE_IMAGE";
+    private static final Set<String> GENERAL_INSPECTION_STAGING_TYPES = Set.of(
+            "INSPECTION_CUSTOM_POINT_PENDING",
+            "INSPECTION_CUSTOM_TASK_PENDING",
+            "INSPECTION_CUSTOM_RECTIFICATION_PENDING"
+    );
+    private static final Set<String> GENERAL_INSPECTION_FINAL_TYPES = Set.of(
+            "INSPECTION_CUSTOM_POINT",
+            "INSPECTION_CUSTOM_TASK",
+            "INSPECTION_CUSTOM_RECTIFICATION",
+            "INSPECTION_CUSTOM_EXPORT"
+    );
     private static final Set<String> QUALITY_STAGING_TYPES = Set.of(
             BUSINESS_QUALITY_PENDING,
             BUSINESS_QUALITY_RECTIFICATION_PENDING,
@@ -59,10 +73,16 @@ public class FileResourceService {
 
     private final FileResourceMapper fileMapper;
     private final ProjectPermissionService permissionService;
+    private GeneralInspectionProjectSettingMapper generalInspectionSettingMapper;
 
     public FileResourceService(FileResourceMapper fileMapper, ProjectPermissionService permissionService) {
         this.fileMapper = fileMapper;
         this.permissionService = permissionService;
+    }
+
+    @Autowired(required = false)
+    public void setGeneralInspectionSettingMapper(GeneralInspectionProjectSettingMapper mapper) {
+        this.generalInspectionSettingMapper = mapper;
     }
 
     public void checkRead(SysUser currentUser, FileResource file) {
@@ -82,6 +102,10 @@ public class FileResourceService {
             return;
         }
         String businessType = normalizeBusinessType(file.getBusinessType());
+        if (GENERAL_INSPECTION_STAGING_TYPES.contains(businessType)
+                || GENERAL_INSPECTION_FINAL_TYPES.contains(businessType)) {
+            requireGeneralInspectionEnabled(file.getProjectId());
+        }
         if (BUSINESS_PROJECT_PROFILE_PENDING.equals(businessType)
                 && !permissionService.isPlatformAdmin(currentUser.getId())
                 && !Objects.equals(file.getUploaderId(), currentUser.getId())) {
@@ -240,16 +264,27 @@ public class FileResourceService {
             throw BusinessException.forbidden("用印附件请通过用印申请专属接口上传");
         }
         if (normalized.startsWith("INSPECTION_")) {
-            if (!Set.of("INSPECTION_RECORD", "INSPECTION_RECTIFICATION").contains(normalized)) {
+            if (GENERAL_INSPECTION_FINAL_TYPES.contains(normalized)) {
+                throw new BusinessException("通用巡检正式附件只能由业务提交绑定");
+            }
+            if (!Set.of("INSPECTION_RECORD", "INSPECTION_RECTIFICATION").contains(normalized)
+                    && !GENERAL_INSPECTION_STAGING_TYPES.contains(normalized)) {
                 throw new BusinessException("不支持的巡检附件类型");
             }
             if (businessId != null) {
                 throw new BusinessException("巡检附件上传时不能直接指定业务记录");
             }
+            boolean customStaging = GENERAL_INSPECTION_STAGING_TYPES.contains(normalized);
+            if (customStaging) requireGeneralInspectionEnabled(projectId);
+            if (!customStaging) {
+                permissionService.requireSystemPermission(currentUser.getId(), projectId,
+                        SystemPermissionCodes.INSPECTION_VIEW);
+            }
             permissionService.requireSystemPermission(currentUser.getId(), projectId,
-                    SystemPermissionCodes.INSPECTION_VIEW);
-            permissionService.requireSystemPermission(currentUser.getId(), projectId,
-                    "INSPECTION_RECTIFICATION".equals(normalized)
+                    "INSPECTION_CUSTOM_POINT_PENDING".equals(normalized)
+                            ? SystemPermissionCodes.INSPECTION_MANAGE
+                            : ("INSPECTION_RECTIFICATION".equals(normalized)
+                            || "INSPECTION_CUSTOM_RECTIFICATION_PENDING".equals(normalized))
                             ? SystemPermissionCodes.INSPECTION_RECTIFY
                             : SystemPermissionCodes.INSPECTION_SUBMIT);
             return normalized;
@@ -329,6 +364,7 @@ public class FileResourceService {
         String businessType = normalizeBusinessType(file.getBusinessType());
         return businessType.equals("INSPECTION_RECORD")
                 || businessType.equals("INSPECTION_RECTIFICATION")
+                || GENERAL_INSPECTION_FINAL_TYPES.contains(businessType)
                 || businessType.equals("QUALITY_ISSUE")
                 || businessType.equals("QUALITY_RECTIFICATION")
                 || businessType.equals("QUALITY_REVIEW");
@@ -386,5 +422,13 @@ public class FileResourceService {
 
     private String normalizeBusinessType(String businessType) {
         return businessType == null ? "" : businessType.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private void requireGeneralInspectionEnabled(Long projectId) {
+        if (generalInspectionSettingMapper == null) return;
+        GeneralInspectionProjectSetting setting = generalInspectionSettingMapper.selectById(projectId);
+        if (setting == null || !Integer.valueOf(1).equals(setting.getEnabled())) {
+            throw BusinessException.forbidden("当前项目尚未启用通用巡检");
+        }
     }
 }
