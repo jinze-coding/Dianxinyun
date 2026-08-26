@@ -24,6 +24,10 @@ public class GeneralInspectionTask {
     private String templateName;
     private String pointCode;
     private String pointName;
+    private String pointTypeCode;
+    private String pointTypeName;
+    private String buildingName;
+    private String floorName;
     private String locationDesc;
     private String slotCode;
     private String slotName;

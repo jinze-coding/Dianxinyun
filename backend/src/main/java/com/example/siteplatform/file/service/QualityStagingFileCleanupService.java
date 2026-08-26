@@ -31,7 +31,9 @@ public class QualityStagingFileCleanupService {
             "QUALITY_WEEKLY_ITEM_PENDING",
             "INSPECTION_CUSTOM_POINT_PENDING",
             "INSPECTION_CUSTOM_TASK_PENDING",
-            "INSPECTION_CUSTOM_RECTIFICATION_PENDING"
+            "INSPECTION_CUSTOM_RECTIFICATION_PENDING",
+            "EDGE_INSPECTION_TASK_PENDING",
+            "EDGE_INSPECTION_RECTIFICATION_PENDING"
     );
 
     private final FileResourceMapper fileMapper;

@@ -74,7 +74,7 @@ public class GeneralInspectionConfigService {
             setting.setVersion(0);
             setting.setUpdatedById(currentUser.getId());
             setting.setUpdatedByName(userName(currentUser));
-            requireOne(settingMapper.insert(setting), "通用巡检项目开关新增");
+            requireOne(settingMapper.insert(setting), "临边巡检项目开关新增");
         } else {
             requireOne(settingMapper.updateFeature(projectId, Boolean.TRUE.equals(request.getEnabled()) ? 1 : 0,
                     request.getExpectedVersion(), currentUser.getId(), userName(currentUser)),

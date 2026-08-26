@@ -6,12 +6,18 @@ import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.file.entity.FileResource;
 import com.example.siteplatform.file.mapper.FileResourceMapper;
 import com.example.siteplatform.inspection.general.entity.GeneralInspectionProjectSetting;
+import com.example.siteplatform.inspection.general.entity.GeneralInspectionRectification;
+import com.example.siteplatform.inspection.general.entity.GeneralInspectionTask;
 import com.example.siteplatform.inspection.general.mapper.GeneralInspectionProjectSettingMapper;
+import com.example.siteplatform.inspection.general.mapper.GeneralInspectionRectificationMapper;
+import com.example.siteplatform.inspection.general.mapper.GeneralInspectionTaskMapper;
 import com.example.siteplatform.project.entity.ProjectInfo;
+import com.example.siteplatform.project.constant.InspectionPermissionCodes;
 import com.example.siteplatform.project.service.ProjectPermissionService;
 import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -39,15 +45,16 @@ public class FileResourceService {
     private static final String BUSINESS_PROJECT_ROUTE_PENDING = "PROJECT_ROUTE_IMAGE_PENDING";
     private static final String BUSINESS_PROJECT_ROUTE = "PROJECT_ROUTE_IMAGE";
     private static final Set<String> GENERAL_INSPECTION_STAGING_TYPES = Set.of(
-            "INSPECTION_CUSTOM_POINT_PENDING",
-            "INSPECTION_CUSTOM_TASK_PENDING",
-            "INSPECTION_CUSTOM_RECTIFICATION_PENDING"
+            "EDGE_INSPECTION_TASK_PENDING",
+            "EDGE_INSPECTION_RECTIFICATION_PENDING"
     );
     private static final Set<String> GENERAL_INSPECTION_FINAL_TYPES = Set.of(
             "INSPECTION_CUSTOM_POINT",
             "INSPECTION_CUSTOM_TASK",
             "INSPECTION_CUSTOM_RECTIFICATION",
-            "INSPECTION_CUSTOM_EXPORT"
+            "INSPECTION_CUSTOM_EXPORT",
+            "EDGE_INSPECTION_TASK",
+            "EDGE_INSPECTION_RECTIFICATION"
     );
     private static final Set<String> QUALITY_STAGING_TYPES = Set.of(
             BUSINESS_QUALITY_PENDING,
@@ -74,6 +81,8 @@ public class FileResourceService {
     private final FileResourceMapper fileMapper;
     private final ProjectPermissionService permissionService;
     private GeneralInspectionProjectSettingMapper generalInspectionSettingMapper;
+    private GeneralInspectionTaskMapper generalInspectionTaskMapper;
+    private GeneralInspectionRectificationMapper generalInspectionRectificationMapper;
 
     public FileResourceService(FileResourceMapper fileMapper, ProjectPermissionService permissionService) {
         this.fileMapper = fileMapper;
@@ -83,6 +92,16 @@ public class FileResourceService {
     @Autowired(required = false)
     public void setGeneralInspectionSettingMapper(GeneralInspectionProjectSettingMapper mapper) {
         this.generalInspectionSettingMapper = mapper;
+    }
+
+    @Autowired(required = false)
+    public void setGeneralInspectionTaskMapper(GeneralInspectionTaskMapper mapper) {
+        this.generalInspectionTaskMapper = mapper;
+    }
+
+    @Autowired(required = false)
+    public void setGeneralInspectionRectificationMapper(GeneralInspectionRectificationMapper mapper) {
+        this.generalInspectionRectificationMapper = mapper;
     }
 
     public void checkRead(SysUser currentUser, FileResource file) {
@@ -122,7 +141,11 @@ public class FileResourceService {
             throw BusinessException.forbidden("无其他人员未保存周检照片访问权限");
         }
         permissionService.checkProjectPermission(currentUser.getId(), file.getProjectId());
-        requireBusinessRead(currentUser, file.getProjectId(), file.getBusinessType());
+        if (businessType.startsWith("EDGE_INSPECTION_")) {
+            requireEdgeFileRead(currentUser, file, businessType);
+        } else {
+            requireBusinessRead(currentUser, file.getProjectId(), file.getBusinessType());
+        }
     }
 
     public void checkWrite(SysUser currentUser, FileResource file) {
@@ -206,6 +229,10 @@ public class FileResourceService {
                 permissionService.requireSystemPermission(
                         currentUser.getId(), projectId, SystemPermissionCodes.QUALITY_MANAGE);
             }
+        } else if (normalized.startsWith("EDGE_INSPECTION_")) {
+            if (!hasAnyEdgeInspectionPermission(currentUser.getId(), projectId)) {
+                throw BusinessException.forbidden("无临边巡检附件查看权限");
+            }
         } else if (normalized.startsWith("INSPECTION_")) {
             permissionService.requireSystemPermission(currentUser.getId(), projectId, SystemPermissionCodes.INSPECTION_VIEW);
         }
@@ -263,9 +290,25 @@ public class FileResourceService {
         if (normalized.startsWith("SEAL_")) {
             throw BusinessException.forbidden("用印附件请通过用印申请专属接口上传");
         }
+        if (normalized.startsWith("EDGE_INSPECTION_")) {
+            if (GENERAL_INSPECTION_FINAL_TYPES.contains(normalized)) {
+                throw new BusinessException("临边巡检正式附件只能由业务提交绑定");
+            }
+            if (!GENERAL_INSPECTION_STAGING_TYPES.contains(normalized)) {
+                throw new BusinessException("不支持的临边巡检附件类型");
+            }
+            if (businessId != null) throw new BusinessException("临边巡检附件上传时不能直接指定业务记录");
+            requireGeneralInspectionEnabled(projectId);
+            requireEdgeInspectionPermission(currentUser.getId(), projectId,
+                    normalized.contains("RECTIFICATION")
+                            ? InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY
+                            : InspectionPermissionCodes.EDGE_INSPECTION_SUBMIT,
+                    normalized.contains("RECTIFICATION") ? "无临边巡检整改权限" : "无临边巡检执行权限");
+            return normalized;
+        }
         if (normalized.startsWith("INSPECTION_")) {
             if (GENERAL_INSPECTION_FINAL_TYPES.contains(normalized)) {
-                throw new BusinessException("通用巡检正式附件只能由业务提交绑定");
+                throw new BusinessException("巡检正式附件只能由业务提交绑定");
             }
             if (!Set.of("INSPECTION_RECORD", "INSPECTION_RECTIFICATION").contains(normalized)
                     && !GENERAL_INSPECTION_STAGING_TYPES.contains(normalized)) {
@@ -308,6 +351,7 @@ public class FileResourceService {
         return normalized;
     }
 
+    @Transactional
     public void validateAndBind(SysUser currentUser, Long projectId, List<Long> fileIds,
                                 String expectedBusinessType, String businessType, Long businessId) {
         if (fileIds == null || fileIds.isEmpty()) return;
@@ -315,12 +359,11 @@ public class FileResourceService {
             throw new BusinessException("附件绑定参数不完整");
         }
         validateQualityBindingTypes(expectedBusinessType, businessType);
-        List<Long> distinctFileIds = fileIds.stream().filter(Objects::nonNull).distinct().toList();
+        List<Long> distinctFileIds = fileIds.stream().filter(Objects::nonNull).distinct().sorted().toList();
         if (distinctFileIds.size() != fileIds.size()) {
             throw new BusinessException("附件列表包含重复或无效文件");
         }
-        List<FileResource> files = fileMapper.selectList(new LambdaQueryWrapper<FileResource>()
-                .in(FileResource::getId, distinctFileIds));
+        List<FileResource> files = fileMapper.selectByIdsForUpdate(distinctFileIds);
         if (files.size() != distinctFileIds.size()) {
             throw new BusinessException("部分附件不存在");
         }
@@ -370,6 +413,99 @@ public class FileResourceService {
                 || businessType.equals("QUALITY_REVIEW");
     }
 
+    private void requireEdgeInspectionPermission(Long userId, Long projectId, String permissionCode,
+                                                 String message) {
+        if (!permissionService.hasInspectionPermission(userId, projectId, permissionCode)) {
+            throw BusinessException.forbidden(message);
+        }
+    }
+
+    /**
+     * 临边巡检照片除项目和功能开关外还按业务记录授权。整改人、复查人即使没有
+     * EDGE_INSPECTION_VIEW，也必须能看到自己整改单中的现场证据和整改照片。
+     */
+    private void requireEdgeFileRead(SysUser currentUser, FileResource file, String businessType) {
+        Long userId = currentUser.getId();
+        Long projectId = file.getProjectId();
+        if (permissionService.isPlatformAdmin(userId)) return;
+
+        if (GENERAL_INSPECTION_STAGING_TYPES.contains(businessType)) {
+            String stagePermission = businessType.contains("RECTIFICATION")
+                    ? InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY
+                    : InspectionPermissionCodes.EDGE_INSPECTION_SUBMIT;
+            if (Objects.equals(file.getUploaderId(), userId)
+                    && hasEdgeInspectionPermission(userId, projectId, stagePermission)) return;
+            throw BusinessException.forbidden("无临边巡检暂存附件访问权限");
+        }
+
+        if (hasEdgeInspectionPermission(userId, projectId, InspectionPermissionCodes.EDGE_INSPECTION_VIEW)
+                || hasEdgeInspectionPermission(userId, projectId, InspectionPermissionCodes.EDGE_INSPECTION_MANAGE)) {
+            return;
+        }
+        if (file.getBusinessId() == null
+                || generalInspectionTaskMapper == null
+                || generalInspectionRectificationMapper == null) {
+            throw BusinessException.forbidden("无临边巡检附件查看权限");
+        }
+
+        if ("EDGE_INSPECTION_TASK".equals(businessType)) {
+            GeneralInspectionTask task = generalInspectionTaskMapper.selectById(file.getBusinessId());
+            if (!isEdgeTaskInProject(task, projectId)) {
+                throw BusinessException.forbidden("无临边巡检附件查看权限");
+            }
+            if (Objects.equals(task.getAssigneeId(), userId)
+                    && hasEdgeInspectionPermission(userId, projectId,
+                    InspectionPermissionCodes.EDGE_INSPECTION_SUBMIT)) return;
+            if (Objects.equals(task.getReviewerId(), userId)
+                    && hasEdgeInspectionPermission(userId, projectId,
+                    InspectionPermissionCodes.EDGE_INSPECTION_REVIEW)) return;
+            List<GeneralInspectionRectification> rectifications = generalInspectionRectificationMapper.selectList(
+                    new LambdaQueryWrapper<GeneralInspectionRectification>()
+                            .eq(GeneralInspectionRectification::getTaskId, task.getId()));
+            if (rectifications.stream().anyMatch(rectification ->
+                    Objects.equals(rectification.getAssigneeId(), userId)
+                            && hasEdgeInspectionPermission(userId, projectId,
+                            InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY)
+                            || Objects.equals(rectification.getReviewerId(), userId)
+                            && hasEdgeInspectionPermission(userId, projectId,
+                            InspectionPermissionCodes.EDGE_INSPECTION_REVIEW))) return;
+        } else if ("EDGE_INSPECTION_RECTIFICATION".equals(businessType)) {
+            GeneralInspectionRectification rectification =
+                    generalInspectionRectificationMapper.selectById(file.getBusinessId());
+            GeneralInspectionTask task = rectification == null ? null
+                    : generalInspectionTaskMapper.selectById(rectification.getTaskId());
+            if (rectification != null
+                    && Objects.equals(rectification.getProjectId(), projectId)
+                    && isEdgeTaskInProject(task, projectId)
+                    && (Objects.equals(rectification.getAssigneeId(), userId)
+                    && hasEdgeInspectionPermission(userId, projectId,
+                    InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY)
+                    || Objects.equals(rectification.getReviewerId(), userId)
+                    && hasEdgeInspectionPermission(userId, projectId,
+                    InspectionPermissionCodes.EDGE_INSPECTION_REVIEW))) return;
+        }
+        throw BusinessException.forbidden("无临边巡检附件查看权限");
+    }
+
+    private boolean isEdgeTaskInProject(GeneralInspectionTask task, Long projectId) {
+        return task != null
+                && Objects.equals(task.getProjectId(), projectId)
+                && task.getPointTypeCode() != null;
+    }
+
+    private boolean hasAnyEdgeInspectionPermission(Long userId, Long projectId) {
+        return permissionService.isPlatformAdmin(userId)
+                || hasEdgeInspectionPermission(userId, projectId, InspectionPermissionCodes.EDGE_INSPECTION_VIEW)
+                || hasEdgeInspectionPermission(userId, projectId, InspectionPermissionCodes.EDGE_INSPECTION_MANAGE)
+                || hasEdgeInspectionPermission(userId, projectId, InspectionPermissionCodes.EDGE_INSPECTION_SUBMIT)
+                || hasEdgeInspectionPermission(userId, projectId, InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY)
+                || hasEdgeInspectionPermission(userId, projectId, InspectionPermissionCodes.EDGE_INSPECTION_REVIEW);
+    }
+
+    private boolean hasEdgeInspectionPermission(Long userId, Long projectId, String permissionCode) {
+        return permissionService.hasInspectionPermission(userId, projectId, permissionCode);
+    }
+
     private void checkQualityWrite(SysUser currentUser, FileResource file, String businessType) {
         if (QUALITY_FINAL_TYPES.contains(businessType)) {
             throw BusinessException.forbidden("质量流程附件不能通过通用文件接口修改或删除");
@@ -413,10 +549,12 @@ public class FileResourceService {
             case BUSINESS_QUALITY_ISSUE -> BUSINESS_QUALITY_PENDING;
             case BUSINESS_QUALITY_RECTIFICATION -> BUSINESS_QUALITY_RECTIFICATION_PENDING;
             case BUSINESS_QUALITY_REVIEW -> BUSINESS_QUALITY_REVIEW_PENDING;
+            case "EDGE_INSPECTION_TASK" -> "EDGE_INSPECTION_TASK_PENDING";
+            case "EDGE_INSPECTION_RECTIFICATION" -> "EDGE_INSPECTION_RECTIFICATION_PENDING";
             default -> null;
         };
         if (requiredStagingType != null && !requiredStagingType.equals(expected)) {
-            throw new BusinessException("质量附件暂存类型与流程阶段不匹配");
+            throw new BusinessException("附件暂存类型与流程阶段不匹配");
         }
     }
 
@@ -428,7 +566,7 @@ public class FileResourceService {
         if (generalInspectionSettingMapper == null) return;
         GeneralInspectionProjectSetting setting = generalInspectionSettingMapper.selectById(projectId);
         if (setting == null || !Integer.valueOf(1).equals(setting.getEnabled())) {
-            throw BusinessException.forbidden("当前项目尚未启用通用巡检");
+            throw BusinessException.forbidden("当前项目尚未启用临边巡检");
         }
     }
 }

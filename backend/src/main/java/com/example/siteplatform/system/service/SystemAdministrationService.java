@@ -54,7 +54,8 @@ public class SystemAdministrationService {
     private static final Set<String> INSPECTION_RECTIFICATION_PERMISSION_CODES = Set.of(
             "INSPECTION.RECTIFY", "INSPECTION.REVIEW");
     private static final Set<String> GENERAL_INSPECTION_PERMISSION_CODES = Set.of(
-            "CUSTOM_INSPECTION_SUBMIT");
+            "EDGE_INSPECTION_VIEW", "EDGE_INSPECTION_MANAGE", "EDGE_INSPECTION_SUBMIT",
+            "EDGE_INSPECTION_RECTIFY", "EDGE_INSPECTION_REVIEW");
     private static final String RETIRED_PROJECT_MEMBER_MENU = "SYSTEM_PROJECT";
     private static final String RETIRED_PROJECT_MEMBER_PERMISSION = "project.member.manage";
     private static final String GENERATED_ROLE_CODE_PREFIX = "ROLE_";
@@ -833,10 +834,11 @@ public class SystemAdministrationService {
                 requiredCodes.add("INSPECTION.VIEW");
             }
             if ("INSPECTION_DAILY_SUBMIT".equals(code)) requiredCodes.add("INSPECTION.SUBMIT");
-            if ("CUSTOM_INSPECTION_SUBMIT".equals(code)) {
-                requiredCodes.add("INSPECTION.VIEW");
-                requiredCodes.add("INSPECTION.SUBMIT");
-            }
+            if ("EDGE_INSPECTION_VIEW".equals(code)) requiredCodes.add("INSPECTION.VIEW");
+            if ("EDGE_INSPECTION_MANAGE".equals(code)) requiredCodes.add("INSPECTION.MANAGE");
+            if ("EDGE_INSPECTION_SUBMIT".equals(code)) requiredCodes.add("INSPECTION.SUBMIT");
+            if ("EDGE_INSPECTION_RECTIFY".equals(code)) requiredCodes.add("INSPECTION.RECTIFY");
+            if ("EDGE_INSPECTION_REVIEW".equals(code)) requiredCodes.add("INSPECTION.REVIEW");
             if (Set.of("INSPECTION.RECTIFY", "INSPECTION.REVIEW").contains(code)) {
                 requiredCodes.add("INSPECTION.VIEW");
             }
@@ -902,7 +904,7 @@ public class SystemAdministrationService {
         requireSelectedPageWhenCatalogExists("WEB_DOCUMENT",
                 Set.of("DOCUMENT_LIBRARY", "DOCUMENT_SEAL", "DOCUMENT_RECYCLE"), selectedCodes, catalogCodes);
         requireSelectedPageWhenCatalogExists("WEB_INSPECTION",
-                Set.of("INSPECTION_LEDGER", "INSPECTION_RECORDS", "INSPECTION_RECTIFICATIONS", "INSPECTION_CONFIG"), selectedCodes, catalogCodes);
+                Set.of("INSPECTION_LEDGER", "INSPECTION_RECORDS", "INSPECTION_RECTIFICATIONS", "INSPECTION_EDGE"), selectedCodes, catalogCodes);
         requireSelectedPageWhenCatalogExists("WEB_QUALITY",
                 Set.of("QUALITY_ISSUES", "QUALITY_DOCUMENTS"), selectedCodes, catalogCodes);
         requireSelectedPageWhenCatalogExists("WEB_SITE_ACCESS",
@@ -982,30 +984,30 @@ public class SystemAdministrationService {
         if ("WEB_INSPECTION".equals(module)) {
             if (!businessModuleCodes.contains("INSPECTION")) return false;
             if (!strictTabs || !catalogHasAny(catalogMenuCodes,
-                    "INSPECTION_LEDGER", "INSPECTION_RECORDS", "INSPECTION_RECTIFICATIONS", "INSPECTION_CONFIG")) return true;
+                    "INSPECTION_LEDGER", "INSPECTION_RECORDS", "INSPECTION_RECTIFICATIONS", "INSPECTION_EDGE")) return true;
             if (INSPECTION_LEDGER_PERMISSION_CODES.contains(code)) {
                 return selectedMenuCodes.contains("INSPECTION_LEDGER");
             }
             if ("INSPECTION.MANAGE".equals(code)) {
                 return selectedMenuCodes.contains("INSPECTION_LEDGER")
-                        || selectedMenuCodes.contains("INSPECTION_CONFIG");
+                        || selectedMenuCodes.contains("INSPECTION_EDGE");
             }
             if (GENERAL_INSPECTION_PERMISSION_CODES.contains(code)) {
-                return selectedMenuCodes.contains("INSPECTION_CONFIG");
+                return selectedMenuCodes.contains("INSPECTION_EDGE");
             }
             if (INSPECTION_RECORD_PERMISSION_CODES.contains(code)
                     || Set.of("INSPECTION.SUBMIT", "INSPECTION.EXPORT").contains(code)) {
                 return selectedMenuCodes.contains("INSPECTION_RECORDS")
-                        || selectedMenuCodes.contains("INSPECTION_CONFIG");
+                        || selectedMenuCodes.contains("INSPECTION_EDGE");
             }
             if (INSPECTION_RECTIFICATION_PERMISSION_CODES.contains(code)) {
                 return selectedMenuCodes.contains("INSPECTION_RECTIFICATIONS")
-                        || selectedMenuCodes.contains("INSPECTION_CONFIG");
+                        || selectedMenuCodes.contains("INSPECTION_EDGE");
             }
             return selectedMenuCodes.contains("INSPECTION_LEDGER")
                     || selectedMenuCodes.contains("INSPECTION_RECORDS")
                     || selectedMenuCodes.contains("INSPECTION_RECTIFICATIONS")
-                    || selectedMenuCodes.contains("INSPECTION_CONFIG");
+                    || selectedMenuCodes.contains("INSPECTION_EDGE");
         }
         if ("WEB_QUALITY".equals(module)) {
             if (!businessModuleCodes.contains("QUALITY")) return false;

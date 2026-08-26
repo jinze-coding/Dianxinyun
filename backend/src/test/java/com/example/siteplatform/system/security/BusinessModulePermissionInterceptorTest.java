@@ -27,6 +27,7 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -81,13 +82,12 @@ class BusinessModulePermissionInterceptorTest {
                 Arguments.of("POST", "/api/v1/inspection/rectifications/8/close", SystemPermissionCodes.INSPECTION_REVIEW),
                 Arguments.of("POST", "/api/v1/inspection/rectifications/8/reject", SystemPermissionCodes.INSPECTION_REVIEW),
                 Arguments.of("PUT", "/api/v1/inspection/settings/2", SystemPermissionCodes.INSPECTION_MANAGE),
-                Arguments.of("GET", "/api/v1/general-inspections/tasks", null),
-                Arguments.of("POST", "/api/v1/general-inspections/tasks/8/scan", SystemPermissionCodes.INSPECTION_SUBMIT),
-                Arguments.of("POST", "/api/v1/general-inspections/tasks/8/submit", SystemPermissionCodes.INSPECTION_SUBMIT),
-                Arguments.of("POST", "/api/v1/general-inspections/rectifications/8/complete", SystemPermissionCodes.INSPECTION_RECTIFY),
-                Arguments.of("POST", "/api/v1/general-inspections/rectifications/8/close", SystemPermissionCodes.INSPECTION_REVIEW),
-                Arguments.of("POST", "/api/v1/general-inspections/points", SystemPermissionCodes.INSPECTION_MANAGE),
-                Arguments.of("POST", "/api/v1/general-inspections/exports", SystemPermissionCodes.INSPECTION_EXPORT),
+                Arguments.of("GET", "/api/v1/edge-inspections/tasks", null),
+                Arguments.of("POST", "/api/v1/edge-inspections/tasks/8/submit", null),
+                Arguments.of("POST", "/api/v1/edge-inspections/rectifications/8/complete", null),
+                Arguments.of("POST", "/api/v1/edge-inspections/rectifications/8/close", null),
+                Arguments.of("POST", "/api/v1/edge-inspections/points", null),
+                Arguments.of("GET", "/api/v1/edge-inspections/statistics", null),
                 Arguments.of("GET", "/api/v1/electric-boxes/7", SystemPermissionCodes.INSPECTION_VIEW),
                 Arguments.of("POST", "/api/v1/electric-boxes/import", SystemPermissionCodes.INSPECTION_MANAGE),
                 Arguments.of("GET", "/api/v1/quality/issues", SystemPermissionCodes.QUALITY_VIEW),
@@ -204,9 +204,24 @@ class BusinessModulePermissionInterceptorTest {
     }
 
     @Test
+    void edgeFileReadDefersToRecordLevelAclInsteadOfRequiringEdgeViewInInterceptor() throws Exception {
+        FileResource edgeEvidence = new FileResource();
+        edgeEvidence.setId(18L);
+        edgeEvidence.setProjectId(2L);
+        edgeEvidence.setBusinessType("EDGE_INSPECTION_TASK");
+        when(fileMapper.selectById(18L)).thenReturn(edgeEvidence);
+
+        mockMvc.perform(get("/api/v1/files/18/download")
+                        .header("Authorization", "Bearer rectifier"))
+                .andExpect(status().isOk());
+
+        verify(permissionService, never()).hasProjectPermission(
+                9L, 2L, "EDGE_INSPECTION_VIEW");
+    }
+
+    @Test
     void publicAndAuthenticationPathsHaveNoModulePermissionMapping() {
         assertThat(interceptor.resolveStaticPermission("GET", "/api/v1/public/electric-boxes/X/summary")).isNull();
-        assertThat(interceptor.resolveStaticPermission("GET", "/api/v1/public/general-inspection-points/X/monthly-records")).isNull();
         assertThat(interceptor.resolveStaticPermission("GET", "/api/v1/scan/electric-boxes/X")).isNull();
         assertThat(interceptor.resolveStaticPermission("POST", "/api/v1/auth/login")).isNull();
         assertThat(interceptor.resolveStaticPermission("POST", "/api/v1/registration-applications")).isNull();

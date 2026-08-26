@@ -5,13 +5,13 @@ import AppNavBar from '@/components/AppNavBar.vue';
 import AppTabBar from '@/components/AppTabBar.vue';
 import WorkspaceAreaSheet from '@/components/workspace/WorkspaceAreaSheet.vue';
 import WorkspaceAreaSwitcher from '@/components/workspace/WorkspaceAreaSwitcher.vue';
-import WorkspaceMetricStrip, { type WorkspaceMetric } from '@/components/workspace/WorkspaceMetricStrip.vue';
 import { WORKSPACE_THEME } from '@/constants/workspaceTheme';
 import { getTodoItems } from '@/api/todo';
-import { getGeneralInspectionTasks, type GeneralInspectionTask } from '@/api/generalInspection';
+import { getEdgeInspectionTasks, type EdgeInspectionTask } from '@/api/edgeInspection';
 import { useProjectStore } from '@/stores/project';
 import { useAuthStore } from '@/stores/auth';
 import type { TodoItem } from '@/types';
+import { isElectricInspectionTodo } from '@/utils/electricInspectionTodo';
 import { usePageScrollHeight } from '@/utils/navLayout';
 import { navigateTo, showToast } from '@/utils/navigation';
 import { startElectricBoxScan } from '@/utils/electricBoxScan';
@@ -21,65 +21,45 @@ const TINT = WORKSPACE_THEME.tint;
 const projectStore = useProjectStore();
 const authStore = useAuthStore();
 const todos = ref<TodoItem[]>([]);
-const generalTasks = ref<GeneralInspectionTask[]>([]);
+const edgeTasks = ref<EdgeInspectionTask[]>([]);
 const loading = ref(false);
 const errorMessage = ref('');
+const edgeUnavailableReason = ref('');
 const scanBusy = ref(false);
 const areaSheetOpen = ref(false);
 const { scrollStyle } = usePageScrollHeight({ bottomRpx: 124, minHeight: 320 });
 
 const projects = computed(() => projectStore.state.projects);
 const currentProject = computed(() => projects.value.find((item) => item.id === projectStore.state.currentProjectId));
-const canView = computed(() => Boolean(currentProject.value)
-  && authStore.hasProjectPermission(
-    currentProject.value!.id,
-    'inspection.view',
-    'BOX_VIEW',
-    'INSPECTION_RECORD_VIEW',
-    'SUMMARY_VIEW'
-  ));
-const canSubmit = computed(() => Boolean(currentProject.value)
-  && authStore.hasProjectPermission(
-    currentProject.value!.id,
-    'inspection.submit',
-    'INSPECTION_DAILY_SUBMIT'
-  ));
-const canSubmitGeneral = computed(() => Boolean(currentProject.value)
-  && authStore.hasProjectPermission(
-    currentProject.value!.id,
-    'inspection.submit',
-    'CUSTOM_INSPECTION_SUBMIT'
-  ));
-const canRectify = computed(() => Boolean(currentProject.value)
+const canViewElectric = computed(() => Boolean(currentProject.value)
+  && authStore.hasProjectPermission(currentProject.value!.id, 'inspection.view', 'BOX_VIEW', 'INSPECTION_RECORD_VIEW', 'SUMMARY_VIEW'));
+const canSubmitElectric = computed(() => Boolean(currentProject.value)
+  && authStore.hasProjectPermission(currentProject.value!.id, 'inspection.submit', 'INSPECTION_DAILY_SUBMIT'));
+const canRectifyElectric = computed(() => Boolean(currentProject.value)
   && authStore.hasProjectPermission(currentProject.value!.id, 'inspection.rectify'));
-const canReviewRectification = computed(() => Boolean(currentProject.value)
+const canReviewElectric = computed(() => Boolean(currentProject.value)
   && authStore.hasProjectPermission(currentProject.value!.id, 'inspection.review'));
-const inspectionTodos = computed(() => todos.value.filter((todo) => todo.type === 'INSPECTION'
-  && (!todo.projectId || todo.projectId === currentProject.value?.id)));
-const rectificationTodos = computed(() => todos.value.filter((todo) => todo.type === 'RECTIFICATION'
-  && (!todo.projectId || todo.projectId === currentProject.value?.id)));
-const recheckTodos = computed(() => todos.value.filter((todo) => todo.type === 'RECHECK'
-  && (!todo.projectId || todo.projectId === currentProject.value?.id)));
-const checkedCount = computed(() => currentProject.value?.todayInspectionCount || 0);
-const pendingGeneralTasks = computed(() => generalTasks.value.filter((task) => task.status === 'PENDING'));
-const todayText = computed(() => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-});
-const todayGeneralTasks = computed(() => generalTasks.value.filter((task) => task.occurrenceDate === todayText.value));
-const pendingTodayGeneralCount = computed(() => todayGeneralTasks.value.filter((task) => task.status === 'PENDING').length);
-const checkedGeneralCount = computed(() => todayGeneralTasks.value.filter((task) => task.status !== 'PENDING' && task.status !== 'CANCELLED').length);
-const requiredCount = computed(() => checkedCount.value + inspectionTodos.value.length
-  + todayGeneralTasks.value.filter((task) => task.status !== 'CANCELLED').length);
-const metrics = computed<WorkspaceMetric[]>(() => [
-  { label: '今日应检', value: requiredCount.value, tone: 'amber' },
-  { label: '今日已检', value: checkedCount.value + checkedGeneralCount.value, tone: 'green' },
-  { label: '今日未检', value: inspectionTodos.value.length + pendingTodayGeneralCount.value, tone: inspectionTodos.value.length + pendingTodayGeneralCount.value ? 'red' : 'green' }
-]);
+const canAccessElectric = computed(() => canViewElectric.value || canSubmitElectric.value
+  || canRectifyElectric.value || canReviewElectric.value);
+const canViewEdge = computed(() => Boolean(currentProject.value)
+  && authStore.hasProjectPermission(currentProject.value!.id, 'EDGE_INSPECTION_VIEW'));
+const canSubmitEdge = computed(() => Boolean(currentProject.value)
+  && authStore.hasProjectPermission(currentProject.value!.id, 'EDGE_INSPECTION_SUBMIT'));
+const canRectifyEdge = computed(() => Boolean(currentProject.value)
+  && authStore.hasProjectPermission(currentProject.value!.id, 'EDGE_INSPECTION_RECTIFY'));
+const canReviewEdge = computed(() => Boolean(currentProject.value)
+  && authStore.hasProjectPermission(currentProject.value!.id, 'EDGE_INSPECTION_REVIEW'));
+const canAccessEdge = computed(() => canViewEdge.value || canSubmitEdge.value || canRectifyEdge.value || canReviewEdge.value);
 
-function hideNativeTabBar() {
-  uni.hideTabBar({ animation: false, fail: () => undefined });
-}
+const electricTodos = computed(() => todos.value.filter((todo) => isElectricInspectionTodo(todo) && todo.type === 'INSPECTION'
+  && (!todo.projectId || todo.projectId === currentProject.value?.id)));
+const electricRectificationTodos = computed(() => todos.value.filter((todo) => isElectricInspectionTodo(todo) && todo.type === 'RECTIFICATION'
+  && (!todo.projectId || todo.projectId === currentProject.value?.id)));
+const electricRecheckTodos = computed(() => todos.value.filter((todo) => isElectricInspectionTodo(todo) && todo.type === 'RECHECK'
+  && (!todo.projectId || todo.projectId === currentProject.value?.id)));
+const pendingEdgeTasks = computed(() => edgeTasks.value.filter((task) => task.status === 'PENDING'));
+
+function hideNativeTabBar() { uni.hideTabBar({ animation: false, fail: () => undefined }); }
 
 onShow(async () => {
   hideNativeTabBar();
@@ -90,32 +70,31 @@ onShow(async () => {
 async function refresh() {
   loading.value = true;
   errorMessage.value = '';
+  edgeUnavailableReason.value = '';
   try {
     await projectStore.loadProjects();
-    if (currentProject.value && !canView.value) {
+    if (!currentProject.value) {
       todos.value = [];
-      generalTasks.value = [];
-      errorMessage.value = '当前项目无巡检查看权限，可切换到其他施工区域';
+      edgeTasks.value = [];
       return;
     }
-    if (currentProject.value) {
-      const [todoResult, generalResult] = await Promise.all([
-        getTodoItems(currentProject.value.id),
-        getGeneralInspectionTasks({ projectId: currentProject.value.id, mine: true }).catch(() => [])
-      ]);
-      todos.value = todoResult;
-      generalTasks.value = generalResult;
-    } else {
-      todos.value = [];
-      generalTasks.value = [];
-    }
+    const todoPromise = canAccessElectric.value
+      ? getTodoItems(currentProject.value.id)
+      : Promise.resolve([] as TodoItem[]);
+    const edgePromise = canAccessEdge.value
+      ? getEdgeInspectionTasks({ projectId: currentProject.value.id, mine: true }).catch((error: unknown) => {
+        edgeUnavailableReason.value = error instanceof Error ? error.message : '当前项目未开启临边巡检';
+        return [] as EdgeInspectionTask[];
+      })
+      : Promise.resolve([] as EdgeInspectionTask[]);
+    const [todoResult, edgeResult] = await Promise.all([todoPromise, edgePromise]);
+    todos.value = todoResult;
+    edgeTasks.value = edgeResult;
   } catch (error) {
     todos.value = [];
-    generalTasks.value = [];
-    errorMessage.value = error instanceof Error ? error.message : '巡检任务加载失败';
-  } finally {
-    loading.value = false;
-  }
+    edgeTasks.value = [];
+    errorMessage.value = error instanceof Error ? error.message : '巡检首页加载失败';
+  } finally { loading.value = false; }
 }
 
 async function selectProject(projectId: number) {
@@ -123,38 +102,41 @@ async function selectProject(projectId: number) {
   await refresh();
 }
 
-async function scan() {
+async function scanElectricBox() {
   if (scanBusy.value) return;
-  if (!canView.value) {
-    showToast('当前项目无巡检查看权限');
-    return;
-  }
+  if (!canViewElectric.value) { showToast('当前项目无电箱巡检查看权限'); return; }
   scanBusy.value = true;
-  try {
-    await startElectricBoxScan(currentProject.value?.id || 1);
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : '扫码失败');
-  } finally {
-    scanBusy.value = false;
-  }
+  try { await startElectricBoxScan(currentProject.value?.id || 1); }
+  catch (error) { showToast(error instanceof Error ? error.message : '扫码失败'); }
+  finally { scanBusy.value = false; }
 }
 
-function startInspection(todo: TodoItem) {
-  if (!canSubmit.value) {
-    showToast('当前项目无巡检提交权限');
-    return;
-  }
-  if (!todo.targetId) {
-    showToast('未找到对应电箱');
-    return;
-  }
+function startElectricInspection(todo: TodoItem) {
+  if (!canSubmitElectric.value) { showToast('当前项目无电箱巡检提交权限'); return; }
+  if (!todo.targetId) { showToast('未找到对应电箱'); return; }
   navigateTo(`/pages/inspection/form?boxId=${todo.targetId}`);
 }
 
-function startGeneralInspection(task: GeneralInspectionTask) {
-  if (!canSubmitGeneral.value) { showToast('当前项目无通用巡检提交权限'); return; }
-  if (task.qrRequired && !task.scanVerified) { showToast('该点位必须先扫码核验'); return; }
-  navigateTo(`/pages/inspection/general-form?id=${task.id}`);
+function startEdgeInspection(task: EdgeInspectionTask) {
+  if (!canSubmitEdge.value) { showToast('当前项目无临边巡检提交权限'); return; }
+  navigateTo(`/pages/inspection/edge-form?id=${task.id}`);
+}
+
+function timePart(value?: string) {
+  if (!value) return '';
+  const normalized = value.replace('T', ' ');
+  return normalized.length >= 16 ? normalized.slice(11, 16) : normalized;
+}
+
+function edgeExecutionSlot(task: EdgeInspectionTask) {
+  const start = timePart(task.startTime || task.availableTime);
+  const end = timePart(task.dueTime);
+  return start && end ? `${start}—${end}` : task.slotName || '单一执行时段';
+}
+
+function openEdgeTasks() {
+  if (!canAccessEdge.value || edgeUnavailableReason.value) { showToast(edgeUnavailableReason.value || '当前项目无临边巡检权限'); return; }
+  navigateTo(`/pages/inspection/edge-tasks?projectId=${currentProject.value?.id || ''}`);
 }
 </script>
 
@@ -163,140 +145,70 @@ function startGeneralInspection(task: GeneralInspectionTask) {
     <AppNavBar title="巡检" :show-back="false" />
     <scroll-view class="workspace-scroll" scroll-y enable-flex :style="scrollStyle">
       <view class="workspace-content">
-        <WorkspaceAreaSwitcher
-          :project="currentProject"
-          :projects="projects"
-          :accent="ACCENT"
-          :tint="TINT"
-          :open="areaSheetOpen"
-          @open="areaSheetOpen = true"
-        />
+        <WorkspaceAreaSwitcher :project="currentProject" :projects="projects" :accent="ACCENT" :tint="TINT" :open="areaSheetOpen" @open="areaSheetOpen = true" />
 
-        <view v-if="loading && !currentProject" class="state-panel">
-          <text class="state-title">正在加载巡检任务</text>
-        </view>
-        <view v-else-if="errorMessage" class="state-panel">
-          <text class="state-title">巡检任务加载失败</text>
-          <text class="state-desc">{{ errorMessage }}</text>
-          <button class="retry-button" @tap="refresh">重新加载</button>
-        </view>
+        <view v-if="loading && !currentProject" class="state-panel"><text class="state-title">正在加载巡检任务</text></view>
+        <view v-else-if="errorMessage" class="state-panel"><text class="state-title">巡检首页加载失败</text><text class="state-desc">{{ errorMessage }}</text><button class="retry-button" @tap="refresh">重新加载</button></view>
 
         <template v-else-if="currentProject">
-          <WorkspaceMetricStrip :metrics="metrics" :accent="ACCENT" :motion-key="`${currentProject.id}-${inspectionTodos.length}`" />
+          <view class="inspection-zone electric-zone">
+            <view class="zone-head">
+              <view class="zone-icon">电</view>
+              <view class="zone-title"><text>电箱巡检</text><text>电箱台账 · 六项日检 · 专用记录与整改</text></view>
+              <view class="zone-count"><text>{{ electricTodos.length }}</text><text>待巡检</text></view>
+            </view>
 
-          <button class="scan-primary" :disabled="scanBusy || !canView" @tap="scan">
-            <view class="scan-icon-wrap">
+            <button class="scan-entry" :disabled="scanBusy || !canViewElectric" @tap="scanElectricBox">
               <image src="/static/design-preview-icons/safety-scan.png" mode="aspectFit" />
-            </view>
-            <view class="scan-copy">
-              <text>{{ scanBusy ? '正在读取二维码' : '扫描巡检二维码' }}</text>
-              <text>开发者工具选择本地图片，真机调起微信扫码</text>
-            </view>
-            <text class="scan-arrow"></text>
-          </button>
+              <view><text>{{ scanBusy ? '正在读取二维码' : '扫描电箱二维码' }}</text><text>仅用于电箱巡检、记录和公开月表</text></view><text>›</text>
+            </button>
 
-          <view class="section-block task-section">
-            <view class="section-head">
-              <view><text class="section-title">今日待巡检</text><text class="section-subtitle">{{ inspectionTodos.length }} 台电箱待完成</text></view>
-              <text class="section-note">{{ currentProject.shortName || currentProject.projectName }}</text>
-            </view>
-            <view class="plain-list">
-              <button v-for="todo in inspectionTodos" :key="todo.targetId" class="plain-row task-row" :disabled="!canSubmit" @tap="startInspection(todo)">
-                <view class="task-code-box">{{ (todo.boxCode || '').slice(-3) }}</view>
-                <view class="plain-copy">
-                  <text class="task-code">{{ todo.boxCode }}</text>
-                  <text class="plain-title">{{ todo.title }}</text>
-                  <text class="plain-meta">{{ todo.installLocation || currentProject.projectName }}</text>
-                </view>
-                <text v-if="canSubmit" class="task-action">去巡检</text>
-                <text class="row-arrow"></text>
+            <view class="task-list">
+              <button v-for="todo in electricTodos.slice(0, 3)" :key="todo.targetId" class="task-row" :disabled="!canSubmitElectric" @tap="startElectricInspection(todo)">
+                <view class="code-mark">{{ (todo.boxCode || '').slice(-3) }}</view>
+                <view><text>{{ todo.boxCode || '电箱任务' }}</text><text>{{ todo.title }} · {{ todo.installLocation || currentProject.projectName }}</text></view>
+                <text class="task-action">去巡检</text>
               </button>
-              <view v-if="!inspectionTodos.length" class="empty-state">
-                <text class="empty-mark">✓</text>
-                <text class="empty-title">今日巡检已完成</text>
-                <text class="empty-desc">当前区域没有待巡检电箱</text>
-              </view>
+              <view v-if="!electricTodos.length" class="empty-row">当前没有待巡检电箱</view>
+            </view>
+
+            <view class="zone-actions">
+              <button :disabled="!canViewElectric" @tap="navigateTo(`/pages/inspection/records?projectId=${currentProject.id}`)">电箱记录</button>
+              <button :disabled="!(canRectifyElectric || canReviewElectric)" @tap="navigateTo(`/pages/rectification/index?projectId=${currentProject.id}`)">电箱整改 {{ electricRectificationTodos.length + electricRecheckTodos.length }}</button>
             </view>
           </view>
 
-          <view v-if="generalTasks.length || canSubmitGeneral" class="section-block task-section">
-            <view class="section-head">
-              <view><text class="section-title">通用巡检</text><text class="section-subtitle">临边等项目自定义巡检 · {{ pendingGeneralTasks.length }} 项待处理</text></view>
-              <button class="all-link" @tap="navigateTo('/pages/inspection/general-tasks')">全部</button>
+          <view class="inspection-zone edge-zone" :class="{ unavailable: !canAccessEdge || edgeUnavailableReason }">
+            <view class="zone-head">
+              <view class="zone-icon">边</view>
+              <view class="zone-title"><text>临边巡检</text><text>8类系统固定检查表 · 独立任务与闭环</text></view>
+              <view class="zone-count"><text>{{ pendingEdgeTasks.length }}</text><text>待巡检</text></view>
             </view>
-            <view class="plain-list">
-              <button v-for="task in pendingGeneralTasks.slice(0, 5)" :key="task.id" class="plain-row task-row" :disabled="!canSubmitGeneral" @tap="startGeneralInspection(task)">
-                <view class="task-code-box">{{ (task.pointCode || '').slice(-3) }}</view>
-                <view class="plain-copy"><text class="task-code">{{ task.pointCode }} · {{ task.slotName }}</text><text class="plain-title">{{ task.pointName }}</text><text class="plain-meta">{{ task.overdue ? '逾期未检，可补检' : `截止 ${task.dueTime}` }}{{ task.qrRequired ? ' · 必须扫码' : '' }}</text></view>
-                <text class="task-action">{{ task.qrRequired && !task.scanVerified ? '请扫码' : '去巡检' }}</text>
-                <text class="row-arrow"></text>
+
+            <view v-if="!canAccessEdge || edgeUnavailableReason" class="edge-disabled">{{ edgeUnavailableReason || '当前账号无临边巡检权限' }}</view>
+            <view v-else class="task-list">
+              <button v-for="task in pendingEdgeTasks.slice(0, 3)" :key="task.id" class="task-row" :disabled="!canSubmitEdge" @tap="startEdgeInspection(task)">
+                <view class="code-mark">{{ (task.pointCode || '').slice(-3) }}</view>
+                <view><text>{{ task.pointName }} · {{ task.pointTypeName || task.categoryName || '临边点位' }}</text><text>{{ [task.buildingName || task.building, task.floorName || task.floor, task.locationDesc].filter(Boolean).join(' · ') || '位置待补充' }} · {{ edgeExecutionSlot(task) }}</text></view>
+                <text class="task-action">{{ task.overdue ? '去补检' : '去巡检' }}</text>
               </button>
-              <view v-if="!pendingGeneralTasks.length" class="empty-state compact-empty"><text class="empty-title">当前没有待执行的通用巡检</text></view>
+              <view v-if="!pendingEdgeTasks.length" class="empty-row">当前没有待执行的临边任务</view>
+            </view>
+
+            <view class="zone-actions">
+              <button :disabled="!canAccessEdge || Boolean(edgeUnavailableReason)" @tap="openEdgeTasks">临边任务与记录</button>
+              <button :disabled="!(canRectifyEdge || canReviewEdge) || Boolean(edgeUnavailableReason)" @tap="navigateTo(`/pages/rectification/edge-list?projectId=${currentProject.id}`)">临边整改闭环</button>
             </view>
           </view>
-
-          <button v-if="canView" class="records-entry pressable" @tap="navigateTo(`/pages/inspection/records?projectId=${currentProject.id}`)">
-            <view class="records-icon"><image src="/static/design-preview-icons/safety-records.png" mode="aspectFit" /></view>
-            <view class="records-copy"><text>查看巡检记录</text><text>按月份、电箱和结果查询</text></view>
-            <text class="row-arrow"></text>
-          </button>
-          <button v-if="canRectify || canReviewRectification" class="records-entry rectification-entry pressable" @tap="navigateTo(`/pages/rectification/index?projectId=${currentProject.id}`)">
-            <view class="records-icon rectification-icon">闭</view>
-            <view class="records-copy"><text>整改闭环</text><text>我的待整改 {{ rectificationTodos.length }} · 项目待复查 {{ recheckTodos.length }}</text></view>
-            <text class="row-arrow"></text>
-          </button>
         </template>
       </view>
     </scroll-view>
-    <WorkspaceAreaSheet
-      :open="areaSheetOpen"
-      :project="currentProject"
-      :projects="projects"
-      :accent="ACCENT"
-      :tint="TINT"
-      @close="areaSheetOpen = false"
-      @select="selectProject"
-    />
+    <WorkspaceAreaSheet :open="areaSheetOpen" :project="currentProject" :projects="projects" :accent="ACCENT" :tint="TINT" @close="areaSheetOpen = false" @select="selectProject" />
     <AppTabBar v-if="!areaSheetOpen" active="inspection" />
   </view>
 </template>
 
 <style scoped src="../../styles/workspace-page.css"></style>
 <style scoped>
-.scan-primary { position: relative; display: flex; width: 100%; min-height: 116rpx; align-items: center; gap: 18rpx; overflow: hidden; padding: 19rpx 22rpx; border: 1rpx solid var(--inspection-border); border-radius: 18rpx; background: var(--inspection-soft-strong); box-shadow: var(--inspection-shadow); color: var(--inspection-primary-deep); text-align: left; transition: background-color 100ms ease, box-shadow 100ms ease, transform 100ms ease; }
-.scan-primary::after,.records-entry::after { border: 0; }
-.scan-primary:active { background: #dcebf7; box-shadow: 0 5rpx 15rpx rgba(49,95,134,.1); transform: scale(.985); }
-.scan-primary[disabled] { opacity: .72; }
-.scan-icon-wrap { position: relative; display: flex; width: 66rpx; height: 66rpx; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; border-radius: 15rpx; background: rgba(255,255,255,.72); }
-.scan-icon-wrap image { width: 40rpx; height: 40rpx; filter: hue-rotate(170deg) saturate(.55) brightness(.92); }
-.scan-copy { min-width: 0; flex: 1; }
-.scan-copy text { display: block; }
-.scan-copy text:first-child { font-size: 28rpx; font-weight: 750; }
-.scan-copy text:last-child { margin-top: 6rpx; color: #70869b; font-size: 21rpx; }
-.scan-arrow { width: 12rpx; height: 12rpx; border-top: 2rpx solid #6d8ba7; border-right: 2rpx solid #6d8ba7; transform: rotate(45deg); }
-.section-head > view { display: flex; min-width: 0; flex-direction: column; gap: 4rpx; }
-.section-subtitle { color: #98A2B3; font-size: 19rpx; }
-.task-row { min-height: 112rpx; }
-.task-code-box { display: flex; width: 58rpx; height: 58rpx; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 13rpx; background: var(--inspection-soft); color: var(--inspection-primary-deep); font-size: 20rpx; font-weight: 800; }
-.task-code { display: block; margin-bottom: 4rpx; color: #8B95A3; font-size: 18rpx; font-weight: 700; }
-.task-action { flex-shrink: 0; padding: 7rpx 12rpx; border: 1rpx solid #cddfec; border-radius: 999rpx; background: var(--inspection-soft); color: var(--inspection-primary-deep); font-size: 20rpx; font-weight: 700; }
-.empty-state { display: flex; min-height: 210rpx; align-items: center; justify-content: center; flex-direction: column; padding: 30rpx; }
-.empty-mark { display: flex; width: 54rpx; height: 54rpx; align-items: center; justify-content: center; border-radius: 50%; background: #E8F6EE; color: #2F9A66; font-size: 28rpx; font-weight: 800; }
-.empty-title { margin-top: 16rpx; color: #344054; font-size: 24rpx; font-weight: 750; }
-.empty-desc { margin-top: 6rpx; color: #98A2B3; font-size: 20rpx; }
-.records-entry { display: flex; width: 100%; min-height: 94rpx; align-items: center; gap: 15rpx; margin: 0; padding: 16rpx 20rpx; border: 1rpx solid var(--inspection-divider); border-radius: 18rpx; background: #fff; box-shadow: var(--inspection-shadow); color: var(--inspection-text); text-align: left; }
-.records-icon { display: flex; width: 52rpx; height: 52rpx; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 14rpx; background: var(--page-tint); }
-.records-icon image {
-  width: 32rpx;
-  height: 32rpx;
-  filter: hue-rotate(170deg) saturate(.55) brightness(.92);
-}
-.records-copy { min-width: 0; flex: 1; }
-.records-copy text { display: block; }
-.records-copy text:first-child { font-size: 23rpx; font-weight: 750; }
-.records-copy text:last-child { margin-top: 4rpx; color: #98a2b3; font-size: 19rpx; }
-.rectification-entry { margin-top: 14rpx; }.rectification-icon { color: var(--inspection-primary-deep); font-size: 22rpx; font-weight: 850; }
-.all-link { min-width: 90rpx; height: 54rpx; margin: 0; padding: 0 14rpx; border: 0; background: transparent; color: var(--inspection-primary-deep); font-size: 20rpx; line-height: 54rpx; }
-.all-link::after { border: 0; }
-.compact-empty { min-height: 120rpx; }
+.inspection-zone{margin-top:18rpx;padding:22rpx;border:1rpx solid #dce5ec;border-radius:20rpx;background:#fff;box-shadow:var(--inspection-shadow)}.electric-zone{border-top:7rpx solid #315f86}.edge-zone{border-top:7rpx solid #a56b2d}.inspection-zone.unavailable{opacity:.75}.zone-head{display:flex;align-items:center;gap:15rpx}.zone-icon{display:flex;width:58rpx;height:58rpx;align-items:center;justify-content:center;flex-shrink:0;border-radius:15rpx;background:#eaf2f7;color:#315f86;font-size:23rpx;font-weight:850}.edge-zone .zone-icon{background:#fff4e5;color:#9a611e}.zone-title{min-width:0;flex:1}.zone-title text{display:block}.zone-title text:first-child{color:#25364a;font-size:27rpx;font-weight:850}.zone-title text:last-child{margin-top:4rpx;color:#8896a5;font-size:18rpx}.zone-count{min-width:72rpx;text-align:center}.zone-count text{display:block}.zone-count text:first-child{color:#315f86;font-size:32rpx;font-weight:900}.edge-zone .zone-count text:first-child{color:#9a611e}.zone-count text:last-child{color:#8c98a4;font-size:17rpx}.scan-entry{display:flex;width:100%;min-height:92rpx;align-items:center;gap:14rpx;margin:18rpx 0 0;padding:15rpx 18rpx;border:1rpx solid #d3e2ec;border-radius:15rpx;background:#f4f9fc;color:#315f86;text-align:left}.scan-entry::after,.task-row::after,.zone-actions button::after{border:0}.scan-entry image{width:44rpx;height:44rpx}.scan-entry>view{min-width:0;flex:1}.scan-entry text{display:block}.scan-entry>view text:first-child{font-size:22rpx;font-weight:780}.scan-entry>view text:last-child{margin-top:4rpx;color:#7b8fa0;font-size:17rpx}.scan-entry>text{font-size:30rpx}.task-list{margin-top:15rpx;border-top:1rpx solid #edf1f4}.task-row{display:flex;width:100%;min-height:94rpx;align-items:center;gap:13rpx;margin:0;padding:14rpx 0;border-bottom:1rpx solid #edf1f4;background:transparent;color:inherit;text-align:left}.code-mark{display:flex;width:50rpx;height:50rpx;align-items:center;justify-content:center;flex-shrink:0;border-radius:12rpx;background:#edf3f7;color:#315f86;font-size:18rpx;font-weight:800}.edge-zone .code-mark{background:#fff4e5;color:#9a611e}.task-row>view:nth-child(2){min-width:0;flex:1}.task-row>view:nth-child(2) text{display:block}.task-row>view:nth-child(2) text:first-child{color:#35485b;font-size:21rpx;font-weight:760}.task-row>view:nth-child(2) text:last-child{margin-top:4rpx;color:#8794a1;font-size:17rpx;line-height:1.45}.task-action{flex-shrink:0;padding:6rpx 10rpx;border-radius:999rpx;background:#eaf2f7;color:#315f86;font-size:17rpx}.edge-zone .task-action{background:#fff4e5;color:#9a611e}.empty-row,.edge-disabled{padding:28rpx 12rpx;color:#929eaa;font-size:20rpx;text-align:center}.edge-disabled{margin-top:16rpx;border-radius:14rpx;background:#f4f5f6}.zone-actions{display:grid;grid-template-columns:1fr 1fr;gap:12rpx;margin-top:17rpx}.zone-actions button{height:62rpx;margin:0;border:1rpx solid #dce5ec;border-radius:13rpx;background:#f8fafb;color:#435a70;font-size:19rpx;line-height:62rpx}.edge-zone .zone-actions button{border-color:#ead8c0;background:#fffaf3;color:#865a25}.zone-actions button[disabled]{opacity:.48}
 </style>

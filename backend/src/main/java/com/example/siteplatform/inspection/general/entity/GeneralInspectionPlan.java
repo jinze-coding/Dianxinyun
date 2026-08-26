@@ -19,6 +19,8 @@ public class GeneralInspectionPlan {
     private String draftConfigJson;
     private Long currentVersionId;
     private LocalDateTime generatedThroughTime;
+    /** Latest feature/schedule re-enable time; unlike the rolling cursor this is a durable edge-task lower bound. */
+    private LocalDateTime edgeGenerationLowerBoundTime;
     private Integer version;
     private Long createdById;
     private String createdByName;

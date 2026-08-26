@@ -14,6 +14,9 @@ public class GeneralInspectionPoint {
     private Long projectId;
     private String pointCode;
     private String pointName;
+    private String pointTypeCode;
+    private String pointTypeName;
+    private LocalDateTime edgeActiveSinceTime;
     private Long categoryId;
     private String categoryName;
     private String areaName;

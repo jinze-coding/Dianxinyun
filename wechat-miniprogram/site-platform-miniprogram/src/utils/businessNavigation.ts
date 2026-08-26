@@ -43,16 +43,16 @@ export function openBusinessRoute(target: BusinessRouteTarget) {
     const id = numericParam(target, 'rectificationId', 'id');
     if (id) { navigateTo(`/pages/rectification/detail?id=${id}`); return true; }
   }
-  if (routeCode === 'GENERAL_INSPECTION_TASK_DETAIL') {
+  if (routeCode === 'EDGE_INSPECTION_TASK_DETAIL') {
     const id = numericParam(target, 'taskId', 'id');
-    if (id) { navigateTo(`/pages/inspection/general-form?id=${id}`); return true; }
+    if (id) { navigateTo(`/pages/inspection/edge-form?id=${id}`); return true; }
   }
-  if (routeCode === 'GENERAL_INSPECTION_RECTIFICATION_DETAIL') {
-    const id = numericParam(target, 'rectificationId', 'id');
-    if (id) { navigateTo(`/pages/rectification/general-detail?id=${id}`); return true; }
+  if (routeCode === 'EDGE_INSPECTION_RECTIFICATION_DETAIL') {
+    const id = numericParam(target, 'taskId', 'rectificationId', 'id');
+    if (id) { navigateTo(`/pages/rectification/edge-detail?id=${id}`); return true; }
   }
-  if (routeCode === 'GENERAL_INSPECTION_EXPORT') {
-    navigateTo('/pages/inspection/general-tasks');
+  if (routeCode === 'EDGE_INSPECTION_TASK_LIST') {
+    navigateTo('/pages/inspection/edge-tasks');
     return true;
   }
 

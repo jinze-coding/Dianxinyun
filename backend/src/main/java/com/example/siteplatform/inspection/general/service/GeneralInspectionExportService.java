@@ -18,7 +18,6 @@ import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.ss.util.WorkbookUtil;
 import org.springframework.core.io.Resource;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
@@ -95,7 +94,6 @@ public class GeneralInspectionExportService {
         return new Download(file.getOriginalFileName(), storageManager.load(file));
     }
 
-    @Scheduled(cron = "${general-inspection.export-cron:20 */2 * * * ?}")
     public void processPendingJobs() {
         List<GeneralInspectionExportJob> pending = exportJobMapper.selectList(
                 new LambdaQueryWrapper<GeneralInspectionExportJob>()
@@ -120,7 +118,6 @@ public class GeneralInspectionExportService {
         }
     }
 
-    @Scheduled(cron = "${general-inspection.export-expiry-cron:0 35 3 * * ?}")
     public void expireFiles() {
         List<GeneralInspectionExportJob> expired = exportJobMapper.selectList(
                 new LambdaQueryWrapper<GeneralInspectionExportJob>()

@@ -85,12 +85,12 @@
       "style": { "navigationStyle": "custom" }
     },
     {
-      "path": "pages/inspection/general-tasks",
-      "style": { "navigationStyle": "custom", "navigationBarTitleText": "我的通用巡检" }
+      "path": "pages/inspection/edge-tasks",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "我的临边巡检" }
     },
     {
-      "path": "pages/inspection/general-form",
-      "style": { "navigationStyle": "custom", "navigationBarTitleText": "通用巡检" }
+      "path": "pages/inspection/edge-form",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "临边巡检" }
     },
     {
       "path": "pages/inspection/records",
@@ -113,8 +113,12 @@
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "整改详情" }
     },
     {
-      "path": "pages/rectification/general-detail",
-      "style": { "navigationStyle": "custom", "navigationBarTitleText": "通用巡检整改" }
+      "path": "pages/rectification/edge-list",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "临边整改闭环" }
+    },
+    {
+      "path": "pages/rectification/edge-detail",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "临边巡检整改单" }
     },
     {
       "path": "pages/seal/entry",
@@ -135,10 +139,6 @@
     {
       "path": "pages/public/box-monthly",
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "电箱月度检查表" }
-    },
-    {
-      "path": "pages/public/general-inspection-monthly",
-      "style": { "navigationStyle": "custom", "navigationBarTitleText": "点位月度巡检" }
     },
     {
       "path": "pages/public/visitor-invite",

@@ -3,7 +3,7 @@ import type { PageResult, TodoItem, TodoSummary, UserNotification } from '@/type
 import { USE_MOCK, request } from './request';
 
 const TODO_TYPES: TodoItem['type'][] = [
-  'INSPECTION', 'GENERAL_INSPECTION', 'GENERAL_INSPECTION_ASSIGN',
+  'INSPECTION', 'EDGE_INSPECTION_TASK', 'EDGE_INSPECTION_RECTIFICATION', 'EDGE_INSPECTION_REVIEW',
   'REVIEW', 'RECTIFICATION', 'RECTIFICATION_ASSIGN', 'RECHECK', 'RECHECK_ASSIGN',
   'SEAL_APPROVAL'
 ];
@@ -40,6 +40,13 @@ function normalizeType(value: unknown, businessType?: unknown, routeKey?: unknow
   if (TODO_TYPES.includes(type as TodoItem['type'])) return type as TodoItem['type'];
   if (toText(businessType).toUpperCase() === 'SEAL_APPLICATION'
     || toText(routeKey).toUpperCase() === 'SEAL_APPLICATION_DETAIL') return 'SEAL_APPROVAL';
+  if (toText(businessType).toUpperCase() === 'EDGE_INSPECTION_TASK'
+    || toText(routeKey).toUpperCase() === 'EDGE_INSPECTION_TASK_DETAIL') return 'EDGE_INSPECTION_TASK';
+  if (toText(businessType).toUpperCase() === 'EDGE_INSPECTION_REVIEW') return 'EDGE_INSPECTION_REVIEW';
+  if (toText(businessType).toUpperCase() === 'EDGE_INSPECTION_RECTIFICATION'
+    || toText(routeKey).toUpperCase() === 'EDGE_INSPECTION_RECTIFICATION_DETAIL') {
+    return type.includes('REVIEW') ? 'EDGE_INSPECTION_REVIEW' : 'EDGE_INSPECTION_RECTIFICATION';
+  }
   return 'INSPECTION';
 }
 
@@ -52,8 +59,9 @@ function normalizePriority(value: unknown): TodoItem['priority'] {
 
 function fallbackTitle(type: TodoItem['type'], marker: string) {
   if (type === 'SEAL_APPROVAL') return `${marker || '用印申请'} 待审批`;
-  if (type === 'GENERAL_INSPECTION') return `${marker || '通用巡检'} 待执行`;
-  if (type === 'GENERAL_INSPECTION_ASSIGN') return `${marker || '通用巡检'} 待改派`;
+  if (type === 'EDGE_INSPECTION_TASK') return `${marker || '临边点位'} 待巡检`;
+  if (type === 'EDGE_INSPECTION_RECTIFICATION') return `${marker || '临边点位'} 待整改`;
+  if (type === 'EDGE_INSPECTION_REVIEW') return `${marker || '临边点位'} 待复查`;
   if (type === 'RECTIFICATION_ASSIGN') return `${marker || '巡检异常'} 待分派`;
   if (type === 'RECHECK_ASSIGN') return `${marker || '巡检异常'} 复查待改派`;
   if (type === 'REVIEW') return `${marker} 待安全复核`;
@@ -67,7 +75,9 @@ function normalizeTodoItem(value: unknown, index: number, scope: 'PENDING' | 'CC
   const taskType = toText(record.taskType || record.type);
   const type = normalizeType(taskType, record.businessType, record.routeCode || record.routeKey);
   const targetId = toNumber(record.targetId, 0);
-  const marker = toText(record.boxCode || record.applicationNo, type === 'SEAL_APPROVAL' ? '用印申请' : '-');
+  const marker = toText(record.boxCode || record.pointName || record.applicationNo,
+    type === 'SEAL_APPROVAL' ? '用印申请'
+      : String(type).startsWith('EDGE_INSPECTION_') ? '临边点位' : '-');
   return {
     id: toNumber(record.id, targetId || index + 1),
     todoKey: toText(record.todoKey, `${scope}-${type}-${targetId || index + 1}`),
@@ -149,7 +159,9 @@ function matchesTodoType(item: TodoItem, type?: string) {
   if (normalized === 'SEAL' || normalized === 'SEAL_APPLICATION') return businessType === 'SEAL_APPLICATION';
   if (normalized === 'QUALITY' || normalized === 'QUALITY_ISSUE') return businessType === 'QUALITY_ISSUE';
   if (normalized === 'INSPECTION_RECORD') return businessType === 'INSPECTION_RECORD';
-  if (normalized === 'GENERAL_INSPECTION' || normalized === 'GENERAL_INSPECTION_TASK') return businessType === 'GENERAL_INSPECTION_TASK';
+  if (normalized === 'INSPECTION_ALL') return businessType.includes('INSPECTION')
+    || ['INSPECTION', 'REVIEW', 'RECTIFICATION', 'RECTIFICATION_ASSIGN', 'RECHECK', 'RECHECK_ASSIGN'].includes(String(item.type));
+  if (normalized === 'EDGE_INSPECTION' || normalized === 'EDGE_INSPECTION_TASK') return businessType === 'EDGE_INSPECTION_TASK';
   return toText(item.taskType || item.type).toUpperCase() === normalized;
 }
 

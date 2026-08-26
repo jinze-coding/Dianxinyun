@@ -67,8 +67,14 @@ public class InspectionPermissionTemplateService {
                 )),
                 new InspectionPermissionCatalogGroupVO("INSPECTION", "巡检", List.of(
                         item(InspectionPermissionCodes.INSPECTION_DAILY_SUBMIT, "日检提交", "提交当前项目任意纳入巡检范围电箱的日检记录"),
-                        item(InspectionPermissionCodes.CUSTOM_INSPECTION_SUBMIT, "通用巡检提交", "执行分配给自己的临边及其他通用巡检任务"),
                         item(InspectionPermissionCodes.INSPECTION_RECORD_VIEW, "检查记录查看", "查看项目检查记录明细")
+                )),
+                new InspectionPermissionCatalogGroupVO("EDGE_INSPECTION", "临边巡检", List.of(
+                        item(InspectionPermissionCodes.EDGE_INSPECTION_VIEW, "查看临边巡检", "查看项目临边点位、任务、记录和整改"),
+                        item(InspectionPermissionCodes.EDGE_INSPECTION_MANAGE, "管理临边巡检", "维护临边点位和周期设置，取消及改派任务"),
+                        item(InspectionPermissionCodes.EDGE_INSPECTION_SUBMIT, "执行临边巡检", "执行分配给自己的临边巡检任务"),
+                        item(InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY, "临边整改", "处理分配给自己的临边巡检整改单"),
+                        item(InspectionPermissionCodes.EDGE_INSPECTION_REVIEW, "临边复查", "复查明确分配给自己的临边巡检整改单")
                 )),
                 new InspectionPermissionCatalogGroupVO("SUMMARY", "汇总", List.of(
                         item(InspectionPermissionCodes.SUMMARY_VIEW, "巡检汇总查看", "查看项目或单箱月度巡检汇总"),

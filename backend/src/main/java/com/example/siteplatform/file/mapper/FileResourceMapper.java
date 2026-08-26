@@ -18,6 +18,7 @@ public interface FileResourceMapper extends BaseMapper<FileResource> {
             SELECT * FROM file_resource
             WHERE deleted = 0 AND id IN
             <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+            ORDER BY id ASC
             FOR UPDATE
             </script>
             """)
@@ -103,7 +104,9 @@ public interface FileResourceMapper extends BaseMapper<FileResource> {
                   'QUALITY_WEEKLY_ITEM_PENDING',
                   'INSPECTION_CUSTOM_POINT_PENDING',
                   'INSPECTION_CUSTOM_TASK_PENDING',
-                  'INSPECTION_CUSTOM_RECTIFICATION_PENDING'
+                  'INSPECTION_CUSTOM_RECTIFICATION_PENDING',
+                  'EDGE_INSPECTION_TASK_PENDING',
+                  'EDGE_INSPECTION_RECTIFICATION_PENDING'
               )
               AND create_time < #{cutoff}
             ORDER BY create_time ASC, id ASC
@@ -128,7 +131,9 @@ public interface FileResourceMapper extends BaseMapper<FileResource> {
                   'QUALITY_WEEKLY_ITEM_PENDING',
                   'INSPECTION_CUSTOM_POINT_PENDING',
                   'INSPECTION_CUSTOM_TASK_PENDING',
-                  'INSPECTION_CUSTOM_RECTIFICATION_PENDING'
+                  'INSPECTION_CUSTOM_RECTIFICATION_PENDING',
+                  'EDGE_INSPECTION_TASK_PENDING',
+                  'EDGE_INSPECTION_RECTIFICATION_PENDING'
               )
               AND create_time < #{cutoff}
             """)
@@ -149,7 +154,9 @@ public interface FileResourceMapper extends BaseMapper<FileResource> {
                   'QUALITY_WEEKLY_ITEM_PENDING',
                   'INSPECTION_CUSTOM_POINT_PENDING',
                   'INSPECTION_CUSTOM_TASK_PENDING',
-                  'INSPECTION_CUSTOM_RECTIFICATION_PENDING'
+                  'INSPECTION_CUSTOM_RECTIFICATION_PENDING',
+                  'EDGE_INSPECTION_TASK_PENDING',
+                  'EDGE_INSPECTION_RECTIFICATION_PENDING'
               )
               AND create_time < #{cutoff}
             """)

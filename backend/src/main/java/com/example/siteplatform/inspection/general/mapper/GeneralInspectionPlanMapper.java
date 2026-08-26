@@ -10,4 +10,7 @@ import org.apache.ibatis.annotations.Select;
 public interface GeneralInspectionPlanMapper extends BaseMapper<GeneralInspectionPlan> {
     @Select("SELECT * FROM general_inspection_plan WHERE id=#{id} AND deleted=0 FOR UPDATE")
     GeneralInspectionPlan selectByIdForUpdate(@Param("id") Long id);
+
+    @Select("SELECT * FROM general_inspection_plan WHERE project_id=#{projectId} AND plan_code='EDGE_PROJECT_SCHEDULE' AND deleted=0 LIMIT 1 FOR UPDATE")
+    GeneralInspectionPlan selectEdgePlanForUpdate(@Param("projectId") Long projectId);
 }

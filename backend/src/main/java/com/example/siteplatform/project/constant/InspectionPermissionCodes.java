@@ -21,6 +21,11 @@ public final class InspectionPermissionCodes {
     public static final String BOX_PUBLIC_ACCESS = "BOX_PUBLIC_ACCESS";
     public static final String INSPECTION_DAILY_SUBMIT = "INSPECTION_DAILY_SUBMIT";
     public static final String CUSTOM_INSPECTION_SUBMIT = "CUSTOM_INSPECTION_SUBMIT";
+    public static final String EDGE_INSPECTION_VIEW = "EDGE_INSPECTION_VIEW";
+    public static final String EDGE_INSPECTION_MANAGE = "EDGE_INSPECTION_MANAGE";
+    public static final String EDGE_INSPECTION_SUBMIT = "EDGE_INSPECTION_SUBMIT";
+    public static final String EDGE_INSPECTION_RECTIFY = "EDGE_INSPECTION_RECTIFY";
+    public static final String EDGE_INSPECTION_REVIEW = "EDGE_INSPECTION_REVIEW";
     public static final String INSPECTION_REVIEW = "INSPECTION_REVIEW";
     public static final String INSPECTION_RECORD_VIEW = "INSPECTION_RECORD_VIEW";
     public static final String RECTIFICATION_VIEW = "RECTIFICATION_VIEW";
@@ -35,7 +40,11 @@ public final class InspectionPermissionCodes {
             BOX_QR_MANAGE,
             BOX_PUBLIC_ACCESS,
             INSPECTION_DAILY_SUBMIT,
-            CUSTOM_INSPECTION_SUBMIT,
+            EDGE_INSPECTION_VIEW,
+            EDGE_INSPECTION_MANAGE,
+            EDGE_INSPECTION_SUBMIT,
+            EDGE_INSPECTION_RECTIFY,
+            EDGE_INSPECTION_REVIEW,
             INSPECTION_REVIEW,
             INSPECTION_RECORD_VIEW,
             RECTIFICATION_VIEW,
@@ -51,7 +60,11 @@ public final class InspectionPermissionCodes {
             BOX_QR_MANAGE,
             BOX_PUBLIC_ACCESS,
             INSPECTION_DAILY_SUBMIT,
-            CUSTOM_INSPECTION_SUBMIT,
+            EDGE_INSPECTION_VIEW,
+            EDGE_INSPECTION_MANAGE,
+            EDGE_INSPECTION_SUBMIT,
+            EDGE_INSPECTION_RECTIFY,
+            EDGE_INSPECTION_REVIEW,
             INSPECTION_RECORD_VIEW,
             SUMMARY_VIEW,
             SUMMARY_EXPORT,
@@ -63,6 +76,9 @@ public final class InspectionPermissionCodes {
             BOX_MANAGE,
             BOX_QR_MANAGE,
             BOX_PUBLIC_ACCESS,
+            EDGE_INSPECTION_VIEW,
+            EDGE_INSPECTION_MANAGE,
+            EDGE_INSPECTION_REVIEW,
             INSPECTION_RECORD_VIEW,
             SUMMARY_VIEW,
             SUMMARY_EXPORT
@@ -70,7 +86,10 @@ public final class InspectionPermissionCodes {
 
     public static final List<String> USER_CODES = List.of(
             BOX_VIEW,
-            INSPECTION_DAILY_SUBMIT
+            INSPECTION_DAILY_SUBMIT,
+            EDGE_INSPECTION_VIEW,
+            EDGE_INSPECTION_SUBMIT,
+            EDGE_INSPECTION_RECTIFY
     );
 
     public static List<String> defaultCodesForProjectRole(String projectRoleCode) {

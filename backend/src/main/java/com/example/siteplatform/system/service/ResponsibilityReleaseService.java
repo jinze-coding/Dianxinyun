@@ -54,15 +54,27 @@ public class ResponsibilityReleaseService {
         impact.setPendingGeneralInspectionTaskCount(count("""
                 SELECT COUNT(*) FROM general_inspection_task
                 WHERE project_id = ? AND assignee_id = ? AND status = 'PENDING'
+                  AND point_type_code IS NOT NULL
                 """, projectId, userId));
         impact.setOpenGeneralRectificationCount(count("""
                 SELECT COUNT(*) FROM general_inspection_rectification
                 WHERE project_id = ? AND assignee_id = ?
                   AND status IN ('UNASSIGNED', 'PENDING', 'REJECTED')
+                  AND EXISTS (
+                      SELECT 1 FROM general_inspection_task edge_task
+                      WHERE edge_task.id = general_inspection_rectification.task_id
+                        AND edge_task.point_type_code IS NOT NULL
+                  )
                 """, projectId, userId));
         impact.setPendingGeneralReviewCount(count("""
                 SELECT COUNT(*) FROM general_inspection_rectification
-                WHERE project_id = ? AND reviewer_id = ? AND status = 'COMPLETED'
+                WHERE project_id = ? AND reviewer_id = ?
+                  AND status NOT IN ('CLOSED', 'VOIDED')
+                  AND EXISTS (
+                      SELECT 1 FROM general_inspection_task edge_task
+                      WHERE edge_task.id = general_inspection_rectification.task_id
+                        AND edge_task.point_type_code IS NOT NULL
+                  )
                 """, projectId, userId));
         impact.setOpenQualityIssueCount(count("""
                 SELECT COUNT(*) FROM quality_issue
@@ -104,9 +116,8 @@ public class ResponsibilityReleaseService {
                 SystemPermissionCodes.INSPECTION_SUBMIT)) {
             clearElectrician(projectId, userId);
         }
-        if (!permissionService.hasProjectPermission(userId, projectId, SystemPermissionCodes.INSPECTION_SUBMIT)
-                || !permissionService.hasProjectPermission(userId, projectId,
-                InspectionPermissionCodes.CUSTOM_INSPECTION_SUBMIT)) {
+        if (!permissionService.hasProjectPermission(userId, projectId,
+                InspectionPermissionCodes.EDGE_INSPECTION_SUBMIT)) {
             clearGeneralInspectionTask(projectId, userId);
         }
         if (!hasAny(userId, projectId,
@@ -114,11 +125,17 @@ public class ResponsibilityReleaseService {
                 SystemPermissionCodes.INSPECTION_MANAGE)) {
             clearSafetyManager(projectId, userId);
             clearInspectionReviewer(projectId, userId);
-            clearGeneralRectificationReviewer(projectId, userId);
         }
-        if (!hasAny(userId, projectId,
+        if (!permissionService.hasProjectPermission(userId, projectId,
                 SystemPermissionCodes.INSPECTION_RECTIFY)) {
             clearRectification(projectId, userId);
+        }
+        if (!permissionService.hasProjectPermission(userId, projectId,
+                InspectionPermissionCodes.EDGE_INSPECTION_REVIEW)) {
+            clearGeneralRectificationReviewer(projectId, userId);
+        }
+        if (!permissionService.hasProjectPermission(userId, projectId,
+                InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY)) {
             clearGeneralRectificationAssignee(projectId, userId);
         }
         if (!permissionService.hasProjectPermission(userId, projectId,
@@ -173,24 +190,49 @@ public class ResponsibilityReleaseService {
                 UPDATE general_inspection_task SET assignee_id = NULL,
                     assignee_name = NULL, version = version + 1, update_time = NOW()
                 WHERE project_id = ? AND assignee_id = ? AND status = 'PENDING'
+                  AND point_type_code IS NOT NULL
                 """, projectId, userId);
     }
 
     private void clearGeneralRectificationAssignee(Long projectId, Long userId) {
+        jdbc.update("""
+                UPDATE general_inspection_task SET default_rectifier_id = NULL,
+                    default_rectifier_name = NULL, version = version + 1, update_time = NOW()
+                WHERE project_id = ? AND default_rectifier_id = ? AND status = 'PENDING'
+                  AND point_type_code IS NOT NULL
+                """, projectId, userId);
         jdbc.update("""
                 UPDATE general_inspection_rectification SET assignee_id = NULL,
                     assignee_name = NULL, status = 'UNASSIGNED',
                     version = version + 1, update_time = NOW()
                 WHERE project_id = ? AND assignee_id = ?
                   AND status IN ('UNASSIGNED', 'PENDING', 'REJECTED')
+                  AND EXISTS (
+                      SELECT 1 FROM general_inspection_task edge_task
+                      WHERE edge_task.id = general_inspection_rectification.task_id
+                        AND edge_task.point_type_code IS NOT NULL
+                  )
                 """, projectId, userId);
     }
 
     private void clearGeneralRectificationReviewer(Long projectId, Long userId) {
         jdbc.update("""
+                UPDATE general_inspection_task SET reviewer_id = NULL,
+                    reviewer_name = NULL, version = version + 1, update_time = NOW()
+                WHERE project_id = ? AND reviewer_id = ?
+                  AND status IN ('PENDING', 'RECTIFICATION_PENDING')
+                  AND point_type_code IS NOT NULL
+                """, projectId, userId);
+        jdbc.update("""
                 UPDATE general_inspection_rectification SET reviewer_id = NULL,
                     reviewer_name = NULL, version = version + 1, update_time = NOW()
-                WHERE project_id = ? AND reviewer_id = ? AND status = 'COMPLETED'
+                WHERE project_id = ? AND reviewer_id = ?
+                  AND status NOT IN ('CLOSED', 'VOIDED')
+                  AND EXISTS (
+                      SELECT 1 FROM general_inspection_task edge_task
+                      WHERE edge_task.id = general_inspection_rectification.task_id
+                        AND edge_task.point_type_code IS NOT NULL
+                  )
                 """, projectId, userId);
     }
 

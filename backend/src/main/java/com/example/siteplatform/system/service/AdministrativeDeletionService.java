@@ -193,15 +193,15 @@ public class AdministrativeDeletionService {
                 SELECT COUNT(*) FROM inspection_rectification
                 WHERE deleted = 0 AND assignee_id = ? AND status <> 'CLOSED'
                 """, id));
-        add(impact, "pendingGeneralInspections", "将转为待改派的通用巡检任务", countSql("""
+        add(impact, "pendingGeneralInspections", "将转为待改派的临边巡检任务", countSql("""
                 SELECT COUNT(*) FROM general_inspection_task
                 WHERE assignee_id = ? AND status = 'PENDING'
                 """, id));
-        add(impact, "openGeneralRectifications", "将转为待分派的通用巡检整改", countSql("""
+        add(impact, "openGeneralRectifications", "将转为待分派的临边巡检整改", countSql("""
                 SELECT COUNT(*) FROM general_inspection_rectification
                 WHERE assignee_id = ? AND status IN ('UNASSIGNED', 'PENDING', 'REJECTED')
                 """, id));
-        add(impact, "pendingGeneralReviews", "将转为待改派的通用巡检复查", countSql("""
+        add(impact, "pendingGeneralReviews", "将转为待改派的临边巡检复查", countSql("""
                 SELECT COUNT(*) FROM general_inspection_rectification
                 WHERE reviewer_id = ? AND status = 'COMPLETED'
                 """, id));
@@ -239,7 +239,7 @@ public class AdministrativeDeletionService {
         add(impact, "boxes", "电箱与二维码", count("electric_box", "project_id", id));
         add(impact, "inspections", "巡检与整改", count("inspection_record", "project_id", id)
                 + count("inspection_rectification", "project_id", id));
-        add(impact, "generalInspections", "通用巡检配置、任务、整改与审计",
+        add(impact, "generalInspections", "临边巡检设置、任务、整改与审计",
                 generalInspectionProjectDataCount(id));
         add(impact, "quality", "质量周检、问题与日志",
                 count("quality_weekly_inspection", "project_id", id)
@@ -333,9 +333,9 @@ public class AdministrativeDeletionService {
         add(impact, "pendingReviews", "可能转待分配的巡检复核", reviews);
         add(impact, "openRectifications", "可能转待分配的巡检整改", rectifications);
         add(impact, "openQualityIssues", "可能转待分配的质量整改", quality);
-        add(impact, "pendingGeneralInspections", "可能转待改派的通用巡检任务", generalTasks);
-        add(impact, "openGeneralRectifications", "可能转待分派的通用巡检整改", generalRectifications);
-        add(impact, "pendingGeneralReviews", "可能转待改派的通用巡检复查", generalReviews);
+        add(impact, "pendingGeneralInspections", "可能转待改派的临边巡检任务", generalTasks);
+        add(impact, "openGeneralRectifications", "可能转待分派的临边巡检整改", generalRectifications);
+        add(impact, "pendingGeneralReviews", "可能转待改派的临边巡检复查", generalReviews);
     }
 
     private void registrationApplicationImpact(DeletionImpactVO impact, Long id) {

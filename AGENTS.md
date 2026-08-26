@@ -10,7 +10,7 @@
 
 - 场内管理：Web 创建单次外访邀请、查看/纠错/作废并按人员导出；访客通过专属小程序码免注册填报，并可在微信静默身份下复用当前项目的常用人员与车辆资料。预约邀请提交后立即登记成功、无需审批，计划离场前提交成功页及同码重扫均显示门卫放行凭证。
 - 资料管理：目录、资料、版本、预览下载、归档、回收站，以及项目级用印申请、用户直指派审批、盖章件回传和用印台账。
-- 巡检管理：保留电箱台账、六项每日巡检、专用月表和统一二维码；另有独立通用巡检引擎，支持公司/项目模板、点位、周期计划、动态任务、逐项整改、匿名月表和异步导出。通用巡检项目开关默认关闭，首个实例为临边巡检。
+- 巡检管理：进入后分为“电箱巡检”和“临边巡检”两个独立专区。电箱继续使用台账、六项每日巡检、专用月表、统一二维码和原整改流程；临边只使用系统内置的 8 类固定检查表，项目只维护点位和一套周期/人员设置，不提供用户模板、自定义类别、二维码、公开月表或异步含图导出。临边项目开关默认关闭。
 - 质量周检：每项目每自然周一份共享草稿，可一次整理多个独立质量问题后原子提交；支持无问题周检留档。提交后各问题独立整改、复查和操作留痕，历史独立问题继续兼容。
 - 系统管理：注册审核、用户、角色权限、菜单功能、用印审批、微信绑定和操作日志。项目与角色只在注册审核或用户管理中分配；用印审批按项目和具体印章直接选择业务审批用户，不向单个用户写入角色权限。
 - 项目信息：Web 顶部当前项目选择器旁进入独立档案页，项目有效成员可查看，平台管理员可编辑；小程序从“我的 → 施工区域”进入同一档案的只读页。该入口是项目基础能力，不新增菜单或普通角色权限码。
@@ -44,7 +44,7 @@ backend/
     seal/          用印配置、扫码申请、直接用户审批、抄送、台账和申请单 PDF
     document/      工程资料目录、资料版本和回收站
     electricbox/   电箱台账和二维码
-    inspection/    电箱巡检记录与月表，以及独立 general 通用巡检数据域
+    inspection/    电箱巡检，以及内部 general 数据域承载的固定式临边巡检
     quality/       质量周检共享草稿、质量问题、整改和复查
     file/          通用文件与存储
     common/        统一响应、异常和限流
@@ -124,7 +124,7 @@ docs/
 - 项目角色权限只在目标 `projectId` 的有效成员关系内生效。用户在 A 项目有写权限，不代表能写 B 项目。
 - `/api/v1/auth/user-info` 是 Web 和小程序菜单、平台权限码、项目角色及项目权限的统一来源。
 - 资料、巡检、质量必须通过一个模块开关统一控制两端入口。场内管理 V1 的模块开关只控制 Web 内部管理；小程序 `pages/public/visitor-invite` 是持邀请令牌的免登录公开页，不进入内部菜单。关闭模块时保留细分操作权限配置，但对应内部入口和后端项目鉴权必须拒绝该模块。
-- 通用巡检在角色 `INSPECTION` 模块之外再使用 `general_inspection_project_setting` 项目试点开关；缺行等同关闭，只有 `PLATFORM_ADMIN` 可启停。执行任务必须同时具备 `inspection.submit + CUSTOM_INSPECTION_SUBMIT` 且为当前主责人；配置、取消、改派和纠错使用 `inspection.manage`，记录/看板还分别要求 `INSPECTION_RECORD_VIEW / SUMMARY_VIEW`。平台管理员未被明确指派时不得代替业务复查人。
+- 临边巡检在角色 `INSPECTION` 模块之外再使用 `general_inspection_project_setting` 项目试点开关；缺行等同关闭，只有 `PLATFORM_ADMIN` 可启停。查看、配置/取消/改派、执行、整改和复查分别使用 `EDGE_INSPECTION_VIEW / EDGE_INSPECTION_MANAGE / EDGE_INSPECTION_SUBMIT / EDGE_INSPECTION_RECTIFY / EDGE_INSPECTION_REVIEW`；执行、整改和复查还必须是当前明确指派人。平台管理员未被明确指派时不得代替业务人员复查。
 - 质量周检草稿由目标项目具备 `quality.manage` 的人员共享编辑，整份草稿使用 `expectedVersion` 防并发覆盖；同项目同一自然周只能保留一份草稿或正式周检。未来周不得创建，往期允许补录并标记实际提交时间。提交必须在单一事务中生成全部独立质量问题，任一问题、整改人或附件校验失败时整批回滚。
 - 新质量问题只能由周检提交生成；旧 `POST /api/v1/quality/issues` 返回 HTTP `410`，历史 `weekly_inspection_id` 为空的问题仍可查询、整改、复查、改派、作废和管理员确认删除。无问题周检必须填写检查结论并上传至少一张周检现场照片。
 - 菜单决定入口可见性，操作权限决定页面内动作；前端显隐只用于体验，不能替代后端鉴权。
@@ -239,8 +239,8 @@ docs/
   角色菜单回填和 `20260803_ROLE_MENU_PERMISSION_HIERARCHY_V1` 均已核对；脚本修正后可无告警幂等复跑。
   前端仍必须保留部分迁移目录防错，不能把单个缺失页签伪装成旧库兼容页。
 - 当前有数据的本地 `dianxinyun` 已完成统一注册、RBAC、微信快捷登录、项目多角色、
-  跨端业务模块、质量并发、巡检整改、场内外访、常用访客资料、门卫登记、用印一期和质量周检迁移，当前为
-  70 表。通用巡检迁移尚未应用。只有从迁移前
+  跨端业务模块、质量并发、巡检整改、场内外访、常用访客资料、门卫登记、用印一期、质量周检和旧通用巡检迁移，2026-08-26 只读核对为
+  91 表。固定式临边转换迁移尚未应用。只有从迁移前
   39 表旧副本升级时，
   才按顺序使用以下增量迁移；不得在当前库盲目重跑或改用 `init.sql`：
 
@@ -264,6 +264,7 @@ backend/src/main/resources/sql/migrations/20260814_site_access_companion_optiona
 backend/src/main/resources/sql/migrations/20260814_site_access_guard_visitor_registration.sql
 backend/src/main/resources/sql/migrations/20260826_quality_weekly_inspection.sql
 backend/src/main/resources/sql/migrations/20260826_general_inspection.sql
+backend/src/main/resources/sql/migrations/20260826_general_inspection_fixed_edge.sql
 ```
 
 `20260803_role_menu_permission_hierarchy.sql` 只增加 6 条页签菜单并一次性回填角色菜单关联，
@@ -291,13 +292,18 @@ backend/src/main/resources/sql/migrations/20260826_general_inspection.sql
 `20260814_site_access_guard_visitor_registration.sql` 新增 4 张门卫固定码与登记业务表；当前长期本地库
 已于 2026-08-14 在完整备份和隔离库双跑后应用，表数由 64 增至 68，生产库尚未应用。
 `20260826_quality_weekly_inspection.sql` 新增质量周检及草稿问题 2 张表，并为 `quality_issue`
-增加可空周检归属与条目顺序；历史独立问题不回填虚构批次。当前长期本地库已存在迁移标记和两张表，
-因此表数为 70；生产库状态仍需在发布前单独核对，
+增加可空周检归属与条目顺序；历史独立问题不回填虚构批次。当前长期本地库已存在迁移标记和两张表；
+生产库状态仍需在发布前单独核对，
 不得未经数据库与上传目录备份、预检、隔离副本双跑及明确升级授权应用到长期本地库或生产库。
-`20260826_general_inspection.sql` 新增 14 张独立通用巡检表、`CUSTOM_INSPECTION_SUBMIT`、
-“巡检配置”页签、6 个预置临边类别和 1 个含 9 项的公司参考模板。项目开关缺行即关闭，不自动为
-任何试点项目启用。脚本已在空库和当前 70 表库的隔离副本双跑，既有非授权种子表校验值未变化；
-长期本地库和生产库均未执行，仍须数据库/上传目录备份、预检和明确授权。
+`20260826_general_inspection.sql` 是已应用的旧开放式通用巡检基线，当前配置库已于 2026-08-26 13:42
+写入 `20260826_GENERAL_INSPECTION_V1`；现有 14 张内部表，项目开关有 1 条启用记录，但点位、计划、任务和整改均为 0 条。
+不得重写、替换或在当前库重跑该历史脚本。`20260826_general_inspection_fixed_edge.sql` 在其之后幂等转换为
+8 类固定临边检查表、`INSPECTION_EDGE` 菜单和 5 项 `EDGE_INSPECTION_*` 权限；未经数据库/上传目录备份、预检、隔离副本双跑及明确授权，
+不得应用到长期本地库或生产库。
+`20260826_site_access_meeting_invitation.sql` 为 `site_visit_invitation` 增加默认并回填为 `SINGLE` 的
+不可变类型，并新增会议登记组、人员和审计 3 张表；不新增菜单或权限。脚本已在隔离临时库连续执行
+两次，默认回填、唯一约束、作废后重新登记和迁移标记均已核对并清理临时库；当前长期本地库和生产库
+均未执行，必须先备份、预检并取得明确升级授权。
 
 - `backend/src/main/resources/sql/init.sql` 是禁用兼容入口，直接执行必须失败。全新空库只能
   使用 `scripts/init-empty-database.sh`；工具要求精确确认并拒绝已有任何表的目标库。

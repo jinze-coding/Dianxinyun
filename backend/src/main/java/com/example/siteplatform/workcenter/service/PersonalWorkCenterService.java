@@ -8,7 +8,7 @@ import com.example.siteplatform.common.PageResult;
 import com.example.siteplatform.inspection.service.InspectionService;
 import com.example.siteplatform.inspection.general.service.GeneralInspectionTaskService;
 import com.example.siteplatform.inspection.general.vo.GeneralInspectionTaskVO;
-import com.example.siteplatform.inspection.general.vo.GeneralInspectionRectificationVO;
+import com.example.siteplatform.inspection.general.vo.EdgeInspectionRectificationSheetVO;
 import com.example.siteplatform.inspection.vo.InspectionTodoVO;
 import com.example.siteplatform.notification.entity.UserNotification;
 import com.example.siteplatform.notification.mapper.UserNotificationMapper;
@@ -59,6 +59,9 @@ public class PersonalWorkCenterService {
     public static final String BUSINESS_SEAL = "SEAL_APPLICATION";
     public static final String BUSINESS_INSPECTION = "INSPECTION_RECORD";
     public static final String BUSINESS_GENERAL_INSPECTION = "GENERAL_INSPECTION_TASK";
+    public static final String BUSINESS_EDGE_INSPECTION_TASK = "EDGE_INSPECTION_TASK";
+    public static final String BUSINESS_EDGE_INSPECTION_RECTIFICATION = "EDGE_INSPECTION_RECTIFICATION";
+    public static final String BUSINESS_EDGE_INSPECTION_REVIEW = "EDGE_INSPECTION_REVIEW";
     public static final String BUSINESS_QUALITY = "QUALITY_ISSUE";
 
     private static final String SEAL_PENDING = "PENDING_APPROVAL";
@@ -71,9 +74,8 @@ public class PersonalWorkCenterService {
             "INSPECTION_FORM",
             "INSPECTION_RECORD_DETAIL",
             "INSPECTION_RECTIFICATION_DETAIL",
-            "GENERAL_INSPECTION_TASK_DETAIL",
-            "GENERAL_INSPECTION_RECTIFICATION_DETAIL",
-            "GENERAL_INSPECTION_EXPORT"
+            "EDGE_INSPECTION_TASK_DETAIL",
+            "EDGE_INSPECTION_RECTIFICATION_DETAIL"
     );
     private static final Comparator<PersonalTodoVO> TODO_ORDER =
             Comparator.comparingInt((PersonalTodoVO todo) -> priorityRank(todo.getPriority()))
@@ -284,21 +286,21 @@ public class PersonalWorkCenterService {
             if (!scope.projectIds().contains(task.getProjectId())) continue;
             PersonalTodoVO todo = new PersonalTodoVO();
             todo.setId(task.getId());
-            todo.setTodoKey("GENERAL_INSPECTION_TASK:" + task.getId());
-            todo.setBusinessType(BUSINESS_GENERAL_INSPECTION);
-            todo.setTaskType("GENERAL_INSPECTION");
-            todo.setType("GENERAL_INSPECTION");
+            todo.setTodoKey("EDGE_INSPECTION_TASK:" + task.getId());
+            todo.setBusinessType(BUSINESS_EDGE_INSPECTION_TASK);
+            todo.setTaskType("EDGE_INSPECTION_TASK");
+            todo.setType("EDGE_INSPECTION_TASK");
             todo.setTargetId(task.getId());
             todo.setTaskId(task.getId());
             todo.setProjectId(task.getProjectId());
             todo.setProjectName(scope.projectNames().get(task.getProjectId()));
-            todo.setTitle("待巡检 · " + task.getPointName());
-            todo.setSummary(joinSummary(task.getTemplateName(), task.getSlotName()));
+            todo.setTitle("临边待巡检 · " + task.getPointName());
+            todo.setSummary(joinSummary(task.getPointTypeName(), task.getSlotName()));
             todo.setDueAt(task.getDueTime());
             todo.setDueText(Boolean.TRUE.equals(task.getOverdue()) ? "已逾期，可补检" : "请在截止时间前完成");
             todo.setPriority(Boolean.TRUE.equals(task.getOverdue()) ? "danger" : "normal");
             todo.setCreatedAt(task.getStartTime());
-            todo.setRouteCode("GENERAL_INSPECTION_TASK_DETAIL");
+            todo.setRouteCode("EDGE_INSPECTION_TASK_DETAIL");
             todo.setRouteParams(Map.of("taskId", task.getId()));
             todo.setScope(SCOPE_PENDING);
             todo.setReadOnly(false);
@@ -310,117 +312,92 @@ public class PersonalWorkCenterService {
                         candidateProjectId, user)) {
                     PersonalTodoVO todo = new PersonalTodoVO();
                     todo.setId(task.getId());
-                    todo.setTodoKey("GENERAL_INSPECTION_TASK_ASSIGN:" + task.getId());
-                    todo.setBusinessType(BUSINESS_GENERAL_INSPECTION);
-                    todo.setTaskType("GENERAL_INSPECTION_ASSIGN");
-                    todo.setType("GENERAL_INSPECTION_ASSIGN");
+                    todo.setTodoKey("EDGE_INSPECTION_TASK_ASSIGN:" + task.getId());
+                    todo.setBusinessType(BUSINESS_EDGE_INSPECTION_TASK);
+                    todo.setTaskType("EDGE_INSPECTION_TASK_ASSIGN");
+                    todo.setType("EDGE_INSPECTION_TASK_ASSIGN");
                     todo.setTargetId(task.getId());
                     todo.setTaskId(task.getId());
                     todo.setProjectId(task.getProjectId());
                     todo.setProjectName(scope.projectNames().get(task.getProjectId()));
-                    todo.setTitle("巡检待改派 · " + task.getPointName());
-                    todo.setSummary(joinSummary(task.getTemplateName(), task.getSlotName()));
+                    todo.setTitle("临边巡检待改派 · " + task.getPointName());
+                    todo.setSummary(joinSummary(task.getPointTypeName(), task.getSlotName()));
                     todo.setDueAt(task.getDueTime());
                     todo.setDueText("原主巡检人资格已失效，请明确改派");
                     todo.setPriority("danger");
-                    todo.setRouteCode("GENERAL_INSPECTION_TASK_DETAIL");
+                    todo.setRouteCode("EDGE_INSPECTION_TASK_DETAIL");
                     todo.setRouteParams(Map.of("taskId", task.getId()));
                     todo.setScope(SCOPE_PENDING);
                     todo.setReadOnly(false);
                     result.add(todo);
                 }
             } catch (BusinessException ignored) {
-                // 非本项目通用巡检管理者不生成改派待办。
+                // 非本项目临边巡检管理者不生成改派待办。
             }
         }
-        for (GeneralInspectionRectificationVO rectification : generalInspectionTaskService.listRectifications(
+        for (EdgeInspectionRectificationSheetVO sheet : generalInspectionTaskService.listEdgeRectificationSheets(
                 null, null, "MINE", user)) {
-            if (!scope.projectIds().contains(rectification.getProjectId())) continue;
-            boolean rectify = Boolean.TRUE.equals(rectification.getCanRectify());
-            boolean review = Boolean.TRUE.equals(rectification.getCanReview());
-            boolean assign = "UNASSIGNED".equals(rectification.getStatus())
-                    && Boolean.TRUE.equals(rectification.getCanAssign());
-            if (!rectify && !review && !assign) continue;
+            if (!scope.projectIds().contains(sheet.getProjectId())) continue;
+            boolean rectify = Boolean.TRUE.equals(sheet.getCanRectify());
+            boolean review = Boolean.TRUE.equals(sheet.getCanReview());
+            if (!rectify && !review) continue;
             PersonalTodoVO todo = new PersonalTodoVO();
-            todo.setId(rectification.getId());
-            todo.setTodoKey("GENERAL_INSPECTION_RECTIFICATION:" + rectification.getId() + ":" + rectification.getStatus());
-            todo.setBusinessType(BUSINESS_GENERAL_INSPECTION);
-            todo.setTaskType(assign ? "RECTIFICATION_ASSIGN" : review ? "RECHECK" : "RECTIFICATION");
+            todo.setId(sheet.getTaskId());
+            todo.setTodoKey((review ? "EDGE_INSPECTION_REVIEW:" : "EDGE_INSPECTION_RECTIFICATION:")
+                    + sheet.getTaskId() + ":" + sheet.getStatus());
+            todo.setBusinessType(review ? BUSINESS_EDGE_INSPECTION_REVIEW : BUSINESS_EDGE_INSPECTION_RECTIFICATION);
+            todo.setTaskType(review ? "EDGE_INSPECTION_REVIEW" : "EDGE_INSPECTION_RECTIFICATION");
             todo.setType(todo.getTaskType());
-            todo.setTargetId(rectification.getId());
-            todo.setProjectId(rectification.getProjectId());
-            todo.setProjectName(scope.projectNames().get(rectification.getProjectId()));
-            todo.setTitle((assign ? "待分派" : review ? "待复查" : "待整改") + " · " + rectification.getPointName());
-            todo.setSummary(rectification.getItemName());
-            todo.setDueAt(rectification.getDeadline() == null ? null : rectification.getDeadline().atTime(23, 59, 59));
-            todo.setDueText(Boolean.TRUE.equals(rectification.getOverdue()) ? "已逾期，请立即处理" : "请按期完成闭环");
-            todo.setPriority(Boolean.TRUE.equals(rectification.getOverdue()) || assign ? "danger" : "warning");
-            todo.setCreatedAt(rectification.getCompletedTime());
-            todo.setRouteCode("GENERAL_INSPECTION_RECTIFICATION_DETAIL");
-            todo.setRouteParams(Map.of("rectificationId", rectification.getId()));
+            todo.setTargetId(sheet.getTaskId());
+            todo.setTaskId(sheet.getTaskId());
+            todo.setProjectId(sheet.getProjectId());
+            todo.setProjectName(scope.projectNames().get(sheet.getProjectId()));
+            todo.setTitle((review ? "临边待复查" : "临边待整改") + " · " + sheet.getPointName());
+            todo.setSummary(sheet.getItems().size() + "项异常 · " + sheet.getPointTypeName());
+            todo.setDueAt(sheet.getDeadline() == null ? null : sheet.getDeadline().atTime(23, 59, 59));
+            todo.setDueText(Boolean.TRUE.equals(sheet.getOverdue()) ? "已逾期，请立即处理" : "请按期完成闭环");
+            todo.setPriority(Boolean.TRUE.equals(sheet.getOverdue()) ? "danger" : "warning");
+            todo.setRouteCode("EDGE_INSPECTION_RECTIFICATION_DETAIL");
+            todo.setRouteParams(Map.of("taskId", sheet.getTaskId()));
             todo.setScope(SCOPE_PENDING);
             todo.setReadOnly(false);
             result.add(todo);
         }
-        Set<Long> existingRectificationIds = result.stream()
-                .filter(todo -> "GENERAL_INSPECTION_RECTIFICATION_DETAIL".equals(todo.getRouteCode()))
+        Set<Long> existingSheetIds = result.stream()
+                .filter(todo -> "EDGE_INSPECTION_RECTIFICATION_DETAIL".equals(todo.getRouteCode()))
                 .map(PersonalTodoVO::getTargetId).filter(Objects::nonNull)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         for (Long candidateProjectId : scope.projectIds()) {
             try {
-                for (GeneralInspectionRectificationVO rectification : generalInspectionTaskService.listRectifications(
-                        candidateProjectId, "UNASSIGNED", "ALL", user)) {
-                    if (!Boolean.TRUE.equals(rectification.getCanAssign())
-                            || !existingRectificationIds.add(rectification.getId())) continue;
+                for (EdgeInspectionRectificationSheetVO sheet : generalInspectionTaskService.listEdgeRectificationSheets(
+                        candidateProjectId, null, "ALL", user)) {
+                    boolean needsAssignment = "UNASSIGNED".equals(sheet.getStatus())
+                            || "COMPLETED".equals(sheet.getStatus()) && sheet.getReviewerId() == null;
+                    if (!needsAssignment || !Boolean.TRUE.equals(sheet.getCanAssign())
+                            || !existingSheetIds.add(sheet.getTaskId())) continue;
                     PersonalTodoVO todo = new PersonalTodoVO();
-                    todo.setId(rectification.getId());
-                    todo.setTodoKey("GENERAL_INSPECTION_UNASSIGNED:" + rectification.getId());
-                    todo.setBusinessType(BUSINESS_GENERAL_INSPECTION);
-                    todo.setTaskType("RECTIFICATION_ASSIGN");
-                    todo.setType("RECTIFICATION_ASSIGN");
-                    todo.setTargetId(rectification.getId());
-                    todo.setProjectId(rectification.getProjectId());
-                    todo.setProjectName(scope.projectNames().get(rectification.getProjectId()));
-                    todo.setTitle("待分派 · " + rectification.getPointName());
-                    todo.setSummary(rectification.getItemName());
-                    todo.setDueText("异常已保存，请尽快指定整改人");
+                    todo.setId(sheet.getTaskId());
+                    todo.setTodoKey("EDGE_INSPECTION_ASSIGN:" + sheet.getTaskId() + ":" + sheet.getStatus());
+                    todo.setBusinessType(BUSINESS_EDGE_INSPECTION_RECTIFICATION);
+                    todo.setTaskType("EDGE_INSPECTION_RECTIFICATION_ASSIGN");
+                    todo.setType("EDGE_INSPECTION_RECTIFICATION_ASSIGN");
+                    todo.setTargetId(sheet.getTaskId());
+                    todo.setTaskId(sheet.getTaskId());
+                    todo.setProjectId(sheet.getProjectId());
+                    todo.setProjectName(scope.projectNames().get(sheet.getProjectId()));
+                    todo.setTitle((sheet.getReviewerId() == null ? "临边复查待改派" : "临边整改待分派")
+                            + " · " + sheet.getPointName());
+                    todo.setSummary(sheet.getItems().size() + "项异常 · " + sheet.getPointTypeName());
+                    todo.setDueText("请尽快明确指派处理人员");
                     todo.setPriority("danger");
-                    todo.setRouteCode("GENERAL_INSPECTION_RECTIFICATION_DETAIL");
-                    todo.setRouteParams(Map.of("rectificationId", rectification.getId()));
+                    todo.setRouteCode("EDGE_INSPECTION_RECTIFICATION_DETAIL");
+                    todo.setRouteParams(Map.of("taskId", sheet.getTaskId()));
                     todo.setScope(SCOPE_PENDING);
                     todo.setReadOnly(false);
                     result.add(todo);
                 }
             } catch (BusinessException ignored) {
-                // 当前成员没有该项目的巡检记录/管理权限时不生成管理待办。
-            }
-        }
-        for (Long candidateProjectId : scope.projectIds()) {
-            try {
-                for (GeneralInspectionRectificationVO rectification
-                        : generalInspectionTaskService.listRectificationsNeedingReviewer(candidateProjectId, user)) {
-                    if (!existingRectificationIds.add(rectification.getId())) continue;
-                    PersonalTodoVO todo = new PersonalTodoVO();
-                    todo.setId(rectification.getId());
-                    todo.setTodoKey("GENERAL_INSPECTION_REVIEW_ASSIGN:" + rectification.getId());
-                    todo.setBusinessType(BUSINESS_GENERAL_INSPECTION);
-                    todo.setTaskType("RECHECK_ASSIGN");
-                    todo.setType("RECHECK_ASSIGN");
-                    todo.setTargetId(rectification.getId());
-                    todo.setProjectId(rectification.getProjectId());
-                    todo.setProjectName(scope.projectNames().get(rectification.getProjectId()));
-                    todo.setTitle("复查待改派 · " + rectification.getPointName());
-                    todo.setSummary(rectification.getItemName());
-                    todo.setDueText("原主复查人资格已失效，请明确改派");
-                    todo.setPriority("danger");
-                    todo.setRouteCode("GENERAL_INSPECTION_RECTIFICATION_DETAIL");
-                    todo.setRouteParams(Map.of("rectificationId", rectification.getId()));
-                    todo.setScope(SCOPE_PENDING);
-                    todo.setReadOnly(false);
-                    result.add(todo);
-                }
-            } catch (BusinessException ignored) {
-                // 非本项目通用巡检管理者不生成复查改派待办。
+                // 当前成员没有该项目临边巡检管理权限时不生成管理待办。
             }
         }
         return result;
@@ -622,7 +599,12 @@ public class PersonalWorkCenterService {
                     .collect(Collectors.toCollection(ArrayList::new));
             case "INSPECTION_ALL" -> todos.stream()
                     .filter(todo -> BUSINESS_INSPECTION.equals(todo.getBusinessType())
-                            || BUSINESS_GENERAL_INSPECTION.equals(todo.getBusinessType()))
+                            || Set.of(BUSINESS_EDGE_INSPECTION_TASK, BUSINESS_EDGE_INSPECTION_RECTIFICATION,
+                            BUSINESS_EDGE_INSPECTION_REVIEW).contains(todo.getBusinessType()))
+                    .collect(Collectors.toCollection(ArrayList::new));
+            case "EDGE_INSPECTION", "EDGE_INSPECTION_TASK" -> todos.stream()
+                    .filter(todo -> Set.of(BUSINESS_EDGE_INSPECTION_TASK, BUSINESS_EDGE_INSPECTION_RECTIFICATION,
+                            BUSINESS_EDGE_INSPECTION_REVIEW).contains(todo.getBusinessType()))
                     .collect(Collectors.toCollection(ArrayList::new));
             case "GENERAL_INSPECTION", "GENERAL_INSPECTION_TASK" -> todos.stream()
                     .filter(todo -> BUSINESS_GENERAL_INSPECTION.equals(todo.getBusinessType()))

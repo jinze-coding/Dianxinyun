@@ -43,6 +43,7 @@ public final class BusinessModuleCodes {
         if (normalized.startsWith("INSPECTION.")
                 || normalized.startsWith("BOX_")
                 || normalized.startsWith("INSPECTION_")
+                || normalized.startsWith("EDGE_INSPECTION_")
                 || normalized.startsWith("CUSTOM_INSPECTION_")
                 || normalized.startsWith("SUMMARY_")
                 || normalized.startsWith("RECTIFICATION_")) return INSPECTION;

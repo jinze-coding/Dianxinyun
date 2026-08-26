@@ -66,6 +66,21 @@ const visibleTodos = computed(() => currentTodos.value.filter((item) =>
   businessFilter.value === 'ALL' || businessKind(item) === businessFilter.value));
 const visibleNotifications = computed(() => notifications.value.filter((item) =>
   businessFilter.value === 'ALL' || businessKind(item) === businessFilter.value));
+const todoSections = computed(() => {
+  const other: TodoItem[] = [];
+  const electric: TodoItem[] = [];
+  const edge: TodoItem[] = [];
+  visibleTodos.value.forEach((item) => {
+    if (isEdgeTodo(item)) edge.push(item);
+    else if (businessKind(item) === 'INSPECTION') electric.push(item);
+    else other.push(item);
+  });
+  return [
+    { key: 'OTHER', label: '', items: other },
+    { key: 'ELECTRIC', label: '电箱巡检', items: electric },
+    { key: 'EDGE', label: '临边巡检', items: edge }
+  ].filter((section) => section.items.length);
+});
 const currentItemCount = computed(() => activeView.value === 'NOTIFICATION'
   ? notifications.value.length : currentTodos.value.length);
 const hasMore = computed(() => {
@@ -217,19 +232,33 @@ function typeLabel(todo: TodoItem) {
   if (todo.type === 'RECTIFICATION') return '巡检整改';
   if (todo.type === 'RECHECK') return '巡检复查';
   if (todo.type === 'REVIEW') return '巡检复核';
-  if (todo.type === 'GENERAL_INSPECTION') return '通用巡检';
-  if (todo.type === 'GENERAL_INSPECTION_ASSIGN') return '通用巡检待改派';
+  if (todo.type === 'EDGE_INSPECTION_TASK') return '临边待巡检';
+  if (todo.type === 'EDGE_INSPECTION_RECTIFICATION') return '临边待整改';
+  if (todo.type === 'EDGE_INSPECTION_REVIEW') return '临边待复查';
   if (todo.type === 'RECTIFICATION_ASSIGN') return '巡检待分派';
   if (todo.type === 'RECHECK_ASSIGN') return '巡检复查待改派';
   return '待巡检';
 }
 
-function businessLabel(kind: Exclude<BusinessKey, 'ALL'>) {
+function isEdgeTodo(todo: TodoItem) {
+  return String(todo.type || '').startsWith('EDGE_INSPECTION_')
+    || String(todo.businessType || '').toUpperCase().startsWith('EDGE_INSPECTION_')
+    || String(todo.routeCode || '').toUpperCase().startsWith('EDGE_INSPECTION_');
+}
+
+function businessLabel(todo: TodoItem) {
+  if (isEdgeTodo(todo)) return '边';
+  const kind = businessKind(todo);
   return kind === 'SEAL' ? '印' : kind === 'QUALITY' ? '质' : '巡';
 }
 
 function formatTime(value?: string) {
   return value ? value.replace('T', ' ').slice(0, 16) : '';
+}
+
+function notificationLabel(item: UserNotification) {
+  const kind = businessKind(item);
+  return kind === 'SEAL' ? '用印' : kind === 'QUALITY' ? '质量' : '巡检';
 }
 
 function openTodo(todo: TodoItem) { openBusinessRoute(todo); }
@@ -278,23 +307,26 @@ async function readAll() {
         <view v-else-if="errorMessage" class="state-card error"><text>{{ errorMessage }}</text><button @tap="refreshCurrent(true)">重新加载</button></view>
 
         <template v-else-if="activeView !== 'NOTIFICATION'">
-          <button v-for="todo in visibleTodos" :key="todo.todoKey || `${todo.type}-${todo.targetId}`" class="business-card" :class="[`kind-${businessKind(todo).toLowerCase()}`, { urgent: todo.priority === 'danger' }]" @tap="openTodo(todo)">
-            <view class="kind-mark">{{ businessLabel(businessKind(todo)) }}</view>
-            <view class="card-copy">
-              <view class="card-title"><text>{{ todo.title }}</text><text>{{ typeLabel(todo) }}</text></view>
-              <text v-if="todo.summary" class="summary">{{ todo.summary }}</text>
-              <text class="meta">{{ [todo.projectName, todo.applicantName ? `申请人 ${todo.applicantName}` : '', todo.dueText].filter(Boolean).join(' · ') }}</text>
-              <text v-if="todo.createdAt" class="time">{{ formatTime(todo.createdAt) }}</text>
-            </view>
-            <text class="arrow">›</text>
-          </button>
+          <view v-for="section in todoSections" :key="section.key" class="todo-section" :class="`section-${section.key.toLowerCase()}`">
+            <view v-if="section.label" class="section-heading"><text>{{ section.label }}</text><text>{{ section.items.length }} 项</text></view>
+            <button v-for="todo in section.items" :key="todo.todoKey || `${todo.type}-${todo.targetId}`" class="business-card" :class="[`kind-${businessKind(todo).toLowerCase()}`, { urgent: todo.priority === 'danger', 'kind-edge': isEdgeTodo(todo) }]" @tap="openTodo(todo)">
+              <view class="kind-mark">{{ businessLabel(todo) }}</view>
+              <view class="card-copy">
+                <view class="card-title"><text>{{ todo.title }}</text><text>{{ typeLabel(todo) }}</text></view>
+                <text v-if="todo.summary" class="summary">{{ todo.summary }}</text>
+                <text class="meta">{{ [todo.projectName, todo.applicantName ? `申请人 ${todo.applicantName}` : '', todo.dueText].filter(Boolean).join(' · ') }}</text>
+                <text v-if="todo.createdAt" class="time">{{ formatTime(todo.createdAt) }}</text>
+              </view>
+              <text class="arrow">›</text>
+            </button>
+          </view>
           <view v-if="!visibleTodos.length" class="empty-card"><text>✓</text><text>{{ activeView === 'CC' ? '暂无抄送给我的事项' : '当前没有待处理事项' }}</text><text>业务状态变化后会自动更新</text></view>
         </template>
 
         <template v-else>
           <button v-for="item in visibleNotifications" :key="item.id" class="notification-card" :class="{ unread: !item.isRead }" @tap="openNotification(item)">
             <view class="unread-dot"></view>
-            <view class="card-copy"><view class="card-title"><text>{{ item.title }}</text><text>{{ businessKind(item) === 'SEAL' ? '用印' : businessKind(item) === 'QUALITY' ? '质量' : '巡检' }}</text></view><text v-if="item.summary" class="summary">{{ item.summary }}</text><text class="meta">{{ [item.projectName, formatTime(item.createTime)].filter(Boolean).join(' · ') }}</text></view>
+            <view class="card-copy"><view class="card-title"><text>{{ item.title }}</text><text>{{ notificationLabel(item) }}</text></view><text v-if="item.summary" class="summary">{{ item.summary }}</text><text class="meta">{{ [item.projectName, formatTime(item.createTime)].filter(Boolean).join(' · ') }}</text></view>
             <text class="arrow">›</text>
           </button>
           <view v-if="!visibleNotifications.length" class="empty-card"><text>铃</text><text>暂无业务通知</text><text>审批、整改和抄送动态会显示在这里</text></view>
@@ -319,10 +351,12 @@ async function readAll() {
 .business-tabs button.active { background: #dbe8f0; color: #315f86; font-weight: 750; }
 .business-tabs .read-all { margin-left: auto; background: transparent; color: #315f86; }
 .content { display: flex; flex-direction: column; gap: 14rpx; padding: 8rpx 24rpx 34rpx; }
+.todo-section { display: flex; flex-direction: column; gap: 12rpx; }.section-heading { display: flex; align-items: center; justify-content: space-between; padding: 8rpx 5rpx 0; color: #41586d; font-size: 22rpx; font-weight: 800; }.section-heading text:last-child { color: #8c99a6; font-size: 18rpx; font-weight: 600; }.section-edge .section-heading { color: #916024; }
 .business-card,.notification-card { display: flex; width: 100%; min-height: 132rpx; align-items: flex-start; gap: 17rpx; padding: 20rpx; border: 1rpx solid #e1e8ed; border-radius: 18rpx; background: #fff; box-shadow: 0 8rpx 24rpx rgba(42,64,82,.055); text-align: left; }
 .business-card.urgent { border-color: #efc9c9; }
 .kind-mark { display: flex; width: 54rpx; height: 54rpx; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 15rpx; background: #e5eef4; color: #315f86; font-size: 22rpx; font-weight: 850; }
 .kind-quality .kind-mark { background: #e9ebf7; color: #5866a0; }.kind-seal .kind-mark { background: #f5ecdf; color: #966421; }
+.kind-edge { border-color: #ead8c0; }.kind-edge .kind-mark { background: #fff1df; color: #966421; }.kind-edge .card-title text:last-child { background: #fff4e5; color: #8d5b22; }
 .card-copy { min-width: 0; flex: 1; }
 .card-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 12rpx; }
 .card-title text:first-child { min-width: 0; flex: 1; color: #25364a; font-size: 24rpx; font-weight: 800; line-height: 1.4; }

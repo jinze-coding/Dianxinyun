@@ -4,16 +4,23 @@ import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.file.entity.FileResource;
 import com.example.siteplatform.file.mapper.FileResourceMapper;
+import com.example.siteplatform.inspection.general.entity.GeneralInspectionRectification;
+import com.example.siteplatform.inspection.general.entity.GeneralInspectionTask;
+import com.example.siteplatform.inspection.general.mapper.GeneralInspectionRectificationMapper;
+import com.example.siteplatform.inspection.general.mapper.GeneralInspectionTaskMapper;
+import com.example.siteplatform.project.constant.InspectionPermissionCodes;
 import com.example.siteplatform.project.service.ProjectPermissionService;
 import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -24,20 +31,26 @@ import static org.mockito.Mockito.when;
 class FileResourceServiceTest {
     private FileResourceMapper fileMapper;
     private ProjectPermissionService permissionService;
+    private GeneralInspectionTaskMapper taskMapper;
+    private GeneralInspectionRectificationMapper rectificationMapper;
     private FileResourceService service;
 
     @BeforeEach
     void setUp() {
         fileMapper = mock(FileResourceMapper.class);
         permissionService = mock(ProjectPermissionService.class);
+        taskMapper = mock(GeneralInspectionTaskMapper.class);
+        rectificationMapper = mock(GeneralInspectionRectificationMapper.class);
         service = new FileResourceService(fileMapper, permissionService);
+        service.setGeneralInspectionTaskMapper(taskMapper);
+        service.setGeneralInspectionRectificationMapper(rectificationMapper);
     }
 
     @Test
     void bindsOnlyCurrentUsersPendingAttachment() {
         SysUser user = user(7L);
         FileResource file = file(11L, 2L, 7L, "QUALITY_PENDING", null);
-        when(fileMapper.selectList(any())).thenReturn(List.of(file));
+        when(fileMapper.selectByIdsForUpdate(any())).thenReturn(List.of(file));
         when(fileMapper.updateById(file)).thenReturn(1);
 
         service.validateAndBind(user, 2L, List.of(11L),
@@ -52,7 +65,7 @@ class FileResourceServiceTest {
     void bindsFirstInspectionPhotoAfterRecordIsCreated() {
         SysUser user = user(7L);
         FileResource file = file(12L, 2L, 7L, "inspection_record", null);
-        when(fileMapper.selectList(any())).thenReturn(List.of(file));
+        when(fileMapper.selectByIdsForUpdate(any())).thenReturn(List.of(file));
         when(fileMapper.updateById(file)).thenReturn(1);
 
         service.validateAndBind(user, 2L, List.of(12L),
@@ -64,9 +77,31 @@ class FileResourceServiceTest {
     }
 
     @Test
+    void bindingLocksTheWholeBatchInStableIdOrderBeforeUpdating() {
+        FileResource first = file(11L, 2L, 7L, "EDGE_INSPECTION_TASK_PENDING", null);
+        FileResource second = file(12L, 2L, 7L, "EDGE_INSPECTION_TASK_PENDING", null);
+        when(fileMapper.selectByIdsForUpdate(List.of(11L, 12L))).thenReturn(List.of(first, second));
+        when(fileMapper.updateById(any())).thenReturn(1);
+
+        service.validateAndBind(user(7L), 2L, List.of(12L, 11L),
+                "EDGE_INSPECTION_TASK_PENDING", "EDGE_INSPECTION_TASK", 31L);
+
+        verify(fileMapper).selectByIdsForUpdate(List.of(11L, 12L));
+        assertEquals(31L, first.getBusinessId());
+        assertEquals(31L, second.getBusinessId());
+    }
+
+    @Test
+    void bindingMethodOwnsTheTransactionThatKeepsAttachmentLocksUntilUpdate() throws Exception {
+        assertTrue(FileResourceService.class.getMethod("validateAndBind", SysUser.class, Long.class,
+                        List.class, String.class, String.class, Long.class)
+                .isAnnotationPresent(Transactional.class));
+    }
+
+    @Test
     void rejectsAttachmentClaimedByCleanupDuringBinding() {
         FileResource file = file(11L, 2L, 7L, "QUALITY_PENDING", null);
-        when(fileMapper.selectList(any())).thenReturn(List.of(file));
+        when(fileMapper.selectByIdsForUpdate(any())).thenReturn(List.of(file));
         when(fileMapper.updateById(file)).thenReturn(0);
 
         BusinessException exception = assertThrows(BusinessException.class,
@@ -79,7 +114,7 @@ class FileResourceServiceTest {
     @Test
     void rejectsAttachmentUploadedByAnotherUser() {
         FileResource file = file(11L, 2L, 8L, "QUALITY_PENDING", null);
-        when(fileMapper.selectList(any())).thenReturn(List.of(file));
+        when(fileMapper.selectByIdsForUpdate(any())).thenReturn(List.of(file));
 
         assertThrows(BusinessException.class, () -> service.validateAndBind(user(7L), 2L, List.of(11L),
                 "QUALITY_PENDING", "QUALITY_ISSUE", 19L));
@@ -89,7 +124,7 @@ class FileResourceServiceTest {
     @Test
     void rejectsAlreadyBoundAttachment() {
         FileResource file = file(11L, 2L, 7L, "QUALITY_PENDING", 18L);
-        when(fileMapper.selectList(any())).thenReturn(List.of(file));
+        when(fileMapper.selectByIdsForUpdate(any())).thenReturn(List.of(file));
 
         assertThrows(BusinessException.class, () -> service.validateAndBind(user(7L), 2L, List.of(11L),
                 "QUALITY_PENDING", "QUALITY_ISSUE", 19L));
@@ -99,7 +134,7 @@ class FileResourceServiceTest {
     @Test
     void rejectsAttachmentFromWrongStagingType() {
         FileResource file = file(11L, 2L, 7L, "QUALITY_REVIEW_PENDING", null);
-        when(fileMapper.selectList(any())).thenReturn(List.of(file));
+        when(fileMapper.selectByIdsForUpdate(any())).thenReturn(List.of(file));
 
         assertThrows(BusinessException.class, () -> service.validateAndBind(user(7L), 2L, List.of(11L),
                 "QUALITY_PENDING", "QUALITY_ISSUE", 19L));
@@ -111,7 +146,7 @@ class FileResourceServiceTest {
         assertThrows(BusinessException.class, () -> service.validateAndBind(user(7L), 2L, List.of(11L),
                 "QUALITY_REVIEW_PENDING", "QUALITY_ISSUE", 19L));
 
-        verify(fileMapper, never()).selectList(any());
+        verify(fileMapper, never()).selectByIdsForUpdate(any());
     }
 
     @Test
@@ -327,6 +362,52 @@ class FileResourceServiceTest {
         assertEquals(403, error.getCode());
     }
 
+    @Test
+    void assignedEdgeRectifierCanReadTaskEvidenceWithoutEdgeView() {
+        FileResource file = file(51L, 2L, 7L, "EDGE_INSPECTION_TASK", 31L);
+        GeneralInspectionTask task = edgeTask(31L, 2L);
+        GeneralInspectionRectification rectification = rectification(41L, 31L, 2L, 9L, 10L);
+        when(taskMapper.selectById(31L)).thenReturn(task);
+        when(rectificationMapper.selectList(any())).thenReturn(List.of(rectification));
+        when(permissionService.hasInspectionPermission(
+                9L, 2L, InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY)).thenReturn(true);
+
+        service.checkRead(user(9L), file);
+
+        verify(permissionService).checkProjectPermission(9L, 2L);
+    }
+
+    @Test
+    void assignedEdgeReviewerCanReadRectificationPhotoWithoutEdgeView() {
+        FileResource file = file(52L, 2L, 7L, "EDGE_INSPECTION_RECTIFICATION", 41L);
+        GeneralInspectionTask task = edgeTask(31L, 2L);
+        GeneralInspectionRectification rectification = rectification(41L, 31L, 2L, 8L, 9L);
+        when(rectificationMapper.selectById(41L)).thenReturn(rectification);
+        when(taskMapper.selectById(31L)).thenReturn(task);
+        when(permissionService.hasInspectionPermission(
+                9L, 2L, InspectionPermissionCodes.EDGE_INSPECTION_REVIEW)).thenReturn(true);
+
+        service.checkRead(user(9L), file);
+
+        verify(permissionService).checkProjectPermission(9L, 2L);
+    }
+
+    @Test
+    void edgeWorkflowPermissionAloneCannotReadUnassignedEvidence() {
+        FileResource file = file(53L, 2L, 7L, "EDGE_INSPECTION_TASK", 31L);
+        GeneralInspectionTask task = edgeTask(31L, 2L);
+        GeneralInspectionRectification rectification = rectification(41L, 31L, 2L, 8L, 10L);
+        when(taskMapper.selectById(31L)).thenReturn(task);
+        when(rectificationMapper.selectList(any())).thenReturn(List.of(rectification));
+        when(permissionService.hasInspectionPermission(
+                9L, 2L, InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY)).thenReturn(true);
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.checkRead(user(9L), file));
+
+        assertEquals(403, error.getCode());
+    }
+
     private SysUser user(Long id) {
         SysUser user = new SysUser();
         user.setId(id);
@@ -341,5 +422,26 @@ class FileResourceServiceTest {
         file.setBusinessType(businessType);
         file.setBusinessId(businessId);
         return file;
+    }
+
+    private GeneralInspectionTask edgeTask(Long id, Long projectId) {
+        GeneralInspectionTask task = new GeneralInspectionTask();
+        task.setId(id);
+        task.setProjectId(projectId);
+        task.setPointTypeCode("FLOOR_EDGE");
+        task.setAssigneeId(7L);
+        task.setReviewerId(10L);
+        return task;
+    }
+
+    private GeneralInspectionRectification rectification(Long id, Long taskId, Long projectId,
+                                                         Long assigneeId, Long reviewerId) {
+        GeneralInspectionRectification rectification = new GeneralInspectionRectification();
+        rectification.setId(id);
+        rectification.setTaskId(taskId);
+        rectification.setProjectId(projectId);
+        rectification.setAssigneeId(assigneeId);
+        rectification.setReviewerId(reviewerId);
+        return rectification;
     }
 }

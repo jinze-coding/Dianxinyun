@@ -102,6 +102,65 @@ public class GeneralInspectionReportingService {
         return vo;
     }
 
+    /** Returns clinical edge-inspection KPIs only; electric-box records are deliberately excluded. */
+    public GeneralInspectionDashboardVO edgeStatistics(Long projectId, LocalDate startDate, LocalDate endDate,
+                                                        SysUser currentUser) {
+        permissionService.requireSummaryView(projectId, currentUser);
+        validatePeriod(startDate, endDate, 366);
+        LocalDate effectiveEnd = endDate.isAfter(LocalDate.now()) ? LocalDate.now() : endDate;
+        List<GeneralInspectionTask> tasks = effectiveEnd.isBefore(startDate) ? List.of()
+                : taskMapper.selectList(new LambdaQueryWrapper<GeneralInspectionTask>()
+                .eq(GeneralInspectionTask::getProjectId, projectId)
+                .isNotNull(GeneralInspectionTask::getPointTypeCode)
+                .between(GeneralInspectionTask::getOccurrenceDate, startDate, effectiveEnd)
+                .ne(GeneralInspectionTask::getStatus, "CANCELLED"));
+        Set<Long> taskIds = tasks.stream().map(GeneralInspectionTask::getId).collect(Collectors.toSet());
+        List<GeneralInspectionRectification> rectifications = taskIds.isEmpty() ? List.of()
+                : rectificationMapper.selectList(new LambdaQueryWrapper<GeneralInspectionRectification>()
+                .in(GeneralInspectionRectification::getTaskId, taskIds)
+                .ne(GeneralInspectionRectification::getStatus, "VOIDED"));
+        LocalDateTime now = LocalDateTime.now();
+        long completed = tasks.stream().filter(task -> task.getSubmittedTime() != null).count();
+        long onTime = tasks.stream().filter(task -> task.getSubmittedTime() != null
+                && Integer.valueOf(1).equals(task.getOnTime())).count();
+        long late = tasks.stream().filter(task -> task.getSubmittedTime() != null
+                && Integer.valueOf(0).equals(task.getOnTime())).count();
+        long missed = tasks.stream().filter(task -> "PENDING".equals(task.getStatus())
+                && now.isAfter(task.getDueTime())).count();
+        long abnormal = tasks.stream().filter(task -> value(task.getAbnormalCount()) > 0).count();
+        Map<Long, List<GeneralInspectionRectification>> rectificationSheets = rectifications.stream()
+                .collect(Collectors.groupingBy(GeneralInspectionRectification::getTaskId));
+        long closedRectifications = rectificationSheets.values().stream()
+                .filter(items -> !items.isEmpty() && items.stream()
+                        .allMatch(rectification -> "CLOSED".equals(rectification.getStatus())))
+                .count();
+        long openRectifications = rectificationSheets.size() - closedRectifications;
+
+        GeneralInspectionDashboardVO vo = new GeneralInspectionDashboardVO();
+        vo.setProjectId(projectId);
+        vo.setElectricBoxDueCount(0L);
+        vo.setElectricBoxCompletedCount(0L);
+        vo.setElectricBoxMissedCount(0L);
+        vo.setElectricBoxAbnormalCount(0L);
+        vo.setGeneralDueCount((long) tasks.size());
+        vo.setGeneralCompletedCount(completed);
+        vo.setGeneralMissedCount(missed);
+        vo.setGeneralAbnormalCount(abnormal);
+        vo.setDueCount((long) tasks.size());
+        vo.setCompletedCount(completed);
+        vo.setOnTimeCount(onTime);
+        vo.setLateCompletedCount(late);
+        vo.setMissedCount(missed);
+        vo.setAbnormalTaskCount(abnormal);
+        vo.setOpenRectificationCount(openRectifications);
+        vo.setClosedRectificationCount(closedRectifications);
+        vo.setCompletionRate(rate(completed, tasks.size()));
+        vo.setOnTimeRate(rate(onTime, tasks.size()));
+        vo.setRectificationClosureRate(rate(closedRectifications, rectificationSheets.size()));
+        vo.setBreakdowns(buildBreakdowns(tasks, rectifications, ElectricKpi.EMPTY, now));
+        return vo;
+    }
+
     private ElectricKpi electricKpi(Long projectId, LocalDate startDate, LocalDate endDate) {
         if (endDate.isBefore(startDate)) return ElectricKpi.EMPTY;
         List<ElectricBox> boxes = electricBoxMapper.selectList(new LambdaQueryWrapper<ElectricBox>()
@@ -210,7 +269,7 @@ public class GeneralInspectionReportingService {
         String personKey = task.getAssigneeId() == null ? "UNASSIGNED" : String.valueOf(task.getAssigneeId());
         String personName = StringUtils.hasText(task.getAssigneeName()) ? task.getAssigneeName() : "待改派";
         return List.of(
-                new DimensionRef("TYPE", "GENERAL", "通用巡检"),
+                new DimensionRef("TYPE", "EDGE_INSPECTION", "临边巡检"),
                 new DimensionRef("POINT", "G:" + task.getPointId(), task.getPointCode() + " · " + task.getPointName()),
                 new DimensionRef("PERSON", personKey, personName),
                 new DimensionRef("DATE", task.getOccurrenceDate().toString(), task.getOccurrenceDate().toString()));

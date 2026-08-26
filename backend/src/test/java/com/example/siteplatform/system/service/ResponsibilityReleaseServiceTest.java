@@ -1,7 +1,9 @@
 package com.example.siteplatform.system.service;
 
 import com.example.siteplatform.notification.service.UserNotificationService;
+import com.example.siteplatform.project.constant.InspectionPermissionCodes;
 import com.example.siteplatform.project.dto.ResponsibilityImpactVO;
+import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -122,6 +124,42 @@ class ResponsibilityReleaseServiceTest {
                 any(Object[].class));
         verify(notificationService, never()).notify(any(), any(), anyString(), any(), anyString(),
                 anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void losingEdgeRectifyDoesNotClearElectricBoxRectificationWhenLegacyRectifyRemains() {
+        doReturn(impact(0, 0)).when(service).impact(9L, 7L);
+        when(permissionService.hasProjectPermission(any(), any(), anyString())).thenReturn(true);
+        when(permissionService.hasProjectPermission(
+                7L, 9L, InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY)).thenReturn(false);
+
+        service.releaseForCapabilityLoss(9L, 7L);
+
+        verify(jdbc, never()).update(argThat(sql -> sql != null
+                        && sql.contains("UPDATE inspection_rectification")), any(Object[].class));
+        verify(jdbc).update(argThat(sql -> sql != null
+                        && sql.contains("UPDATE general_inspection_rectification")
+                        && sql.contains("point_type_code IS NOT NULL")), any(Object[].class));
+        verify(permissionService).hasProjectPermission(
+                7L, 9L, SystemPermissionCodes.INSPECTION_RECTIFY);
+    }
+
+    @Test
+    void losingEdgeReviewClearsTaskAndEveryOpenEdgeSheetReviewerOnly() {
+        doReturn(impact(0, 0)).when(service).impact(9L, 7L);
+        when(permissionService.hasProjectPermission(any(), any(), anyString())).thenReturn(true);
+        when(permissionService.hasProjectPermission(
+                7L, 9L, InspectionPermissionCodes.EDGE_INSPECTION_REVIEW)).thenReturn(false);
+
+        service.releaseForCapabilityLoss(9L, 7L);
+
+        verify(jdbc).update(argThat(sql -> sql != null
+                        && sql.contains("UPDATE general_inspection_task SET reviewer_id = NULL")
+                        && sql.contains("point_type_code IS NOT NULL")), any(Object[].class));
+        verify(jdbc).update(argThat(sql -> sql != null
+                        && sql.contains("UPDATE general_inspection_rectification SET reviewer_id = NULL")
+                        && sql.contains("status NOT IN ('CLOSED', 'VOIDED')")
+                        && sql.contains("edge_task.point_type_code IS NOT NULL")), any(Object[].class));
     }
 
     private ResponsibilityImpactVO impact(long configCount, long pendingCount) {

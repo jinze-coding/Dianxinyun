@@ -262,6 +262,25 @@ test('inspection rectification actions grant only their stable operation permiss
   assert.deepEqual(new Set(permissionIdsForActionKeys(safetyOfficer, actions)), new Set([2, 3]));
 });
 
+test('edge inspection uses an independent menu and five fixed operation permissions', () => {
+  const tree = buildRoleMenuTree([
+    { id: 60, menuCode: 'WEB_INSPECTION', menuName: '巡检管理' },
+    { id: 61, parentId: 60, menuCode: 'INSPECTION_LEDGER', menuName: '电箱台账' },
+    { id: 62, parentId: 60, menuCode: 'INSPECTION_EDGE', menuName: '临边巡检' },
+  ], { scopeType: 'PROJECT' });
+  const inspection = tree.find((node) => node.moduleCode === 'INSPECTION');
+  assert.equal(inspection.children.some((node) => node.menuCode === 'INSPECTION_EDGE' && !node.unavailable), true);
+
+  const permissions = [
+    ['EDGE_INSPECTION_VIEW', 70], ['EDGE_INSPECTION_MANAGE', 71], ['EDGE_INSPECTION_SUBMIT', 72],
+    ['EDGE_INSPECTION_RECTIFY', 73], ['EDGE_INSPECTION_REVIEW', 74],
+  ].map(([permissionCode, id]) => ({ id, permissionCode, permissionName: permissionCode, moduleCode: 'WEB_INSPECTION' }));
+  const actions = buildPermissionActions(permissions);
+  const selected = toggleActionKey(new Set(), 'inspection.edge.review', true, actions);
+  assert.deepEqual(selected, new Set(['inspection.edge.review', 'inspection.edge.view']));
+  assert.deepEqual(new Set(permissionIdsForActionKeys(selected, actions)), new Set([70, 74]));
+});
+
 test('removing a prerequisite also removes dependent actions', () => {
   const permissions = [
     ['document.view', 1], ['document.upload', 2], ['document.manage', 3],

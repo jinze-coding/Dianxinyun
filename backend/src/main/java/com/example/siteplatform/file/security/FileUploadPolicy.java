@@ -76,7 +76,7 @@ public final class FileUploadPolicy {
             return;
         }
         boolean workflowPhoto = (normalized.startsWith("QUALITY_") && !"QUALITY_DOCUMENT".equals(normalized))
-                || normalized.startsWith("INSPECTION_");
+                || normalized.startsWith("INSPECTION_") || normalized.startsWith("EDGE_INSPECTION_");
         validate(file,
                 workflowPhoto ? IMAGE_EXTENSIONS : DOCUMENT_EXTENSIONS,
                 workflowPhoto ? MAX_IMAGE_BYTES : MAX_DOCUMENT_BYTES,

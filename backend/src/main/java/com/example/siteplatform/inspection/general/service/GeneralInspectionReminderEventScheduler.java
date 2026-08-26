@@ -12,7 +12,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -30,7 +29,6 @@ public class GeneralInspectionReminderEventScheduler {
     private final ApplicationEventPublisher applicationEventPublisher;
     private final ObjectMapper objectMapper;
 
-    @Scheduled(cron = "${general-inspection.reminder-event-cron:15 */5 * * * ?}")
     public void produceReminderEvents() {
         LocalDateTime now = LocalDateTime.now();
         List<GeneralInspectionTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<GeneralInspectionTask>()
@@ -55,7 +53,6 @@ public class GeneralInspectionReminderEventScheduler {
         }
     }
 
-    @Scheduled(cron = "${general-inspection.event-dispatch-cron:30 * * * * ?}")
     public void dispatchOutbox() {
         outboxMapper.recoverStuck();
         List<GeneralInspectionEventOutbox> rows = outboxMapper.selectList(

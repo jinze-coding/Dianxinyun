@@ -40,7 +40,7 @@ import PersonalInboxPage from './pages/PersonalInbox';
 import SystemManagementPage from './pages/SystemManagement';
 import SiteAccessManagementPage from './pages/SiteAccessManagement';
 import ProjectInformationPage from './pages/ProjectInformation';
-import GeneralInspectionManagement from './pages/GeneralInspectionManagement';
+import EdgeInspectionManagement from './pages/EdgeInspectionManagement';
 import { getPersonalTodoSummary, getUnreadNotificationCount } from './services/personalInbox';
 import { canAccessPage, collectProjectMenuCodes, hasProjectPermission, isPlatformAdmin } from './utils/permissions';
 import { pageMenuAllowed } from './utils/roleAuthorization';
@@ -3352,7 +3352,6 @@ const ELECTRIC_INSPECTION_TABS = [
   { id: 'ledger', label: '电箱台账', menuCode: 'INSPECTION_LEDGER' },
   { id: 'records', label: '巡检记录', menuCode: 'INSPECTION_RECORDS' },
   { id: 'rectification', label: '整改闭环', menuCode: 'INSPECTION_RECTIFICATIONS' },
-  { id: 'general', label: '巡检配置', menuCode: 'INSPECTION_CONFIG' },
 ];
 
 const BOX_STATUS_TEXT = { ACTIVE: '启用', INACTIVE: '停用', REMOVED: '已拆除' };
@@ -6834,33 +6833,56 @@ function ElectricInspectionPage({ projectId, theme: T, currentUser, businessTarg
     () => collectProjectMenuCodes(currentUser, projectId),
     [currentUser, projectId],
   );
-  const visibleTabs = useMemo(
+  const visibleElectricTabs = useMemo(
     () => ELECTRIC_INSPECTION_TABS.filter((tab) => isPlatformAdmin(currentUser)
       || pageMenuAllowed(projectMenuCodes, [tab.menuCode], ['WEB_INSPECTION', 'ELECTRIC_INSPECTION'])),
     [currentUser, projectMenuCodes],
   );
-  const [activeTab, setActiveTab] = useState(visibleTabs[0]?.id || '');
+  const edgeAreaVisible = useMemo(
+    () => isPlatformAdmin(currentUser)
+      || pageMenuAllowed(projectMenuCodes, ['INSPECTION_EDGE'], ['WEB_INSPECTION', 'ELECTRIC_INSPECTION']),
+    [currentUser, projectMenuCodes],
+  );
+  const visibleAreas = useMemo(() => [
+    ...(visibleElectricTabs.length ? [{ id: 'electric', label: '电箱巡检', description: '电箱台账、六项日检、记录与整改' }] : []),
+    ...(edgeAreaVisible ? [{ id: 'edge', label: '临边巡检', description: '固定检查表、点位、周期任务与整改闭环' }] : []),
+  ], [edgeAreaVisible, visibleElectricTabs.length]);
+  const [activeArea, setActiveArea] = useState(visibleAreas[0]?.id || '');
+  const [activeTab, setActiveTab] = useState(visibleElectricTabs[0]?.id || '');
   const [menuNotice, setMenuNotice] = useState('');
 
   useEffect(() => {
-    if (!visibleTabs.some((tab) => tab.id === activeTab)) {
-      const fallback = visibleTabs[0];
-      setActiveTab(fallback?.id || '');
-      if (fallback) setMenuNotice(`当前角色无原页签菜单权限，已切换到${fallback.label}`);
+    if (!visibleAreas.some((area) => area.id === activeArea)) {
+      const fallback = visibleAreas[0];
+      setActiveArea(fallback?.id || '');
+      if (fallback) setMenuNotice(`当前角色无原专区菜单权限，已切换到${fallback.label}`);
     }
-  }, [activeTab, visibleTabs]);
+  }, [activeArea, visibleAreas]);
 
   useEffect(() => {
-    const targetTab = businessTarget?.routeCode === 'INSPECTION_RECTIFICATION_DETAIL'
+    if (!visibleElectricTabs.some((tab) => tab.id === activeTab)) {
+      const fallback = visibleElectricTabs[0];
+      setActiveTab(fallback?.id || '');
+      if (fallback && activeArea === 'electric') setMenuNotice(`当前角色无原页签菜单权限，已切换到${fallback.label}`);
+    }
+  }, [activeArea, activeTab, visibleElectricTabs]);
+
+  useEffect(() => {
+    const routeCode = String(businessTarget?.routeCode || '');
+    if (routeCode.startsWith('EDGE_INSPECTION_')) {
+      setActiveArea('edge');
+      setMenuNotice('');
+      return;
+    }
+    const targetTab = routeCode === 'INSPECTION_RECTIFICATION_DETAIL'
       ? 'rectification'
-      : businessTarget?.routeCode === 'INSPECTION_RECORD_DETAIL'
+      : routeCode === 'INSPECTION_RECORD_DETAIL'
         ? 'records'
-        : businessTarget?.routeCode === 'INSPECTION_FORM'
+        : routeCode === 'INSPECTION_FORM'
           ? 'ledger'
-          : businessTarget?.routeCode?.startsWith('GENERAL_INSPECTION_')
-            ? 'general'
           : '';
     if (targetTab) {
+      setActiveArea('electric');
       setActiveTab(targetTab);
       setMenuNotice('');
     }
@@ -6888,28 +6910,43 @@ function ElectricInspectionPage({ projectId, theme: T, currentUser, businessTarg
       }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 800, color: T.textPrimary }}>巡检管理</div>
-          <div style={{ fontSize: 11, color: menuNotice ? T.warning : T.textMuted, marginTop: 3 }}>{menuNotice || '维护电箱台账和巡检记录；用户权限已统一迁移至系统管理'}</div>
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          {visibleTabs.map(tab => (
-            <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMenuNotice(''); }} style={{
-              padding: '7px 14px',
-              borderRadius: 5,
-              cursor: 'pointer',
-              border: `1px solid ${activeTab === tab.id ? T.accent : T.borderColor}`,
-              background: activeTab === tab.id ? T.accent : T.surface2,
-              color: activeTab === tab.id ? '#fff' : T.textSecondary,
-              fontSize: 12,
-              fontWeight: activeTab === tab.id ? 700 : 500,
-            }}>{tab.label}</button>
-          ))}
+          <div style={{ fontSize: 11, color: menuNotice ? T.warning : T.textMuted, marginTop: 3 }}>{menuNotice || '电箱巡检与临边巡检为两个独立专区，记录和整改分别管理'}</div>
         </div>
       </div>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.max(1, visibleAreas.length)}, minmax(220px, 1fr))`, gap: 10, flexShrink: 0 }}>
+        {visibleAreas.map(area => {
+          const selected = activeArea === area.id;
+          return <button key={area.id} onClick={() => { setActiveArea(area.id); setMenuNotice(''); }} style={{
+            padding: '12px 14px', borderRadius: 7, cursor: 'pointer', textAlign: 'left',
+            border: `1px solid ${selected ? T.accent : T.borderColor}`,
+            borderLeft: `4px solid ${selected ? T.accent : T.borderColor}`,
+            background: selected ? T.activeItemBg : T.cardBg,
+            color: T.textPrimary,
+          }}>
+            <span style={{ display: 'block', fontSize: 14, fontWeight: 800 }}>{area.label}</span>
+            <span style={{ display: 'block', marginTop: 4, fontSize: 11, color: T.textMuted }}>{area.description}</span>
+          </button>;
+        })}
+      </div>
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {activeTab
-          ? activeTab === 'general'
-            ? <GeneralInspectionManagement projectId={projectId} theme={T} currentUser={currentUser} businessTarget={businessTarget} />
-            : <InspectionBackendPanel projectId={projectId} theme={T} activeTab={activeTab} currentUser={currentUser} onTabChange={setActiveTab} businessTarget={businessTarget} />
+        {activeArea
+          ? activeArea === 'edge'
+            ? <EdgeInspectionManagement projectId={projectId} theme={T} currentUser={currentUser} businessTarget={businessTarget} />
+            : <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flexShrink: 0 }}>
+                {visibleElectricTabs.map(tab => <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMenuNotice(''); }} style={{
+                  padding: '6px 12px', borderRadius: 5, cursor: 'pointer', fontSize: 12,
+                  border: `1px solid ${activeTab === tab.id ? T.accent : T.borderColor}`,
+                  background: activeTab === tab.id ? T.accent : T.surface2,
+                  color: activeTab === tab.id ? '#fff' : T.textSecondary,
+                }}>{tab.label}</button>)}
+              </div>
+              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                {activeTab
+                  ? <InspectionBackendPanel projectId={projectId} theme={T} activeTab={activeTab} currentUser={currentUser} onTabChange={setActiveTab} businessTarget={businessTarget} />
+                  : <div style={{ padding: 24, color: T.textMuted }}>当前角色没有可访问的电箱巡检子页签</div>}
+              </div>
+            </div>
           : <div style={{ padding: 24, color: T.textMuted }}>当前角色没有可访问的巡检页签</div>}
       </div>
     </div>

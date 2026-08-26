@@ -29,7 +29,7 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
     static final String PROJECT_DOCUMENTS = "/api/v1/project-documents";
     static final String DOCUMENT_FOLDERS = "/api/v1/document-folders";
     static final String INSPECTION = "/api/v1/inspection";
-    static final String GENERAL_INSPECTIONS = "/api/v1/general-inspections";
+    static final String EDGE_INSPECTIONS = "/api/v1/edge-inspections";
     static final String ELECTRIC_BOXES = "/api/v1/electric-boxes";
     static final String FILES = "/api/v1/files";
     static final String QUALITY_ISSUES = "/api/v1/quality/issues";
@@ -120,27 +120,10 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
             }
             return SystemPermissionCodes.INSPECTION_MANAGE;
         }
-        if (matchesModule(normalizedPath, GENERAL_INSPECTIONS)) {
-            if (normalizedPath.equals(GENERAL_INSPECTIONS + "/exports")
-                    || normalizedPath.startsWith(GENERAL_INSPECTIONS + "/exports/")) {
-                return SystemPermissionCodes.INSPECTION_EXPORT;
-            }
-            // 通用巡检读取同时包含配置查看、本人任务、本人整改、管理记录和看板，
-            // 所需权限不同，统一交由各服务按项目和记录级 ACL 校验。
-            if (read) return null;
-            if (normalizedPath.matches(GENERAL_INSPECTIONS + "/tasks/[^/]+/(scan|submit)")) {
-                return SystemPermissionCodes.INSPECTION_SUBMIT;
-            }
-            if (normalizedPath.equals(GENERAL_INSPECTIONS + "/scan/resolve")) {
-                return SystemPermissionCodes.INSPECTION_SUBMIT;
-            }
-            if (normalizedPath.matches(GENERAL_INSPECTIONS + "/rectifications/[^/]+/complete")) {
-                return SystemPermissionCodes.INSPECTION_RECTIFY;
-            }
-            if (normalizedPath.matches(GENERAL_INSPECTIONS + "/rectifications/[^/]+/(close|reject)")) {
-                return SystemPermissionCodes.INSPECTION_REVIEW;
-            }
-            return SystemPermissionCodes.INSPECTION_MANAGE;
+        if (matchesModule(normalizedPath, EDGE_INSPECTIONS)) {
+            // 临边巡检使用 EDGE_INSPECTION_* 细分权限并包含记录级指派校验，
+            // 统一交由服务层根据实际项目和任务/整改单校验。
+            return null;
         }
         if (matchesModule(normalizedPath, ELECTRIC_BOXES)) {
             return read ? SystemPermissionCodes.INSPECTION_VIEW : SystemPermissionCodes.INSPECTION_MANAGE;
@@ -186,6 +169,12 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
             else if (normalizedType.contains("RECTIFICATION")) permissionCode = SystemPermissionCodes.QUALITY_RECTIFY;
             else if (normalizedType.contains("REVIEW")) permissionCode = SystemPermissionCodes.QUALITY_REVIEW;
             else permissionCode = SystemPermissionCodes.QUALITY_MANAGE;
+        } else if (normalizedType.startsWith("EDGE_INSPECTION_")) {
+            // 下载与预览必须结合任务/整改单当前指派关系判断，读操作交由
+            // FileResourceService 在加载真实文件和业务记录后执行记录级 ACL。
+            if (read) return null;
+            else if (normalizedType.contains("RECTIFICATION")) permissionCode = "EDGE_INSPECTION_RECTIFY";
+            else permissionCode = "EDGE_INSPECTION_SUBMIT";
         } else if (normalizedType.startsWith("INSPECTION_")) {
             if (read) permissionCode = SystemPermissionCodes.INSPECTION_VIEW;
             else if ("INSPECTION_CUSTOM_POINT_PENDING".equals(normalizedType)) permissionCode = SystemPermissionCodes.INSPECTION_MANAGE;

@@ -13,7 +13,6 @@ import com.example.siteplatform.inspection.general.mapper.*;
 import com.example.siteplatform.inspection.general.vo.*;
 import com.example.siteplatform.notification.service.UserNotificationService;
 import com.example.siteplatform.project.constant.InspectionPermissionCodes;
-import com.example.siteplatform.system.constant.SystemPermissionCodes;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -30,7 +29,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class GeneralInspectionTaskService {
 
-    private static final Set<String> RESULTS = Set.of("NORMAL", "ABNORMAL", "NA");
+    private static final Set<String> RESULTS = Set.of("NORMAL", "ABNORMAL");
     private static final Set<String> SUBMITTED_TASK_STATES = Set.of("COMPLETED", "RECTIFICATION_PENDING", "CLOSED");
     private static final Set<String> OPEN_RECTIFICATION_STATES = Set.of("UNASSIGNED", "PENDING", "COMPLETED", "REJECTED");
 
@@ -66,6 +65,7 @@ public class GeneralInspectionTaskService {
             query.in(GeneralInspectionTask::getProjectId, enabledProjectIds);
         }
         if (mine) query.eq(GeneralInspectionTask::getAssigneeId, currentUser.getId());
+        query.isNotNull(GeneralInspectionTask::getPointTypeCode);
         if (StringUtils.hasText(status)) query.eq(GeneralInspectionTask::getStatus, status.trim().toUpperCase());
         if (startDate != null) query.ge(GeneralInspectionTask::getOccurrenceDate, startDate);
         if (endDate != null) query.le(GeneralInspectionTask::getOccurrenceDate, endDate);
@@ -82,6 +82,7 @@ public class GeneralInspectionTaskService {
                         .eq(GeneralInspectionTask::getProjectId, projectId)
                         .eq(GeneralInspectionTask::getStatus, "PENDING")
                         .isNull(GeneralInspectionTask::getAssigneeId)
+                        .isNotNull(GeneralInspectionTask::getPointTypeCode)
                         .orderByAsc(GeneralInspectionTask::getDueTime))
                 .stream().map(task -> toTaskVO(task, false, currentUser)).toList();
     }
@@ -94,11 +95,14 @@ public class GeneralInspectionTaskService {
                         .eq(GeneralInspectionRectification::getStatus, "COMPLETED")
                         .isNull(GeneralInspectionRectification::getReviewerId)
                         .orderByAsc(GeneralInspectionRectification::getDeadline))
-                .stream().map(rectification -> toRectificationVO(rectification, currentUser)).toList();
+                .stream()
+                .filter(rectification -> isEdgeTask(taskMapper.selectById(rectification.getTaskId())))
+                .map(rectification -> toRectificationVO(rectification, currentUser)).toList();
     }
 
     public GeneralInspectionTaskVO getTask(Long id, SysUser currentUser) {
         GeneralInspectionTask task = requireTask(id);
+        if (!isEdgeTask(task)) throw BusinessException.notFound("临边巡检任务不存在");
         permissionService.requireEnabled(task.getProjectId(), currentUser);
         if (!canReadTask(task, currentUser, false)) throw BusinessException.forbidden("无该巡检任务访问权限");
         return toTaskVO(task, true, currentUser);
@@ -151,7 +155,7 @@ public class GeneralInspectionTaskService {
     public GeneralInspectionTaskVO submitTask(Long id, GeneralInspectionTaskSubmitRequest request,
                                                SysUser currentUser) {
         GeneralInspectionTask task = taskMapper.selectByIdForUpdate(id);
-        if (task == null) throw BusinessException.notFound("巡检任务不存在");
+        if (!isEdgeTask(task)) throw BusinessException.notFound("临边巡检任务不存在");
         permissionService.requireSubmit(task.getProjectId(), currentUser);
         requirePrimaryAssignee(task, currentUser);
         requireExpected(task.getVersion(), request.getExpectedVersion(), "任务版本已变化，请刷新后重试");
@@ -182,7 +186,7 @@ public class GeneralInspectionTaskService {
         if (ids.size() != request.getTaskIds().size()) throw new BusinessException("取消任务列表包含重复或无效标识");
         for (Long id : ids) {
             GeneralInspectionTask task = taskMapper.selectByIdForUpdate(id);
-            if (task == null) throw BusinessException.notFound("巡检任务不存在：" + id);
+            if (!isEdgeTask(task)) throw BusinessException.notFound("临边巡检任务不存在：" + id);
             permissionService.requireManage(task.getProjectId(), currentUser);
             if (!"PENDING".equals(task.getStatus())) throw conflict("只能取消尚未提交的任务：" + id);
             task.setStatus("CANCELLED");
@@ -201,21 +205,21 @@ public class GeneralInspectionTaskService {
     public GeneralInspectionTaskVO reassignTask(Long id, GeneralInspectionTaskActionRequest request,
                                                  SysUser currentUser) {
         GeneralInspectionTask task = taskMapper.selectByIdForUpdate(id);
-        if (task == null) throw BusinessException.notFound("巡检任务不存在");
+        if (!isEdgeTask(task)) throw BusinessException.notFound("临边巡检任务不存在");
         permissionService.requireManage(task.getProjectId(), currentUser);
         requireExpected(task.getVersion(), request.getExpectedVersion(), "任务版本已变化，请刷新后重试");
-        if ("CANCELLED".equals(task.getStatus()) || "CLOSED".equals(task.getStatus())) throw conflict("当前任务状态不可改派");
+        requireTaskReassignable(task.getStatus());
         if (request.getAssigneeId() == null && request.getReviewerId() == null) throw new BusinessException("至少指定新的主巡检人或主复查人");
         String before = snapshot(task);
         if (request.getAssigneeId() != null) {
             SysUser assignee = requireActivePermissionUser(task.getProjectId(), request.getAssigneeId(),
-                    SystemPermissionCodes.INSPECTION_SUBMIT, true, "主巡检人");
+                    InspectionPermissionCodes.EDGE_INSPECTION_SUBMIT, "主巡检人");
             task.setAssigneeId(assignee.getId());
             task.setAssigneeName(userName(assignee));
         }
         if (request.getReviewerId() != null) {
             SysUser reviewer = requireActivePermissionUser(task.getProjectId(), request.getReviewerId(),
-                    SystemPermissionCodes.INSPECTION_REVIEW, false, "主复查人");
+                    InspectionPermissionCodes.EDGE_INSPECTION_REVIEW, "主复查人");
             task.setReviewerId(reviewer.getId());
             task.setReviewerName(userName(reviewer));
             List<GeneralInspectionRectification> rectifications = listRectificationsByTask(task.getId());
@@ -414,7 +418,7 @@ public class GeneralInspectionTaskService {
         requireExpected(rectification.getVersion(), request.getExpectedVersion(), "整改版本已变化，请刷新后重试");
         if (Set.of("CLOSED", "VOIDED").contains(rectification.getStatus())) throw conflict("已关闭或已作废整改不能改派");
         SysUser assignee = requireActivePermissionUser(rectification.getProjectId(), request.getAssigneeId(),
-                SystemPermissionCodes.INSPECTION_RECTIFY, false, "整改人");
+                InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY, "整改人");
         if (request.getDeadline() == null || request.getDeadline().isBefore(LocalDate.now())) throw new BusinessException("整改期限不能早于今天");
         String from = rectification.getStatus();
         rectification.setAssigneeId(assignee.getId());
@@ -453,7 +457,7 @@ public class GeneralInspectionTaskService {
         rectification.setVersion(value(rectification.getVersion(), 0) + 1);
         requireOne(rectificationMapper.updateById(rectification), "整改反馈提交");
         fileResourceService.validateAndBind(currentUser, rectification.getProjectId(), newPhotos,
-                "INSPECTION_CUSTOM_RECTIFICATION_PENDING", "INSPECTION_CUSTOM_RECTIFICATION", rectification.getId());
+                "EDGE_INSPECTION_RECTIFICATION_PENDING", "EDGE_INSPECTION_RECTIFICATION", rectification.getId());
         record(rectification.getProjectId(), "RECTIFICATION", id, "COMPLETE", currentUser, from, "COMPLETED", feedback, null, null);
         notifyReviewer(rectification);
         eventPublisher.publish(new GeneralInspectionDomainEvent("RECTIFICATION_REVIEW_PENDING",
@@ -492,6 +496,373 @@ public class GeneralInspectionTaskService {
         return toRectificationVO(rectification, currentUser);
     }
 
+    public List<EdgeInspectionRectificationSheetVO> listEdgeRectificationSheets(
+            Long projectId, String status, String scope, SysUser currentUser) {
+        requireUser(currentUser);
+        String normalizedScope = StringUtils.hasText(scope) ? scope.trim().toUpperCase() : "MINE";
+        if (!Set.of("MINE", "RECTIFY", "REVIEW", "ALL").contains(normalizedScope)) {
+            throw new BusinessException("整改范围仅支持 MINE、RECTIFY、REVIEW 或 ALL");
+        }
+        LambdaQueryWrapper<GeneralInspectionTask> taskQuery = new LambdaQueryWrapper<GeneralInspectionTask>()
+                .isNotNull(GeneralInspectionTask::getPointTypeCode)
+                .gt(GeneralInspectionTask::getAbnormalCount, 0);
+        if (projectId != null) {
+            permissionService.requireEnabled(projectId, currentUser);
+            switch (normalizedScope) {
+                case "ALL" -> permissionService.requireRecordView(projectId, currentUser);
+                case "RECTIFY" -> permissionService.requireRectify(projectId, currentUser);
+                case "REVIEW" -> permissionService.requireReview(projectId, currentUser);
+                default -> {
+                    // MINE is authorized per assigned sheet below.
+                }
+            }
+            taskQuery.eq(GeneralInspectionTask::getProjectId, projectId);
+        } else {
+            if ("ALL".equals(normalizedScope)) throw new BusinessException("管理查询必须指定项目");
+            List<Long> enabledProjects = settingMapper.selectList(
+                            new LambdaQueryWrapper<GeneralInspectionProjectSetting>()
+                                    .eq(GeneralInspectionProjectSetting::getEnabled, 1))
+                    .stream().map(GeneralInspectionProjectSetting::getProjectId).toList();
+            if (enabledProjects.isEmpty()) return List.of();
+            taskQuery.in(GeneralInspectionTask::getProjectId, enabledProjects);
+        }
+        List<GeneralInspectionTask> tasks = taskMapper.selectList(taskQuery
+                .orderByAsc(GeneralInspectionTask::getDueTime)
+                .orderByAsc(GeneralInspectionTask::getId));
+        List<EdgeInspectionRectificationSheetVO> result = new ArrayList<>();
+        for (GeneralInspectionTask task : tasks) {
+            if (!permissionService.hasActiveProjectAccess(task.getProjectId(), currentUser.getId())) continue;
+            List<GeneralInspectionRectification> rectifications = listRectificationsByTask(task.getId()).stream()
+                    .filter(rectification -> !"VOIDED".equals(rectification.getStatus())).toList();
+            if (rectifications.isEmpty() || !matchesSheetScope(rectifications, normalizedScope, currentUser)) continue;
+            EdgeInspectionRectificationSheetVO sheet = toEdgeSheet(task, rectifications, currentUser);
+            if (StringUtils.hasText(status)
+                    && !sheet.getStatus().equals(status.trim().toUpperCase())) continue;
+            result.add(sheet);
+        }
+        return result;
+    }
+
+    public EdgeInspectionRectificationSheetVO getEdgeRectificationSheet(Long taskId, SysUser currentUser) {
+        GeneralInspectionTask task = requireTask(taskId);
+        if (!isEdgeTask(task)) throw BusinessException.notFound("临边巡检整改单不存在");
+        permissionService.requireEnabled(task.getProjectId(), currentUser);
+        List<GeneralInspectionRectification> rectifications = listRectificationsByTask(taskId).stream()
+                .filter(rectification -> !"VOIDED".equals(rectification.getStatus())).toList();
+        if (rectifications.isEmpty()) throw BusinessException.notFound("临边巡检整改单不存在");
+        boolean directlyAssigned = rectifications.stream().anyMatch(rectification ->
+                Objects.equals(rectification.getAssigneeId(), currentUser.getId())
+                        && permissionService.hasInspectionPermission(task.getProjectId(), currentUser.getId(),
+                        InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY)
+                        || Objects.equals(rectification.getReviewerId(), currentUser.getId())
+                        && permissionService.hasInspectionPermission(task.getProjectId(), currentUser.getId(),
+                        InspectionPermissionCodes.EDGE_INSPECTION_REVIEW));
+        if (!directlyAssigned && !canReadTask(task, currentUser, false)) {
+            throw BusinessException.forbidden("无该临边巡检整改单访问权限");
+        }
+        return toEdgeSheet(task, rectifications, currentUser);
+    }
+
+    @Transactional
+    public EdgeInspectionRectificationSheetVO completeEdgeRectificationSheet(
+            Long taskId, EdgeInspectionRectificationCompleteRequest request, SysUser currentUser) {
+        GeneralInspectionTask task = taskMapper.selectByIdForUpdate(taskId);
+        if (task == null || !isEdgeTask(task)) throw BusinessException.notFound("临边巡检整改单不存在");
+        permissionService.requireRectify(task.getProjectId(), currentUser);
+        requireExpected(task.getVersion(), request.getExpectedVersion(), "整改单版本已变化，请刷新后重试");
+        List<GeneralInspectionRectification> rectifications = rectificationMapper.selectByTaskIdForUpdate(taskId)
+                .stream().filter(rectification -> !"VOIDED".equals(rectification.getStatus())).toList();
+        if (rectifications.isEmpty()) throw BusinessException.notFound("临边巡检整改单不存在");
+        if (rectifications.stream().anyMatch(rectification ->
+                !Objects.equals(rectification.getAssigneeId(), currentUser.getId()))) {
+            throw BusinessException.forbidden("仅整改单当前整改人可整单提交反馈");
+        }
+        if (rectifications.stream().anyMatch(rectification ->
+                !Set.of("PENDING", "REJECTED").contains(rectification.getStatus()))) {
+            throw conflict("整改单包含不可提交反馈的异常项，请刷新后重试");
+        }
+        String fromStatus = sheetStatus(rectifications);
+        Map<Long, EdgeInspectionRectificationCompleteRequest.ItemFeedback> feedbacks = request.getItems().stream()
+                .collect(Collectors.toMap(EdgeInspectionRectificationCompleteRequest.ItemFeedback::getRectificationId,
+                        Function.identity(), (a, b) -> { throw new BusinessException("整改反馈项不能重复"); }));
+        Set<Long> expectedIds = rectifications.stream().map(GeneralInspectionRectification::getId)
+                .collect(Collectors.toSet());
+        if (!feedbacks.keySet().equals(expectedIds)) throw new BusinessException("必须一次提交整单全部异常项反馈");
+        Set<Long> allPhotos = new HashSet<>();
+        LocalDateTime now = LocalDateTime.now();
+        for (GeneralInspectionRectification rectification : rectifications) {
+            EdgeInspectionRectificationCompleteRequest.ItemFeedback feedback = feedbacks.get(rectification.getId());
+            requireExpected(rectification.getVersion(), feedback.getExpectedVersion(),
+                    rectification.getItemName() + "整改版本已变化，请刷新后重试");
+            String feedbackText = trimRequired(feedback.getFeedback(), "整改说明", 1000);
+            List<Long> photos = distinctIds(feedback.getPhotoFileIds(), rectification.getItemName() + "整改照片");
+            if (photos.isEmpty()) throw new BusinessException(rectification.getItemName() + "至少上传1张整改照片");
+            List<Long> existingPhotos = parseIds(rectification.getRectificationPhotoFileIds());
+            if (!photos.containsAll(existingPhotos)) {
+                throw new BusinessException(rectification.getItemName() + "已提交的整改照片不能移除");
+            }
+            if (photos.stream().anyMatch(allPhotos::contains)) {
+                throw new BusinessException("同一整改照片不能重复用于多个异常项");
+            }
+            allPhotos.addAll(photos);
+            List<Long> newPhotos = photos.stream().filter(photoId -> !existingPhotos.contains(photoId)).toList();
+            rectification.setFeedback(feedbackText);
+            rectification.setRectificationPhotoFileIds(joinIds(photos));
+            rectification.setCompletedTime(now);
+            rectification.setReviewComment(null);
+            rectification.setReviewTime(null);
+            rectification.setStatus("COMPLETED");
+            rectification.setVersion(value(rectification.getVersion(), 0) + 1);
+            requireOne(rectificationMapper.updateById(rectification), "整单整改反馈保存");
+            if (!newPhotos.isEmpty()) {
+                fileResourceService.validateAndBind(currentUser, task.getProjectId(), newPhotos,
+                        "EDGE_INSPECTION_RECTIFICATION_PENDING", "EDGE_INSPECTION_RECTIFICATION", rectification.getId());
+            }
+        }
+        task.setVersion(value(task.getVersion(), 0) + 1);
+        requireOne(taskMapper.updateById(task), "整改单版本更新");
+        record(task.getProjectId(), "RECTIFICATION_SHEET", taskId, "COMPLETE", currentUser,
+                fromStatus, "COMPLETED", "整单整改反馈已提交", null, null);
+        GeneralInspectionRectification first = rectifications.get(0);
+        notifyReviewer(first);
+        eventPublisher.publish(new GeneralInspectionDomainEvent("RECTIFICATION_REVIEW_PENDING",
+                task.getProjectId(), "RECTIFICATION_SHEET", taskId, now,
+                Map.of("version", value(task.getVersion(), 0))));
+        return toEdgeSheet(task, rectifications, currentUser);
+    }
+
+    @Transactional
+    public EdgeInspectionRectificationSheetVO reviewEdgeRectificationSheet(
+            Long taskId, EdgeInspectionRectificationReviewRequest request, boolean approve, SysUser currentUser) {
+        GeneralInspectionTask task = taskMapper.selectByIdForUpdate(taskId);
+        if (task == null || !isEdgeTask(task)) throw BusinessException.notFound("临边巡检整改单不存在");
+        permissionService.requireReview(task.getProjectId(), currentUser);
+        requireExpected(task.getVersion(), request.getExpectedVersion(), "整改单版本已变化，请刷新后重试");
+        if (!Objects.equals(task.getReviewerId(), currentUser.getId())) {
+            throw BusinessException.forbidden("仅明确指派的整单复查人可以复查；平台管理员也不能代审");
+        }
+        List<GeneralInspectionRectification> rectifications = rectificationMapper.selectByTaskIdForUpdate(taskId)
+                .stream().filter(rectification -> !"VOIDED".equals(rectification.getStatus())).toList();
+        if (rectifications.isEmpty()) throw BusinessException.notFound("临边巡检整改单不存在");
+        if (rectifications.stream().anyMatch(rectification -> !"COMPLETED".equals(rectification.getStatus()))) {
+            throw conflict("只有全部异常项均已整改反馈后才能整单复查");
+        }
+        String comment = approve ? trim(request.getComment(), 1000)
+                : trimRequired(request.getComment(), "退回原因", 1000);
+        LocalDateTime now = LocalDateTime.now();
+        String sheetFromStatus = sheetStatus(rectifications);
+        boolean becameUnassigned = false;
+        for (GeneralInspectionRectification rectification : rectifications) {
+            if (!Objects.equals(rectification.getReviewerId(), currentUser.getId())) {
+                throw BusinessException.forbidden("整改单复查人已变化，请刷新后重试");
+            }
+            rectification.setReviewComment(comment);
+            rectification.setReviewTime(now);
+            if (approve) {
+                rectification.setStatus("CLOSED");
+                rectification.setCloseTime(now);
+            } else {
+                SysUser activeRectifier = validRectifier(task.getProjectId(), rectification.getAssigneeId());
+                if (activeRectifier == null) {
+                    rectification.setAssigneeId(null);
+                    rectification.setAssigneeName(null);
+                    rectification.setStatus("UNASSIGNED");
+                    becameUnassigned = true;
+                } else {
+                    rectification.setAssigneeName(userName(activeRectifier));
+                    rectification.setStatus("REJECTED");
+                }
+                rectification.setRejectCount(value(rectification.getRejectCount(), 0) + 1);
+            }
+            rectification.setVersion(value(rectification.getVersion(), 0) + 1);
+            requireOne(rectificationMapper.updateById(rectification), approve ? "整单复查关闭" : "整单复查退回");
+        }
+        task.setStatus(approve ? "CLOSED" : "RECTIFICATION_PENDING");
+        if (becameUnassigned) {
+            task.setDefaultRectifierId(null);
+            task.setDefaultRectifierName(null);
+        }
+        task.setVersion(value(task.getVersion(), 0) + 1);
+        requireOne(taskMapper.updateById(task), "巡检任务整单复查状态更新");
+        record(task.getProjectId(), "RECTIFICATION_SHEET", taskId, approve ? "CLOSE" : "REJECT", currentUser,
+                sheetFromStatus, sheetStatus(rectifications), comment, null, null);
+        if (!approve && becameUnassigned) {
+            eventPublisher.publish(new GeneralInspectionDomainEvent("RECTIFICATION_UNASSIGNED",
+                    task.getProjectId(), "RECTIFICATION_SHEET", taskId, now,
+                    Map.of("version", value(task.getVersion(), 0), "reason", "RECTIFIER_PERMISSION_INVALID")));
+        } else if (!approve) {
+            notifyRectifier(rectifications.get(0));
+        }
+        return toEdgeSheet(task, rectifications, currentUser);
+    }
+
+    @Transactional
+    public EdgeInspectionRectificationSheetVO reassignEdgeRectificationSheet(
+            Long taskId, EdgeInspectionRectificationReassignRequest request, SysUser currentUser) {
+        GeneralInspectionTask task = taskMapper.selectByIdForUpdate(taskId);
+        if (task == null || !isEdgeTask(task)) throw BusinessException.notFound("临边巡检整改单不存在");
+        permissionService.requireManage(task.getProjectId(), currentUser);
+        requireExpected(task.getVersion(), request.getExpectedVersion(), "整改单版本已变化，请刷新后重试");
+        if (request.getAssigneeId() == null && request.getReviewerId() == null) {
+            throw new BusinessException("至少指定新的整改人或复查人");
+        }
+        SysUser assignee = request.getAssigneeId() == null ? null
+                : requireActivePermissionUser(task.getProjectId(), request.getAssigneeId(),
+                InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY, "整改人");
+        SysUser reviewer = request.getReviewerId() == null ? null
+                : requireActivePermissionUser(task.getProjectId(), request.getReviewerId(),
+                InspectionPermissionCodes.EDGE_INSPECTION_REVIEW, "复查人");
+        if (request.getDeadline() != null && request.getDeadline().isBefore(LocalDate.now())) {
+            throw new BusinessException("整改期限不能早于今天");
+        }
+        List<GeneralInspectionRectification> rectifications = rectificationMapper.selectByTaskIdForUpdate(taskId)
+                .stream().filter(rectification -> !Set.of("CLOSED", "VOIDED").contains(rectification.getStatus())).toList();
+        if (rectifications.isEmpty()) throw conflict("已关闭整改单不能改派");
+        String fromStatus = sheetStatus(rectifications);
+        String beforeSnapshot = snapshot(edgeReassignmentSnapshot(task, rectifications));
+        for (GeneralInspectionRectification rectification : rectifications) {
+            if (assignee != null) {
+                rectification.setAssigneeId(assignee.getId());
+                rectification.setAssigneeName(userName(assignee));
+                if ("UNASSIGNED".equals(rectification.getStatus())) rectification.setStatus("PENDING");
+            }
+            if (reviewer != null) {
+                rectification.setReviewerId(reviewer.getId());
+                rectification.setReviewerName(userName(reviewer));
+            }
+            if (request.getDeadline() != null) rectification.setDeadline(request.getDeadline());
+            rectification.setVersion(value(rectification.getVersion(), 0) + 1);
+            requireOne(rectificationMapper.updateById(rectification), "整改单改派");
+        }
+        if (assignee != null) {
+            task.setDefaultRectifierId(assignee.getId());
+            task.setDefaultRectifierName(userName(assignee));
+        }
+        if (reviewer != null) {
+            task.setReviewerId(reviewer.getId());
+            task.setReviewerName(userName(reviewer));
+        }
+        task.setVersion(value(task.getVersion(), 0) + 1);
+        requireOne(taskMapper.updateById(task), "整改单改派任务快照更新");
+        String toStatus = sheetStatus(rectifications);
+        record(task.getProjectId(), "RECTIFICATION_SHEET", taskId, "REASSIGN", currentUser,
+                fromStatus, toStatus, trimRequired(request.getReason(), "改派原因", 500),
+                beforeSnapshot, snapshot(edgeReassignmentSnapshot(task, rectifications)));
+        if (assignee != null && rectifications.stream().anyMatch(rectification ->
+                Set.of("PENDING", "REJECTED").contains(rectification.getStatus()))) {
+            notifyRectifier(rectifications.get(0));
+        }
+        return toEdgeSheet(task, rectifications, currentUser);
+    }
+
+    private boolean matchesSheetScope(List<GeneralInspectionRectification> rectifications, String scope,
+                                      SysUser currentUser) {
+        if ("ALL".equals(scope)) return true;
+        if ("RECTIFY".equals(scope)) {
+            return permissionService.hasInspectionPermission(rectifications.get(0).getProjectId(), currentUser.getId(),
+                    InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY)
+                    && rectifications.stream().anyMatch(rectification ->
+                    Objects.equals(rectification.getAssigneeId(), currentUser.getId()));
+        }
+        if ("REVIEW".equals(scope)) {
+            return permissionService.hasInspectionPermission(rectifications.get(0).getProjectId(), currentUser.getId(),
+                    InspectionPermissionCodes.EDGE_INSPECTION_REVIEW)
+                    && rectifications.stream().anyMatch(rectification ->
+                    Objects.equals(rectification.getReviewerId(), currentUser.getId()));
+        }
+        return rectifications.stream().anyMatch(rectification ->
+                Objects.equals(rectification.getAssigneeId(), currentUser.getId())
+                        && permissionService.hasInspectionPermission(rectification.getProjectId(), currentUser.getId(),
+                        InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY)
+                        || Objects.equals(rectification.getReviewerId(), currentUser.getId())
+                        && permissionService.hasInspectionPermission(rectification.getProjectId(), currentUser.getId(),
+                        InspectionPermissionCodes.EDGE_INSPECTION_REVIEW));
+    }
+
+    private EdgeInspectionRectificationSheetVO toEdgeSheet(GeneralInspectionTask task,
+                                                             List<GeneralInspectionRectification> rectifications,
+                                                             SysUser user) {
+        EdgeInspectionRectificationSheetVO vo = new EdgeInspectionRectificationSheetVO();
+        vo.setTaskId(task.getId());
+        vo.setProjectId(task.getProjectId());
+        vo.setPointId(task.getPointId());
+        vo.setPointCode(task.getPointCode());
+        vo.setPointName(task.getPointName());
+        vo.setPointTypeCode(task.getPointTypeCode());
+        vo.setPointTypeName(task.getPointTypeName());
+        vo.setBuildingName(task.getBuildingName());
+        vo.setFloorName(task.getFloorName());
+        vo.setLocationDesc(task.getLocationDesc());
+        vo.setOccurrenceDate(task.getOccurrenceDate());
+        vo.setStatus(sheetStatus(rectifications));
+        GeneralInspectionRectification representative = rectifications.get(0);
+        vo.setReviewComment(rectifications.stream()
+                .map(GeneralInspectionRectification::getReviewComment)
+                .filter(StringUtils::hasText)
+                .findFirst().orElse(null));
+        vo.setAssigneeId(representative.getAssigneeId());
+        vo.setAssigneeName(representative.getAssigneeName());
+        vo.setReviewerId(representative.getReviewerId());
+        vo.setReviewerName(representative.getReviewerName());
+        vo.setDeadline(rectifications.stream().map(GeneralInspectionRectification::getDeadline)
+                .filter(Objects::nonNull).min(LocalDate::compareTo).orElse(null));
+        vo.setVersion(task.getVersion());
+        vo.setOverdue(vo.getDeadline() != null && vo.getDeadline().isBefore(LocalDate.now())
+                && !"CLOSED".equals(vo.getStatus()));
+        vo.setCanRectify(rectifications.stream().allMatch(rectification ->
+                Objects.equals(rectification.getAssigneeId(), user.getId()))
+                && rectifications.stream().allMatch(rectification ->
+                Set.of("PENDING", "REJECTED").contains(rectification.getStatus()))
+                && permissionService.hasInspectionPermission(task.getProjectId(), user.getId(),
+                InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY));
+        vo.setCanReview(Objects.equals(task.getReviewerId(), user.getId())
+                && rectifications.stream().allMatch(rectification -> "COMPLETED".equals(rectification.getStatus()))
+                && permissionService.hasInspectionPermission(task.getProjectId(), user.getId(),
+                InspectionPermissionCodes.EDGE_INSPECTION_REVIEW));
+        vo.setCanAssign(permissionService.canManage(task.getProjectId(), user));
+        Set<Long> taskItemIds = rectifications.stream()
+                .map(GeneralInspectionRectification::getTaskItemId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, GeneralInspectionTaskItem> taskItems = taskItemIds.isEmpty() ? Map.of()
+                : taskItemMapper.selectBatchIds(taskItemIds).stream()
+                .collect(Collectors.toMap(GeneralInspectionTaskItem::getId, Function.identity()));
+        vo.setItems(rectifications.stream().map(rectification -> {
+            EdgeInspectionRectificationSheetVO.Item item = new EdgeInspectionRectificationSheetVO.Item();
+            item.setRectificationId(rectification.getId());
+            item.setTaskItemId(rectification.getTaskItemId());
+            item.setItemName(rectification.getItemName());
+            item.setProblemDesc(rectification.getProblemDesc());
+            item.setRequirement(rectification.getRequirement());
+            GeneralInspectionTaskItem taskItem = taskItems.get(rectification.getTaskItemId());
+            item.setEvidencePhotoFileIds(taskItem == null ? List.of() : parseIds(taskItem.getPhotoFileIds()));
+            item.setStatus(rectification.getStatus());
+            item.setFeedback(rectification.getFeedback());
+            item.setPhotoFileIds(parseIds(rectification.getRectificationPhotoFileIds()));
+            item.setCompletedTime(rectification.getCompletedTime());
+            item.setReviewComment(rectification.getReviewComment());
+            item.setReviewTime(rectification.getReviewTime());
+            item.setRejectCount(rectification.getRejectCount());
+            item.setVersion(rectification.getVersion());
+            return item;
+        }).toList());
+        return vo;
+    }
+
+    private String sheetStatus(List<GeneralInspectionRectification> rectifications) {
+        Set<String> states = rectifications.stream().map(GeneralInspectionRectification::getStatus)
+                .collect(Collectors.toSet());
+        if (!states.isEmpty() && states.stream().allMatch("CLOSED"::equals)) return "CLOSED";
+        if (states.contains("UNASSIGNED")) return "UNASSIGNED";
+        if (states.contains("REJECTED")) return "REJECTED";
+        if (!states.isEmpty() && states.stream().allMatch("COMPLETED"::equals)) return "COMPLETED";
+        return "PENDING";
+    }
+
+    private boolean isEdgeTask(GeneralInspectionTask task) {
+        return task != null && StringUtils.hasText(task.getPointTypeCode());
+    }
+
     private Submission validateSubmission(GeneralInspectionTask task, List<GeneralInspectionTaskItem> items,
                                             GeneralInspectionTemplateVersion templateVersion,
                                             List<Long> overallPhotos, String remark,
@@ -516,16 +887,12 @@ public class GeneralInspectionTaskService {
         for (GeneralInspectionTaskItem item : items) {
             GeneralInspectionTaskSubmitRequest.ItemResult result = resultMap.get(item.getId());
             String normalized = result.getResult() == null ? "" : result.getResult().trim().toUpperCase();
-            if (!RESULTS.contains(normalized)) throw new BusinessException("检查结果仅支持正常、异常或不适用");
-            if ("NA".equals(normalized) && !Integer.valueOf(1).equals(item.getAllowNa())) throw new BusinessException(item.getItemName() + "不允许选择不适用");
-            if ("NA".equals(normalized) && !StringUtils.hasText(result.getDescription())) throw new BusinessException(item.getItemName() + "选择不适用时必须说明原因");
-            if ("NORMAL".equals(normalized) && Integer.valueOf(1).equals(item.getNormalDescriptionRequired())
-                    && !StringUtils.hasText(result.getDescription())) throw new BusinessException(item.getItemName() + "正常结果必须填写说明");
-            if ("ABNORMAL".equals(normalized) && Integer.valueOf(1).equals(item.getAbnormalDescriptionRequired())
-                    && !StringUtils.hasText(result.getDescription())) throw new BusinessException(item.getItemName() + "异常结果必须填写说明");
+            if (!RESULTS.contains(normalized)) throw new BusinessException("临边巡检结果仅支持正常或异常");
+            if ("ABNORMAL".equals(normalized) && !StringUtils.hasText(result.getDescription())) {
+                throw new BusinessException(item.getItemName() + "异常时必须填写说明");
+            }
             List<Long> photos = distinctIds(result.getPhotoFileIds(), item.getItemName() + "照片");
-            int min = "NORMAL".equals(normalized) ? value(item.getNormalPhotoMin(), 0)
-                    : "ABNORMAL".equals(normalized) ? value(item.getAbnormalPhotoMin(), 0) : 0;
+            int min = "ABNORMAL".equals(normalized) ? 1 : 0;
             if (photos.size() < min || photos.size() > value(item.getPhotoMax(), 9)) throw new BusinessException(item.getItemName() + "照片数量不符合模板规则");
             allPhotos.addAll(photos);
             if ("ABNORMAL".equals(normalized)) abnormalCount++;
@@ -569,10 +936,9 @@ public class GeneralInspectionTaskService {
         for (GeneralInspectionTaskItem item : items) {
             if (!"ABNORMAL".equals(item.getResult())) continue;
             GeneralInspectionTaskSubmitRequest.ItemResult result = resultMap.get(item.getId());
-            Long candidateId = result.getRectifierId() != null ? result.getRectifierId() : task.getDefaultRectifierId();
+            Long candidateId = task.getDefaultRectifierId();
             SysUser assignee = validRectifier(task.getProjectId(), candidateId);
-            LocalDate deadline = result.getDeadline() != null ? result.getDeadline()
-                    : LocalDate.now().plusDays(value(task.getDefaultRectificationDays(), 3));
+            LocalDate deadline = LocalDate.now().plusDays(value(task.getDefaultRectificationDays(), 3));
             if (deadline.isBefore(LocalDate.now())) throw new BusinessException("整改期限不能早于今天");
             GeneralInspectionRectification rectification = new GeneralInspectionRectification();
             rectification.setProjectId(task.getProjectId());
@@ -582,7 +948,7 @@ public class GeneralInspectionTaskService {
             rectification.setPointName(task.getPointName());
             rectification.setItemName(item.getItemName());
             rectification.setProblemDesc(item.getDescription());
-            rectification.setRequirement(trim(result.getRequirement(), 1000));
+            rectification.setRequirement(null);
             rectification.setAssigneeId(assignee == null ? null : assignee.getId());
             rectification.setAssigneeName(assignee == null ? null : userName(assignee));
             rectification.setDeadline(deadline);
@@ -625,7 +991,7 @@ public class GeneralInspectionTaskService {
 
     private void bindTaskFiles(GeneralInspectionTask task, List<Long> fileIds, SysUser user) {
         fileResourceService.validateAndBind(user, task.getProjectId(), fileIds,
-                "INSPECTION_CUSTOM_TASK_PENDING", "INSPECTION_CUSTOM_TASK", task.getId());
+                "EDGE_INSPECTION_TASK_PENDING", "EDGE_INSPECTION_TASK", task.getId());
     }
 
     private GeneralInspectionTaskVO toTaskVO(GeneralInspectionTask task, boolean includeItems, SysUser user) {
@@ -640,6 +1006,10 @@ public class GeneralInspectionTaskService {
         vo.setTemplateName(task.getTemplateName());
         vo.setPointCode(task.getPointCode());
         vo.setPointName(task.getPointName());
+        vo.setPointTypeCode(task.getPointTypeCode());
+        vo.setPointTypeName(task.getPointTypeName());
+        vo.setBuildingName(task.getBuildingName());
+        vo.setFloorName(task.getFloorName());
         vo.setLocationDesc(task.getLocationDesc());
         vo.setSlotCode(task.getSlotCode());
         vo.setSlotName(task.getSlotName());
@@ -658,9 +1028,10 @@ public class GeneralInspectionTaskService {
         vo.setOverdue(overdue);
         vo.setLateSubmission(task.getSubmittedTime() != null && Integer.valueOf(0).equals(task.getOnTime()));
         vo.setDisplayStatus(displayStatus(task, overdue));
-        vo.setCanExecute("PENDING".equals(task.getStatus()) && !now.isBefore(task.getAvailableTime())
-                && Objects.equals(task.getAssigneeId(), user.getId()));
-        vo.setCanManage(permissionService.canManage(task.getProjectId(), user));
+        vo.setCanExecute(canExecuteTask(task, user, now));
+        boolean canManage = permissionService.canManage(task.getProjectId(), user);
+        vo.setCanManage(canManage);
+        vo.setCanReassign(canReassignTask(task.getStatus(), canManage));
         vo.setSubmittedTime(task.getSubmittedTime());
         vo.setOverallPhotoMin(value(task.getOverallPhotoMin(), 0));
         vo.setOverallPhotoMax(value(task.getOverallPhotoMax(), 9));
@@ -706,6 +1077,10 @@ public class GeneralInspectionTaskService {
         task.setTemplateName(source.getTemplateName());
         task.setPointCode(source.getPointCode());
         task.setPointName(source.getPointName());
+        task.setPointTypeCode(source.getPointTypeCode());
+        task.setPointTypeName(source.getPointTypeName());
+        task.setBuildingName(source.getBuildingName());
+        task.setFloorName(source.getFloorName());
         task.setLocationDesc(source.getLocationDesc());
         task.setSlotCode(source.getSlotCode());
         task.setSlotName(source.getSlotName());
@@ -768,8 +1143,12 @@ public class GeneralInspectionTaskService {
     }
 
     private boolean canReadTask(GeneralInspectionTask task, SysUser user, boolean alreadyMine) {
-        if (alreadyMine || Objects.equals(task.getAssigneeId(), user.getId()) || Objects.equals(task.getReviewerId(), user.getId())
-                || csvContains(task.getBackupReviewerIds(), user.getId())) return true;
+        if ((alreadyMine || Objects.equals(task.getAssigneeId(), user.getId()))
+                && permissionService.hasInspectionPermission(task.getProjectId(), user.getId(),
+                InspectionPermissionCodes.EDGE_INSPECTION_SUBMIT)) return true;
+        if (Objects.equals(task.getReviewerId(), user.getId())
+                && permissionService.hasInspectionPermission(task.getProjectId(), user.getId(),
+                InspectionPermissionCodes.EDGE_INSPECTION_REVIEW)) return true;
         try {
             permissionService.requireRecordView(task.getProjectId(), user);
             return true;
@@ -806,24 +1185,25 @@ public class GeneralInspectionTaskService {
 
     private SysUser validRectifier(Long projectId, Long userId) {
         if (userId == null || !permissionService.hasActiveProjectAccess(projectId, userId)
-                || !permissionService.hasSystemPermission(projectId, userId, SystemPermissionCodes.INSPECTION_RECTIFY)) return null;
+                || !permissionService.hasInspectionPermission(projectId, userId,
+                InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY)) return null;
         SysUser user = userMapper.selectById(userId);
         return active(user) ? user : null;
     }
 
     private boolean validReviewer(Long projectId, Long userId) {
         if (userId == null || !permissionService.hasActiveProjectAccess(projectId, userId)
-                || !permissionService.hasSystemPermission(projectId, userId, SystemPermissionCodes.INSPECTION_REVIEW)) return false;
+                || !permissionService.hasInspectionPermission(projectId, userId,
+                InspectionPermissionCodes.EDGE_INSPECTION_REVIEW)) return false;
         return active(userMapper.selectById(userId));
     }
 
-    private SysUser requireActivePermissionUser(Long projectId, Long userId, String permissionCode,
-                                                 boolean requireCustomSubmit, String label) {
+    private SysUser requireActivePermissionUser(Long projectId, Long userId, String permissionCode, String label) {
         if (userId == null || !permissionService.hasActiveProjectAccess(projectId, userId)) throw new BusinessException(label + "必须是项目有效成员");
         SysUser user = userMapper.selectById(userId);
-        if (!active(user) || !permissionService.hasSystemPermission(projectId, userId, permissionCode)
-                || requireCustomSubmit && !permissionService.hasInspectionPermission(projectId, userId,
-                InspectionPermissionCodes.CUSTOM_INSPECTION_SUBMIT)) throw new BusinessException(label + "账号或权限无效");
+        if (!active(user) || !permissionService.hasInspectionPermission(projectId, userId, permissionCode)) {
+            throw new BusinessException(label + "账号或权限无效");
+        }
         return user;
     }
 
@@ -874,28 +1254,28 @@ public class GeneralInspectionTaskService {
     private void notifyAfterSubmit(GeneralInspectionTask task) {
         if (task.getAbnormalCount() == null || task.getAbnormalCount() == 0) return;
         if (task.getReviewerId() != null) {
-            notificationService.notify(task.getReviewerId(), task.getProjectId(), "GENERAL_INSPECTION_TASK",
-                    task.getId(), "ABNORMAL_SUBMITTED", "通用巡检发现异常",
+            notificationService.notify(task.getReviewerId(), task.getProjectId(), "EDGE_INSPECTION_TASK",
+                    task.getId(), "ABNORMAL_SUBMITTED", "临边巡检发现异常",
                     task.getPointName() + "有" + task.getAbnormalCount() + "项异常待整改闭环",
-                    "general-task-abnormal:" + task.getId(), "GENERAL_INSPECTION_TASK_DETAIL",
+                    "edge-task-abnormal:" + task.getId(), "EDGE_INSPECTION_TASK_DETAIL",
                     "{\"taskId\":" + task.getId() + "}");
         }
     }
 
     private void notifyRectifier(GeneralInspectionRectification rectification) {
         notificationService.notify(rectification.getAssigneeId(), rectification.getProjectId(),
-                "GENERAL_INSPECTION_RECTIFICATION", rectification.getId(), "RECTIFY_PENDING",
-                "通用巡检整改待处理", rectification.getPointName() + " · " + rectification.getItemName(),
-                "general-rectify:" + rectification.getId() + ":" + rectification.getVersion(),
-                "GENERAL_INSPECTION_RECTIFICATION_DETAIL", "{\"rectificationId\":" + rectification.getId() + "}");
+                "EDGE_INSPECTION_RECTIFICATION", rectification.getTaskId(), "RECTIFY_PENDING",
+                "临边巡检整改待处理", rectification.getPointName() + "存在异常项待整单整改",
+                "edge-rectify:" + rectification.getTaskId(),
+                "EDGE_INSPECTION_RECTIFICATION_DETAIL", "{\"taskId\":" + rectification.getTaskId() + "}");
     }
 
     private void notifyReviewer(GeneralInspectionRectification rectification) {
         notificationService.notify(rectification.getReviewerId(), rectification.getProjectId(),
-                "GENERAL_INSPECTION_RECTIFICATION", rectification.getId(), "REVIEW_PENDING",
-                "通用巡检整改待复查", rectification.getPointName() + " · " + rectification.getItemName(),
-                "general-review:" + rectification.getId() + ":" + rectification.getVersion(),
-                "GENERAL_INSPECTION_RECTIFICATION_DETAIL", "{\"rectificationId\":" + rectification.getId() + "}");
+                "EDGE_INSPECTION_REVIEW", rectification.getTaskId(), "REVIEW_PENDING",
+                "临边巡检整改待复查", rectification.getPointName() + "整改单待复查",
+                "edge-review:" + rectification.getTaskId() + ":" + rectification.getVersion(),
+                "EDGE_INSPECTION_RECTIFICATION_DETAIL", "{\"taskId\":" + rectification.getTaskId() + "}");
     }
 
     private void record(Long projectId, String businessType, Long businessId, String action, SysUser user,
@@ -912,13 +1292,35 @@ public class GeneralInspectionTaskService {
         log.setComment(comment);
         log.setBeforeJson(before);
         log.setAfterJson(after);
-        requireOne(actionLogMapper.insert(log), "通用巡检操作日志写入");
+        requireOne(actionLogMapper.insert(log), "临边巡检操作日志写入");
     }
 
     private Set<Long> collectExistingPhotoIds(GeneralInspectionTask task, List<GeneralInspectionTaskItem> items) {
         Set<Long> ids = new HashSet<>(parseIds(task.getOverallPhotoFileIds()));
         items.forEach(item -> ids.addAll(parseIds(item.getPhotoFileIds())));
         return ids;
+    }
+
+    private Map<String, Object> edgeReassignmentSnapshot(GeneralInspectionTask task,
+                                                         List<GeneralInspectionRectification> rectifications) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("taskId", task.getId());
+        result.put("defaultRectifierId", task.getDefaultRectifierId());
+        result.put("defaultRectifierName", task.getDefaultRectifierName());
+        result.put("reviewerId", task.getReviewerId());
+        result.put("reviewerName", task.getReviewerName());
+        result.put("items", rectifications.stream().map(rectification -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("rectificationId", rectification.getId());
+            item.put("assigneeId", rectification.getAssigneeId());
+            item.put("assigneeName", rectification.getAssigneeName());
+            item.put("reviewerId", rectification.getReviewerId());
+            item.put("reviewerName", rectification.getReviewerName());
+            item.put("deadline", rectification.getDeadline());
+            item.put("status", rectification.getStatus());
+            return item;
+        }).toList());
+        return result;
     }
 
     private List<Long> distinctIds(List<Long> ids, String label) {
@@ -947,10 +1349,34 @@ public class GeneralInspectionTaskService {
         return ids.stream().filter(Objects::nonNull).distinct().map(String::valueOf).collect(Collectors.joining(","));
     }
 
-    private String displayStatus(GeneralInspectionTask task, boolean overdue) {
+    static String displayStatus(GeneralInspectionTask task, boolean overdue) {
         if (overdue) return "OVERDUE_MISSED";
-        if (task.getSubmittedTime() != null && Integer.valueOf(0).equals(task.getOnTime())) return "LATE_COMPLETED";
+        if ("COMPLETED".equals(task.getStatus())
+                && task.getSubmittedTime() != null
+                && Integer.valueOf(0).equals(task.getOnTime())) {
+            return "LATE_COMPLETED";
+        }
         return task.getStatus();
+    }
+
+    static void requireTaskReassignable(String status) {
+        if (!"PENDING".equals(status)) {
+            throw BusinessException.of(409, "仅待巡检任务可改派；整改人或复查人请在整改单中改派");
+        }
+    }
+
+    static boolean canReassignTask(String status, boolean canManage) {
+        return canManage && "PENDING".equals(status);
+    }
+
+    boolean canExecuteTask(GeneralInspectionTask task, SysUser user, LocalDateTime now) {
+        return task != null && user != null && user.getId() != null
+                && "PENDING".equals(task.getStatus())
+                && task.getAvailableTime() != null
+                && !now.isBefore(task.getAvailableTime())
+                && Objects.equals(task.getAssigneeId(), user.getId())
+                && permissionService.hasInspectionPermission(task.getProjectId(), user.getId(),
+                InspectionPermissionCodes.EDGE_INSPECTION_SUBMIT);
     }
 
     private String appendCorrectionNote(String old, String reason) {
