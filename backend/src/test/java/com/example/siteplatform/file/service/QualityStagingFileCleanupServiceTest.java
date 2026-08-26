@@ -128,6 +128,52 @@ class QualityStagingFileCleanupServiceTest {
         verify(fileMapper, never()).purgeClaimedQualityStagingFile(41L, cutoff);
     }
 
+    @Test
+    void weeklyPendingUploadExpiresButBoundWeeklyDraftSurvives() {
+        LocalDateTime cutoff = LocalDateTime.of(2026, 8, 26, 10, 0);
+        FileResource pending = file(
+                51L, "QUALITY_WEEKLY_ITEM_PENDING", null, cutoff.minusHours(2), 0);
+        FileResource boundDraft = file(
+                52L, "QUALITY_WEEKLY_DRAFT_ITEM", 88L, cutoff.minusDays(30), 0);
+        when(fileMapper.selectExpiredQualityStagingFiles(cutoff, 200))
+                .thenReturn(List.of(pending, boundDraft));
+        when(fileMapper.claimExpiredQualityStagingFile(51L, cutoff)).thenReturn(1);
+        when(fileMapper.purgeClaimedQualityStagingFile(51L, cutoff)).thenReturn(1);
+
+        QualityStagingFileCleanupService.CleanupResult result = service.cleanupExpired(cutoff, 200);
+
+        assertEquals(new QualityStagingFileCleanupService.CleanupResult(2, 1, 0, 1), result);
+        verify(storageManager).delete(pending);
+        verify(storageManager, never()).delete(boundDraft);
+    }
+
+    @Test
+    void recoversStalePendingDeleteAndMarksPhysicalFailureForAdminRetry() {
+        LocalDateTime cutoff = LocalDateTime.of(2026, 8, 26, 10, 0);
+        FileResource succeeded = file(
+                61L, "QUALITY_WEEKLY_DRAFT_ITEM", 88L, cutoff.minusDays(2), 1);
+        succeeded.setStatus("PENDING_DELETE");
+        succeeded.setUpdateTime(cutoff.minusMinutes(1));
+        FileResource failed = file(
+                62L, "QUALITY_WEEKLY_DRAFT", 77L, cutoff.minusDays(2), 1);
+        failed.setStatus("PENDING_DELETE");
+        failed.setUpdateTime(cutoff.minusMinutes(2));
+        when(fileMapper.selectStalePendingDeleteFiles(cutoff, 200))
+                .thenReturn(List.of(succeeded, failed));
+        when(fileMapper.purgeStalePendingDeleteFile(61L, cutoff)).thenReturn(1);
+        doThrow(new RuntimeException("storage unavailable"))
+                .when(storageManager).delete(failed);
+        when(fileMapper.markPhysicalDeleteFailed(62L)).thenReturn(1);
+
+        QualityStagingFileCleanupService.CleanupResult result =
+                service.cleanupPendingDeletes(cutoff, 200);
+
+        assertEquals(new QualityStagingFileCleanupService.CleanupResult(2, 1, 1, 0), result);
+        verify(storageManager).delete(succeeded);
+        verify(fileMapper).purgeStalePendingDeleteFile(61L, cutoff);
+        verify(fileMapper).markPhysicalDeleteFailed(62L);
+    }
+
     private FileResource file(Long id, String businessType, Long businessId,
                               LocalDateTime createTime, Integer deleted) {
         FileResource file = new FileResource();

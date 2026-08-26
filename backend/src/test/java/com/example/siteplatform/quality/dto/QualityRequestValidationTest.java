@@ -1,6 +1,7 @@
 package com.example.siteplatform.quality.dto;
 
 import com.example.siteplatform.quality.controller.QualityIssueController;
+import com.example.siteplatform.quality.controller.QualityWeeklyInspectionController;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Valid;
 import jakarta.validation.Validation;
@@ -103,19 +104,59 @@ class QualityRequestValidationTest {
     }
 
     @Test
-    void everyQualityWriteEndpointEnablesRequestBodyValidation() throws NoSuchMethodException {
-        assertValidatedBody("createIssue", QualityIssueCreateRequest.class);
+    void everyActiveQualityWriteEndpointEnablesRequestBodyValidation() throws NoSuchMethodException {
         assertValidatedBody("submitRectification", QualityRectificationRequest.class);
         assertValidatedBody("reviewIssue", QualityReviewRequest.class);
         assertValidatedBody("assignIssue", QualityAssignRequest.class);
         assertValidatedBody("voidIssue", QualityVoidRequest.class);
+        assertWeeklyValidatedBody("createOrRestore", QualityWeeklyDraftCreateRequest.class, false);
+        assertWeeklyValidatedBody("saveDraft", QualityWeeklyDraftSaveRequest.class, true);
+        assertWeeklyValidatedBody("submit", QualityWeeklyActionRequest.class, true);
+        assertWeeklyValidatedBody("discard", QualityWeeklyActionRequest.class, true);
+    }
+
+    @Test
+    void weeklyDraftRequestsEnforceOuterBoundsWhileAllowingIncompleteItemFields() {
+        QualityWeeklyDraftCreateRequest create = new QualityWeeklyDraftCreateRequest();
+        create.setProjectId(-1L);
+
+        QualityWeeklyDraftItemRequest item = new QualityWeeklyDraftItemRequest();
+        item.setItemKey("x".repeat(101));
+        item.setItemOrder(51);
+        item.setTitle("x".repeat(201));
+        item.setBeforePhotoFileIds(List.of(0L));
+        QualityWeeklyDraftSaveRequest save = new QualityWeeklyDraftSaveRequest();
+        save.setExpectedVersion(-1);
+        save.setConclusion("x".repeat(1001));
+        save.setItems(List.of(item));
+
+        Set<String> createPaths = paths(validator.validate(create));
+        Set<String> savePaths = paths(validator.validate(save));
+
+        assertTrue(createPaths.containsAll(Set.of("projectId", "weekStart")));
+        assertTrue(savePaths.containsAll(Set.of("expectedVersion", "conclusion")));
+        assertTrue(savePaths.stream().anyMatch(path -> path.startsWith("items[0].itemKey")));
+        assertTrue(savePaths.stream().anyMatch(path -> path.startsWith("items[0].itemOrder")));
+        assertTrue(savePaths.stream().anyMatch(path -> path.startsWith("items[0].title")));
+        assertTrue(savePaths.stream().anyMatch(path -> path.startsWith("items[0].beforePhotoFileIds[0]")));
     }
 
     private void assertValidatedBody(String methodName, Class<?> requestType) throws NoSuchMethodException {
-        Class<?>[] parameterTypes = "createIssue".equals(methodName)
-                ? new Class<?>[]{requestType, String.class}
-                : new Class<?>[]{Long.class, requestType, String.class};
+        Class<?>[] parameterTypes = new Class<?>[]{Long.class, requestType, String.class};
         Method method = QualityIssueController.class.getDeclaredMethod(methodName, parameterTypes);
+        Parameter requestParameter = java.util.Arrays.stream(method.getParameters())
+                .filter(parameter -> parameter.getType().equals(requestType))
+                .findFirst()
+                .orElseThrow();
+        assertTrue(requestParameter.isAnnotationPresent(Valid.class));
+    }
+
+    private void assertWeeklyValidatedBody(String methodName, Class<?> requestType, boolean hasId)
+            throws NoSuchMethodException {
+        Class<?>[] parameterTypes = hasId
+                ? new Class<?>[]{Long.class, requestType, String.class}
+                : new Class<?>[]{requestType, String.class};
+        Method method = QualityWeeklyInspectionController.class.getDeclaredMethod(methodName, parameterTypes);
         Parameter requestParameter = java.util.Arrays.stream(method.getParameters())
                 .filter(parameter -> parameter.getType().equals(requestType))
                 .findFirst()

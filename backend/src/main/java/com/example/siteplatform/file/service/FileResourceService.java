@@ -23,6 +23,11 @@ public class FileResourceService {
     private static final String BUSINESS_QUALITY_PENDING = "QUALITY_PENDING";
     private static final String BUSINESS_QUALITY_RECTIFICATION_PENDING = "QUALITY_RECTIFICATION_PENDING";
     private static final String BUSINESS_QUALITY_REVIEW_PENDING = "QUALITY_REVIEW_PENDING";
+    private static final String BUSINESS_QUALITY_WEEKLY_PENDING = "QUALITY_WEEKLY_PENDING";
+    private static final String BUSINESS_QUALITY_WEEKLY_ITEM_PENDING = "QUALITY_WEEKLY_ITEM_PENDING";
+    private static final String BUSINESS_QUALITY_WEEKLY_DRAFT = "QUALITY_WEEKLY_DRAFT";
+    private static final String BUSINESS_QUALITY_WEEKLY_DRAFT_ITEM = "QUALITY_WEEKLY_DRAFT_ITEM";
+    private static final String BUSINESS_QUALITY_WEEKLY_INSPECTION = "QUALITY_WEEKLY_INSPECTION";
     private static final String BUSINESS_QUALITY_ISSUE = "QUALITY_ISSUE";
     private static final String BUSINESS_QUALITY_RECTIFICATION = "QUALITY_RECTIFICATION";
     private static final String BUSINESS_QUALITY_REVIEW = "QUALITY_REVIEW";
@@ -33,12 +38,23 @@ public class FileResourceService {
     private static final Set<String> QUALITY_STAGING_TYPES = Set.of(
             BUSINESS_QUALITY_PENDING,
             BUSINESS_QUALITY_RECTIFICATION_PENDING,
-            BUSINESS_QUALITY_REVIEW_PENDING
+            BUSINESS_QUALITY_REVIEW_PENDING,
+            BUSINESS_QUALITY_WEEKLY_PENDING,
+            BUSINESS_QUALITY_WEEKLY_ITEM_PENDING
+    );
+    private static final Set<String> QUALITY_DRAFT_TYPES = Set.of(
+            BUSINESS_QUALITY_WEEKLY_DRAFT,
+            BUSINESS_QUALITY_WEEKLY_DRAFT_ITEM
+    );
+    private static final Set<String> QUALITY_WEEKLY_STAGING_TYPES = Set.of(
+            BUSINESS_QUALITY_WEEKLY_PENDING,
+            BUSINESS_QUALITY_WEEKLY_ITEM_PENDING
     );
     private static final Set<String> QUALITY_FINAL_TYPES = Set.of(
             BUSINESS_QUALITY_ISSUE,
             BUSINESS_QUALITY_RECTIFICATION,
-            BUSINESS_QUALITY_REVIEW
+            BUSINESS_QUALITY_REVIEW,
+            BUSINESS_QUALITY_WEEKLY_INSPECTION
     );
 
     private final FileResourceMapper fileMapper;
@@ -74,6 +90,12 @@ public class FileResourceService {
         if (BUSINESS_PROJECT_ROUTE_PENDING.equals(businessType)
                 && !permissionService.isPlatformAdmin(currentUser.getId())) {
             throw BusinessException.forbidden("无项目到访路线图暂存文件访问权限");
+        }
+        if (QUALITY_WEEKLY_STAGING_TYPES.contains(businessType)
+                && file.getBusinessId() == null
+                && !permissionService.isPlatformAdmin(currentUser.getId())
+                && !Objects.equals(file.getUploaderId(), currentUser.getId())) {
+            throw BusinessException.forbidden("无其他人员未保存周检照片访问权限");
         }
         permissionService.checkProjectPermission(currentUser.getId(), file.getProjectId());
         requireBusinessRead(currentUser, file.getProjectId(), file.getBusinessType());
@@ -155,6 +177,11 @@ public class FileResourceService {
         String normalized = normalizeBusinessType(businessType);
         if (normalized.startsWith("QUALITY_")) {
             permissionService.requireSystemPermission(currentUser.getId(), projectId, SystemPermissionCodes.QUALITY_VIEW);
+            if (QUALITY_DRAFT_TYPES.contains(normalized)
+                    || QUALITY_WEEKLY_STAGING_TYPES.contains(normalized)) {
+                permissionService.requireSystemPermission(
+                        currentUser.getId(), projectId, SystemPermissionCodes.QUALITY_MANAGE);
+            }
         } else if (normalized.startsWith("INSPECTION_")) {
             permissionService.requireSystemPermission(currentUser.getId(), projectId, SystemPermissionCodes.INSPECTION_VIEW);
         }
@@ -331,7 +358,12 @@ public class FileResourceService {
 
     private String qualityWritePermission(String businessType) {
         return switch (businessType) {
-            case BUSINESS_QUALITY_DOCUMENT, BUSINESS_QUALITY_PENDING -> SystemPermissionCodes.QUALITY_MANAGE;
+            case BUSINESS_QUALITY_DOCUMENT,
+                 BUSINESS_QUALITY_PENDING,
+                 BUSINESS_QUALITY_WEEKLY_PENDING,
+                 BUSINESS_QUALITY_WEEKLY_ITEM_PENDING,
+                 BUSINESS_QUALITY_WEEKLY_DRAFT,
+                 BUSINESS_QUALITY_WEEKLY_DRAFT_ITEM -> SystemPermissionCodes.QUALITY_MANAGE;
             case BUSINESS_QUALITY_RECTIFICATION_PENDING -> SystemPermissionCodes.QUALITY_RECTIFY;
             case BUSINESS_QUALITY_REVIEW_PENDING -> SystemPermissionCodes.QUALITY_REVIEW;
             default -> null;

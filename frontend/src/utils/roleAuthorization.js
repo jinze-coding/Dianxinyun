@@ -32,11 +32,11 @@ export const BUSINESS_MENU_DEFINITIONS = [
   },
   {
     moduleCode: 'QUALITY',
-    label: '质量管理',
+    label: '质量周检',
     description: 'Web 与小程序共用模块开关',
     backingMenuCodes: ['WEB_QUALITY', 'MINI_QUALITY'],
     pages: [
-      { menuCode: 'QUALITY_ISSUES', label: '质量问题' },
+      { menuCode: 'QUALITY_ISSUES', label: '周检与整改闭环' },
       { menuCode: 'QUALITY_DOCUMENTS', label: '质量资料' },
     ],
   },
@@ -78,10 +78,10 @@ const ACTION_DEFINITIONS = [
   { key: 'inspection.rectify', label: '提交分配给自己的巡检整改', group: '巡检管理 · 整改闭环', menuCodes: ['INSPECTION_RECTIFICATIONS'], primaryCodes: ['inspection.rectify'], codes: ['inspection.rectify', 'inspection.view'] },
   { key: 'inspection.review', label: '复查、退回和改派巡检整改', group: '巡检管理 · 整改闭环', menuCodes: ['INSPECTION_RECTIFICATIONS'], primaryCodes: ['inspection.review'], codes: ['inspection.review', 'inspection.view'] },
 
-  { key: 'quality.view', label: '查看质量问题和质量资料', group: '质量管理 · 通用操作', menuCodes: ['QUALITY_ISSUES', 'QUALITY_DOCUMENTS'], primaryCodes: ['quality.view'], codes: ['quality.view'] },
-  { key: 'quality.manage', label: '发起、改派及管理质量资料', group: '质量管理 · 通用操作', menuCodes: ['QUALITY_ISSUES', 'QUALITY_DOCUMENTS'], primaryCodes: ['quality.manage'], codes: ['quality.manage', 'quality.view'], requiresActions: ['quality.view'] },
-  { key: 'quality.rectify', label: '提交质量整改', group: '质量管理 · 质量问题', menuCodes: ['QUALITY_ISSUES'], primaryCodes: ['quality.rectify'], codes: ['quality.rectify', 'quality.view'], requiresActions: ['quality.view'] },
-  { key: 'quality.review', label: '复查质量问题', group: '质量管理 · 质量问题', menuCodes: ['QUALITY_ISSUES'], primaryCodes: ['quality.review'], codes: ['quality.review', 'quality.view'], requiresActions: ['quality.view'] },
+  { key: 'quality.view', label: '查看质量周检、问题和质量资料', group: '质量周检 · 通用操作', menuCodes: ['QUALITY_ISSUES', 'QUALITY_DOCUMENTS'], primaryCodes: ['quality.view'], codes: ['quality.view'] },
+  { key: 'quality.manage', label: '编辑提交周检、改派及管理质量资料', group: '质量周检 · 通用操作', menuCodes: ['QUALITY_ISSUES', 'QUALITY_DOCUMENTS'], primaryCodes: ['quality.manage'], codes: ['quality.manage', 'quality.view'], requiresActions: ['quality.view'] },
+  { key: 'quality.rectify', label: '提交质量整改', group: '质量周检 · 整改闭环', menuCodes: ['QUALITY_ISSUES'], primaryCodes: ['quality.rectify'], codes: ['quality.rectify', 'quality.view'], requiresActions: ['quality.view'] },
+  { key: 'quality.review', label: '复查质量问题', group: '质量周检 · 整改闭环', menuCodes: ['QUALITY_ISSUES'], primaryCodes: ['quality.review'], codes: ['quality.review', 'quality.view'], requiresActions: ['quality.view'] },
 ];
 
 const normalize = (value) => String(value || '').trim().toUpperCase();

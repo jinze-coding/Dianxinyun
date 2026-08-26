@@ -227,7 +227,11 @@ public class AdministrativeDeletionService {
         add(impact, "boxes", "电箱与二维码", count("electric_box", "project_id", id));
         add(impact, "inspections", "巡检与整改", count("inspection_record", "project_id", id)
                 + count("inspection_rectification", "project_id", id));
-        add(impact, "quality", "质量问题与日志", count("quality_issue", "project_id", id));
+        add(impact, "quality", "质量周检、问题与日志",
+                count("quality_weekly_inspection", "project_id", id)
+                        + count("quality_weekly_inspection_draft_item", "project_id", id)
+                        + count("quality_issue", "project_id", id)
+                        + count("quality_issue_log", "project_id", id));
         add(impact, "sealWorkflow", "用印申请、印章、审批、抄送与通知", sealProjectDataCount(id));
         long submittedSealApplications = submittedSealApplicationCount(id);
         add(impact, "preservedSealHistory", "必须保留的已提交用印申请与审批台账", submittedSealApplications);
@@ -403,9 +407,13 @@ public class AdministrativeDeletionService {
 
     private void qualityIssueImpact(DeletionImpactVO impact, Long id) {
         Map<String, Object> issue = requireRow(
-                "SELECT id, project_id, issue_no FROM quality_issue WHERE id = ?", id, "质量问题不存在");
+                "SELECT id, project_id, issue_no, weekly_inspection_id FROM quality_issue WHERE id = ?",
+                id, "质量问题不存在");
         impact.setTargetName(text(issue.get("issue_no")));
         add(impact, "logs", "质量操作留痕", count("quality_issue_log", "issue_id", id));
+        if (issue.get("weekly_inspection_id") != null) {
+            add(impact, "weeklyInspection", "保留所属周检留档", 1);
+        }
         Map<String, Object> stats = fileStats("""
                 SELECT COUNT(*) file_count, COALESCE(SUM(file_size), 0) file_bytes
                 FROM file_resource
@@ -538,7 +546,8 @@ public class AdministrativeDeletionService {
                 + "(SELECT id FROM inspection_record WHERE project_id = ?)", projectId);
 
         for (String table : List.of(
-                "quality_issue_log", "quality_issue", "inspection_rectification", "inspection_record",
+                "quality_issue_log", "quality_issue", "quality_weekly_inspection_draft_item",
+                "quality_weekly_inspection", "inspection_rectification", "inspection_record",
                 "electric_box_inspection_scope", "electric_box_qr_log", "project_inspection_setting",
                 "project_document", "document_folder", "person_certificate", "person_entry_exit_log",
                 "safety_education_batch", "temporary_person", "video_access_log", "video_layout_config",

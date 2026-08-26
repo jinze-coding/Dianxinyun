@@ -197,6 +197,54 @@ class FileResourceServiceTest {
     }
 
     @Test
+    void authorizesWeeklyDraftStagingUploadsWithQualityManagePermission() {
+        assertEquals("QUALITY_WEEKLY_PENDING", service.authorizeUpload(
+                user(9L), 2L, " quality_weekly_pending ", null));
+        assertEquals("QUALITY_WEEKLY_ITEM_PENDING", service.authorizeUpload(
+                user(9L), 2L, "quality_weekly_item_pending", null));
+
+        verify(permissionService, org.mockito.Mockito.times(2))
+                .requireSystemPermission(9L, 2L, SystemPermissionCodes.QUALITY_MANAGE);
+    }
+
+    @Test
+    void sharedWeeklyDraftAttachmentRequiresQualityManageToRead() {
+        FileResource file = file(11L, 2L, 8L, "QUALITY_WEEKLY_DRAFT_ITEM", 42L);
+
+        service.checkRead(user(9L), file);
+
+        verify(permissionService).requireSystemPermission(9L, 2L, SystemPermissionCodes.QUALITY_VIEW);
+        verify(permissionService).requireSystemPermission(9L, 2L, SystemPermissionCodes.QUALITY_MANAGE);
+    }
+
+    @Test
+    void weeklyPendingAttachmentRequiresQualityManageEvenForUploader() {
+        FileResource file = file(11L, 2L, 9L, "QUALITY_WEEKLY_ITEM_PENDING", null);
+        doThrow(BusinessException.forbidden("denied"))
+                .when(permissionService)
+                .requireSystemPermission(9L, 2L, SystemPermissionCodes.QUALITY_MANAGE);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.checkRead(user(9L), file));
+
+        assertEquals(403, exception.getCode());
+        verify(permissionService).requireSystemPermission(9L, 2L, SystemPermissionCodes.QUALITY_VIEW);
+        verify(permissionService).requireSystemPermission(9L, 2L, SystemPermissionCodes.QUALITY_MANAGE);
+    }
+
+    @Test
+    void weeklyPendingAttachmentIsPrivateUntilSavedIntoSharedDraft() {
+        FileResource file = file(11L, 2L, 8L, "QUALITY_WEEKLY_PENDING", null);
+        when(permissionService.isPlatformAdmin(9L)).thenReturn(false);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.checkRead(user(9L), file));
+
+        assertEquals(403, exception.getCode());
+        verify(permissionService, never()).checkProjectPermission(9L, 2L);
+    }
+
+    @Test
     void directUploadCannotCreateFinalQualityAttachment() {
         assertThrows(BusinessException.class, () -> service.authorizeUpload(
                 user(9L), 2L, "QUALITY_ISSUE", null));

@@ -15,7 +15,7 @@ require_command() {
   }
 }
 
-for command in curl jq cupsfilter base64; do
+for command in curl jq cupsfilter base64 python3; do
   require_command "$command"
 done
 
@@ -35,6 +35,18 @@ post_json() {
   local label="$4"
   local response
   response="$(curl -sS -H "Authorization: Bearer $token" \
+    -H 'Content-Type: application/json' -d "$payload" "$API_BASE$path")"
+  expect_success "$response" "$label"
+  printf '%s' "$response"
+}
+
+put_json() {
+  local token="$1"
+  local path="$2"
+  local payload="$3"
+  local label="$4"
+  local response
+  response="$(curl -sS -X PUT -H "Authorization: Bearer $token" \
     -H 'Content-Type: application/json' -d "$payload" "$API_BASE$path")"
   expect_success "$response" "$label"
   printf '%s' "$response"
@@ -133,24 +145,43 @@ INSPECTION_PAYLOAD="$(jq -n \
 post_json "$ADMIN_TOKEN" '/inspection/records' "$INSPECTION_PAYLOAD" \
   '提交演示巡检记录' >/dev/null
 
-printf '[INFO] 创建一个真实质量问题\n'
-QUALITY_FILE_ID="$(upload_file "$ADMIN_TOKEN" 'QUALITY_PENDING' \
+printf '[INFO] 创建并提交一份真实质量周检\n'
+QUALITY_FILE_ID="$(upload_file "$ADMIN_TOKEN" 'QUALITY_WEEKLY_ITEM_PENDING' \
   '质量问题照片' '演示质量问题.png' "$SEED_TMP_DIR/演示质量问题.png")"
 QUALITY_DEADLINE="$(date -v+3d +%F)"
+QUALITY_WEEK_START="$(python3 -c 'import datetime,sys; d=datetime.date.fromisoformat(sys.argv[1]); print(d-datetime.timedelta(days=d.weekday()))' "$CHECK_DATE")"
+QUALITY_DRAFT_RESPONSE="$(post_json "$ADMIN_TOKEN" '/quality/weekly-inspections/drafts' \
+  "$(jq -n --arg weekStart "$QUALITY_WEEK_START" '{projectId:1, weekStart:$weekStart}')" \
+  '创建演示质量周检草稿')"
+QUALITY_DRAFT_ID="$(jq -r '.data.id' <<<"$QUALITY_DRAFT_RESPONSE")"
+QUALITY_DRAFT_VERSION="$(jq -r '.data.version' <<<"$QUALITY_DRAFT_RESPONSE")"
 QUALITY_PAYLOAD="$(jq -n \
+  --argjson expectedVersion "$QUALITY_DRAFT_VERSION" \
+  --arg inspectionDate "$CHECK_DATE" \
   --arg deadline "$QUALITY_DEADLINE" \
   --argjson photoId "$QUALITY_FILE_ID" \
   '{
-    projectId:1,
-    title:"演示区域临边防护标识需补充",
-    location:"主体楼一层东侧演示区",
-    description:"现场演示点位缺少一处醒目标识，请在期限内补充。",
-    severity:"NORMAL",
-    assigneeId:1,
-    deadline:$deadline,
-    photoFileIds:[$photoId]
+    expectedVersion:$expectedVersion,
+    inspectionDate:$inspectionDate,
+    conclusion:"本周质量周检发现一项演示问题。",
+    overviewPhotoFileIds:[],
+    items:[{
+      itemKey:"demo-quality-item-1",
+      itemOrder:1,
+      title:"演示区域临边防护标识需补充",
+      location:"主体楼一层东侧演示区",
+      description:"现场演示点位缺少一处醒目标识，请在期限内补充。",
+      severity:"NORMAL",
+      assigneeId:1,
+      deadline:$deadline,
+      beforePhotoFileIds:[$photoId]
+    }]
   }')"
-post_json "$ADMIN_TOKEN" '/quality/issues' "$QUALITY_PAYLOAD" \
-  '创建演示质量问题' >/dev/null
+QUALITY_SAVE_RESPONSE="$(put_json "$ADMIN_TOKEN" "/quality/weekly-inspections/$QUALITY_DRAFT_ID/draft" \
+  "$QUALITY_PAYLOAD" '保存演示质量周检草稿')"
+QUALITY_SAVED_VERSION="$(jq -r '.data.version' <<<"$QUALITY_SAVE_RESPONSE")"
+post_json "$ADMIN_TOKEN" "/quality/weekly-inspections/$QUALITY_DRAFT_ID/submit" \
+  "$(jq -n --argjson expectedVersion "$QUALITY_SAVED_VERSION" '{expectedVersion:$expectedVersion}')" \
+  '提交演示质量周检' >/dev/null
 
 printf '[SUCCESS] 单项目演示业务数据已通过真实接口生成\n'

@@ -37,6 +37,14 @@
       "style": { "navigationStyle": "custom", "disableScroll": true }
     },
     {
+      "path": "pages/quality/weekly-edit",
+      "style": { "navigationStyle": "custom", "disableScroll": true, "navigationBarTitleText": "编辑质量周检" }
+    },
+    {
+      "path": "pages/quality/weekly-detail",
+      "style": { "navigationStyle": "custom", "disableScroll": true, "navigationBarTitleText": "质量周检详情" }
+    },
+    {
       "path": "pages/todo/index",
       "style": { "navigationStyle": "custom", "disableScroll": true }
     },

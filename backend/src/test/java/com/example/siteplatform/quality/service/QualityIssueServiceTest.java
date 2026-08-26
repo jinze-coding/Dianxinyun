@@ -9,6 +9,7 @@ import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.common.PageResult;
 import com.example.siteplatform.file.mapper.FileResourceMapper;
+import com.example.siteplatform.file.entity.FileResource;
 import com.example.siteplatform.file.service.FileResourceService;
 import com.example.siteplatform.notification.service.WechatNotificationService;
 import com.example.siteplatform.quality.dto.QualityAssignRequest;
@@ -663,6 +664,36 @@ class QualityIssueServiceTest {
         assertTrue(result.getRecords().isEmpty());
     }
 
+    @Test
+    void historicalSourceFilterOnlyReturnsLegacyIndependentIssues() {
+        when(issueMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+
+        service.listIssues(9L, "ALL", "", "HISTORICAL", operator);
+
+        ArgumentCaptor<LambdaQueryWrapper<QualityIssue>> wrapperCaptor =
+                ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(issueMapper).selectList(wrapperCaptor.capture());
+        assertTrue(wrapperCaptor.getValue().getSqlSegment().contains("weekly_inspection_id IS NULL"));
+    }
+
+    @Test
+    void detailSeparatesOriginalEvidenceFromLatestRectificationRound() {
+        QualityIssue issue = issue(120L, QualityIssueService.STATUS_RECHECK, 2);
+        issue.setRectificationPhotoFileIds("9,10");
+        when(issueMapper.selectById(120L)).thenReturn(issue);
+        when(fileMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(
+                List.of(file(1L)),
+                List.of(file(7L), file(8L), file(9L), file(10L)),
+                List.of());
+        when(logMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+
+        QualityIssueVO result = service.getIssue(120L, operator);
+
+        assertEquals(List.of(1L), result.getOriginalProblemPhotoFileIds());
+        assertEquals(List.of(7L, 8L, 9L, 10L), result.getRectificationPhotoFileIds());
+        assertEquals(List.of(9L, 10L), result.getLatestRectificationPhotoFileIds());
+    }
+
     private QualityIssueCreateRequest validCreateRequest() {
         QualityIssueCreateRequest request = new QualityIssueCreateRequest();
         request.setProjectId(9L);
@@ -699,6 +730,12 @@ class QualityIssueServiceTest {
         user.setUsername(name);
         user.setRealName(name);
         return user;
+    }
+
+    private FileResource file(Long id) {
+        FileResource file = new FileResource();
+        file.setId(id);
+        return file;
     }
 
     private void stubEmptyDetails() {

@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   assignQualityIssue,
-  createQualityIssue,
   getQualityAssignees,
   getQualityIssue,
   getQualityIssuePage,
@@ -24,17 +23,8 @@ import {
   isPlatformAdmin,
 } from "../../utils/permissions";
 import { pageMenuAllowed } from "../../utils/roleAuthorization";
+import WeeklyInspectionPanel from "./WeeklyInspectionPanel";
 
-const EMPTY_CREATE = {
-  requestKey: "",
-  title: "",
-  location: "",
-  description: "",
-  severity: "NORMAL",
-  assigneeId: "",
-  deadline: "",
-  files: [],
-};
 const formatTime = (value) =>
   value ? String(value).replace("T", " ").slice(0, 16) : "-";
 const statusLabel = (issue) =>
@@ -59,12 +49,8 @@ const actionLabel = (value) =>
 const projectKey = (value) =>
   value === null || value === undefined ? "" : String(value);
 const QUALITY_PAGE_SIZE = 20;
-const issueQueryKey = (projectId, status, keyword, pageNo) =>
-  `${projectKey(projectId)}|${status}|${keyword.trim()}|${pageNo}`;
-const createRequestKey = () =>
-  `web-${typeof crypto !== "undefined" && crypto.randomUUID
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`}`;
+const issueQueryKey = (projectId, status, source, keyword, pageNo) =>
+  `${projectKey(projectId)}|${status}|${source}|${keyword.trim()}|${pageNo}`;
 const isArchivedDocument = (file) =>
   ["ARCHIVED", "已归档"].includes(String(file?.status || "").toUpperCase())
   || file?.status === "已归档";
@@ -148,7 +134,12 @@ const buildEvidenceStages = (issue) => {
     }
     stages.push({ ...fallbackStage, photoIds: fallbackIds });
   };
-  attachFallback("CREATE", issue?.issuePhotoFileIds, {
+  attachFallback(
+    "CREATE",
+    parsePhotoFileIds(issue?.originalProblemPhotoFileIds).length
+      ? issue.originalProblemPhotoFileIds
+      : issue?.issuePhotoFileIds,
+    {
     key: "fallback-create",
     type: "CREATE",
     title: "问题发起",
@@ -156,8 +147,14 @@ const buildEvidenceStages = (issue) => {
     operatorName: issue?.createdByName,
     createTime: issue?.createTime,
     comment: issue?.description,
-  });
-  attachFallback("RECTIFY", issue?.rectificationPhotoFileIds, {
+    },
+  );
+  attachFallback(
+    "RECTIFY",
+    parsePhotoFileIds(issue?.latestRectificationPhotoFileIds).length
+      ? issue.latestRectificationPhotoFileIds
+      : issue?.rectificationPhotoFileIds,
+    {
     key: "fallback-rectify",
     type: "RECTIFY",
     title: "最近一轮整改",
@@ -165,7 +162,8 @@ const buildEvidenceStages = (issue) => {
     operatorName: issue?.assigneeName,
     createTime: issue?.rectifiedTime,
     comment: issue?.rectificationDescription,
-  });
+    },
+  );
   attachFallback("REVIEW", issue?.reviewPhotoFileIds, {
     key: "fallback-review",
     type: "REVIEW",
@@ -226,9 +224,10 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
   const [documentsProjectKey, setDocumentsProjectKey] = useState("");
   const [documentScope, setDocumentScope] = useState("ACTIVE");
   const [members, setMembers] = useState([]);
-  const [activeTab, setActiveTab] = useState("issues");
+  const [activeTab, setActiveTab] = useState("weekly");
   const [menuNotice, setMenuNotice] = useState("");
   const [status, setStatus] = useState("ALL");
+  const [issueSource, setIssueSource] = useState("ALL");
   const [pageNo, setPageNo] = useState(1);
   const [keyword, setKeyword] = useState("");
   const [appliedKeyword, setAppliedKeyword] = useState("");
@@ -240,7 +239,6 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
   const [documentsErrorProjectKey, setDocumentsErrorProjectKey] = useState("");
   const [modal, setModal] = useState(null);
   const [selectedIssue, setSelectedIssue] = useState(null);
-  const [createForm, setCreateForm] = useState(EMPTY_CREATE);
   const [actionForm, setActionForm] = useState({
     description: "",
     files: [],
@@ -330,6 +328,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
   const loadQualityData = async (options = {}) => {
     const targetProjectId = options.projectId ?? projectId;
     const targetStatus = options.status ?? status;
+    const targetSource = options.source ?? issueSource;
     const targetKeyword = (options.keyword ?? appliedKeyword).trim();
     const targetPageNo = options.pageNo ?? pageNo;
     const targetProjectKey = projectKey(targetProjectId);
@@ -342,6 +341,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
     const targetQueryKey = issueQueryKey(
       targetProjectId,
       targetStatus,
+      targetSource,
       targetKeyword,
       targetPageNo,
     );
@@ -354,6 +354,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
         getQualitySummary(targetProjectId),
         getQualityIssuePage(targetProjectId, {
           status: targetStatus,
+          source: targetSource,
           keyword: targetKeyword || undefined,
           pageNo: targetPageNo,
           pageSize: QUALITY_PAGE_SIZE,
@@ -482,6 +483,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
     releaseEvidenceUrls();
     setEvidenceState({ loading: false, files: {} });
     setStatus("ALL");
+    setIssueSource("ALL");
     setPageNo(1);
     setKeyword("");
     setAppliedKeyword("");
@@ -491,19 +493,19 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
   }, [projectId]);
   useEffect(() => {
     if (activeTab === "issues" && canViewIssues) loadQualityData();
-  }, [activeTab, canViewIssues, projectId, status, appliedKeyword, pageNo]);
+  }, [activeTab, canViewIssues, projectId, status, issueSource, appliedKeyword, pageNo]);
   useEffect(() => {
     if (activeTab === "documents" && canViewDocuments) {
       loadDocuments();
     }
   }, [activeTab, canViewDocuments, projectId]);
   useEffect(() => {
-    if (activeTab === "issues" && !canViewIssues && canViewDocuments) {
+    if (["weekly", "issues"].includes(activeTab) && !canViewIssues && canViewDocuments) {
       setActiveTab("documents");
-      setMenuNotice("当前角色无质量问题菜单权限，已切换到质量资料");
+      setMenuNotice("当前角色无质量周检菜单权限，已切换到质量资料");
     } else if (activeTab === "documents" && !canViewDocuments && canViewIssues) {
-      setActiveTab("issues");
-      setMenuNotice("当前角色无质量资料菜单权限，已切换到质量问题");
+      setActiveTab("weekly");
+      setMenuNotice("当前角色无质量资料菜单权限，已切换到质量周检");
     }
   }, [activeTab, canViewDocuments, canViewIssues]);
 
@@ -511,6 +513,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
   const currentQueryKey = issueQueryKey(
     projectId,
     status,
+    issueSource,
     appliedKeyword,
     pageNo,
   );
@@ -549,9 +552,8 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
         && documentsErrorProjectKey !== currentProjectKey
       ));
 
-  const canManage = Boolean(currentSummary?.canManage)
-    && (isPlatformAdmin(currentUser)
-      || hasProjectPermission(currentUser, projectId, "quality.manage"));
+  const canManage = isPlatformAdmin(currentUser)
+    || hasProjectPermission(currentUser, projectId, "quality.manage");
   const canRectify = isPlatformAdmin(currentUser)
     || hasProjectPermission(currentUser, projectId, "quality.rectify");
   const canReview = isPlatformAdmin(currentUser)
@@ -589,19 +591,6 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
       alert(error.message || "整改负责人加载失败，请稍后重试");
       return false;
     }
-  };
-
-  const openCreate = async () => {
-    if (submittingRef.current) return;
-    const candidates = await loadMembers();
-    if (!candidates) return;
-    const date = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
-    setCreateForm({
-      ...EMPTY_CREATE,
-      requestKey: createRequestKey(),
-      deadline: date,
-    });
-    setModal("create");
   };
 
   const loadIssueEvidence = async (issue, requestId, targetProjectKey) => {
@@ -713,48 +702,6 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
     } catch (error) {
       await Promise.allSettled(ids.map((id) => deleteFile(id)));
       throw error;
-    }
-  };
-
-  const submitCreate = async () => {
-    if (submittingRef.current) return;
-    if (!createForm.title.trim() || !createForm.files.length)
-      return alert("请填写问题标题并上传至少一张问题照片");
-    if (!createForm.assigneeId)
-      return alert("请选择整改负责人");
-    if (!beginSubmitting()) return;
-    let photoFileIds = [];
-    try {
-      photoFileIds = await uploadFiles(
-        createForm.files,
-        "QUALITY_PENDING",
-      );
-      const res = await createQualityIssue({
-        ...createForm,
-        files: undefined,
-        projectId,
-        assigneeId: createForm.assigneeId
-          ? Number(createForm.assigneeId)
-          : undefined,
-        photoFileIds,
-      });
-      if (res.code !== 200) throw new Error(res.message || "发起失败");
-      const boundPhotoIds = new Set(
-        parsePhotoFileIds(res.data?.issuePhotoFileIds),
-      );
-      await Promise.allSettled(
-        photoFileIds
-          .filter((id) => !boundPhotoIds.has(id))
-          .map((id) => deleteFile(id)),
-      );
-      closeModal();
-      setPageNo(1);
-      await loadQualityData({ pageNo: 1 });
-    } catch (error) {
-      await Promise.allSettled(photoFileIds.map((id) => deleteFile(id)));
-      alert(error.message || "发起失败");
-    } finally {
-      finishSubmitting();
     }
   };
 
@@ -1039,7 +986,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
         background: T.pageBg,
       }}
     >
-      <div
+      {activeTab === "issues" && <div
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(5,minmax(0,1fr))",
@@ -1070,7 +1017,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
             </div>
           </div>
         ))}
-      </div>
+      </div>}
       <div
         style={{
           background: T.cardBg,
@@ -1086,13 +1033,22 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
       >
         <div style={{ display: "flex", gap: 6 }}>
           {canViewIssues && <button
+            onClick={() => { setActiveTab("weekly"); setMenuNotice(""); }}
+            style={{
+              ...buttonStyle(activeTab === "weekly" ? "primary" : "secondary"),
+              background: activeTab === "weekly" ? T.accent : T.surface2,
+            }}
+          >
+            周检记录
+          </button>}
+          {canViewIssues && <button
             onClick={() => { setActiveTab("issues"); setMenuNotice(""); }}
             style={{
               ...buttonStyle(activeTab === "issues" ? "primary" : "secondary"),
               background: activeTab === "issues" ? T.accent : T.surface2,
             }}
           >
-            质量问题
+            整改闭环
           </button>}
           {canViewDocuments && <button
             onClick={() => { setActiveTab("documents"); setMenuNotice(""); }}
@@ -1107,8 +1063,25 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
           </button>}
           {menuNotice && <span style={{ alignSelf: "center", color: T.warning, fontSize: 11 }}>{menuNotice}</span>}
         </div>
-        {activeTab === "issues" ? (
+        {activeTab === "weekly" ? (
+          <span style={{ color: T.textMuted, fontSize: 11 }}>
+            共享草稿跨 Web 与小程序同步，整批提交后每个问题独立整改、复查和留痕。
+          </span>
+        ) : activeTab === "issues" ? (
           <div style={{ display: "flex", gap: 7 }}>
+            <select
+              value={issueSource}
+              onChange={(e) => {
+                setPageNo(1);
+                setIssueSource(e.target.value);
+              }}
+              style={{ ...fieldStyle, width: 132 }}
+              title="按问题来源筛选"
+            >
+              <option value="ALL">全部问题</option>
+              <option value="WEEKLY">周检问题</option>
+              <option value="HISTORICAL">历史独立问题</option>
+            </select>
             <select
               value={status}
               onChange={(e) => {
@@ -1144,15 +1117,8 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
             >
               查询
             </button>
-            <button
-              disabled={!canManage}
-              onClick={openCreate}
-              style={buttonStyle()}
-            >
-              发起检查
-            </button>
           </div>
-        ) : (
+        ) : activeTab === "documents" ? (
           <div
             style={{
               display: "flex",
@@ -1204,7 +1170,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
               </>
             )}
           </div>
-        )}
+        ) : null}
       </div>
       <div
         style={{
@@ -1216,7 +1182,17 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
           borderRadius: 8,
         }}
       >
-        {activeTab === "issues" ? (
+        {activeTab === "weekly" ? (
+          <WeeklyInspectionPanel
+            projectId={projectId}
+            T={T}
+            canManage={canManage}
+            buttonStyle={buttonStyle}
+            fieldStyle={fieldStyle}
+            pill={pill}
+            onOpenIssue={(issue) => openIssue(issue)}
+          />
+        ) : activeTab === "issues" ? (
           issuesAreLoading ? (
             <LoadingState T={T} text="质量问题加载中..." />
           ) : currentIssueError ? (
@@ -1463,165 +1439,40 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
           </>
         )}
       </div>
-      {modal && !["assign", "void"].includes(modal) && (
-        <Modal
-          T={T}
-          title={modal === "create" ? "发起质量检查" : "质量问题详情"}
-          onClose={closeModal}
-        >
-          {modal === "create" ? (
-            <>
-              <label style={labelStyle(T)}>
-                问题标题 *
-                <input
-                  style={fieldStyle}
-                  maxLength={200}
-                  value={createForm.title}
-                  onChange={(e) =>
-                    setCreateForm({ ...createForm, title: e.target.value })
-                  }
-                />
-              </label>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 10,
-                }}
-              >
-                <label style={labelStyle(T)}>
-                  问题位置
-                  <input
-                    style={fieldStyle}
-                    maxLength={200}
-                    value={createForm.location}
-                    onChange={(e) =>
-                      setCreateForm({ ...createForm, location: e.target.value })
-                    }
-                  />
-                </label>
-                <label style={labelStyle(T)}>
-                  严重等级
-                  <select
-                    style={fieldStyle}
-                    value={createForm.severity}
-                    onChange={(e) =>
-                      setCreateForm({ ...createForm, severity: e.target.value })
-                    }
-                  >
-                    <option value="NORMAL">一般</option>
-                    <option value="WARNING">重要</option>
-                    <option value="DANGER">严重</option>
-                  </select>
-                </label>
-                <label style={labelStyle(T)}>
-                  整改负责人
-                  <select
-                    style={fieldStyle}
-                    value={createForm.assigneeId}
-                    onChange={(e) =>
-                      setCreateForm({
-                        ...createForm,
-                        assigneeId: e.target.value,
-                      })
-                    }
-                  >
-                  <option value="">请选择整改负责人</option>
-                  {members.map((member) => (
-                    <option key={member.userId} value={member.userId}>
-                      {member.displayName}
-                    </option>
-                  ))}
-                  </select>
-                </label>
-                <label style={labelStyle(T)}>
-                  闭环期限
-                  <input
-                    type="date"
-                    style={fieldStyle}
-                    value={createForm.deadline}
-                    onChange={(e) =>
-                      setCreateForm({ ...createForm, deadline: e.target.value })
-                    }
-                  />
-                </label>
-              </div>
-              <label style={labelStyle(T)}>
-                问题描述
-                <textarea
-                  style={{ ...fieldStyle, minHeight: 80 }}
-                  maxLength={1000}
-                  value={createForm.description}
-                  onChange={(e) =>
-                    setCreateForm({
-                      ...createForm,
-                      description: e.target.value,
-                    })
-                  }
-                />
-              </label>
-              <label style={labelStyle(T)}>
-                问题照片 *
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  style={fieldStyle}
-                  onChange={(e) =>
-                    setCreateForm({
-                      ...createForm,
-                      files: Array.from(e.target.files || []),
-                    })
-                  }
-                />
-              </label>
-              <ModalActions
-                buttonStyle={buttonStyle}
-                submitting={submitting}
-                onCancel={closeModal}
-                onSubmit={submitCreate}
-              />
-            </>
-          ) : (
-            selectedIssue && (
-              <IssueDetail
-                T={T}
-                issue={selectedIssue}
-                members={members}
-                actionForm={actionForm}
-                setActionForm={setActionForm}
-                canManage={canManage}
-                canRectify={canRectify}
-                canReview={canReview}
-                canDelete={canDelete}
-                submitting={submitting}
-                buttonStyle={buttonStyle}
-                fieldStyle={fieldStyle}
-                pill={pill}
-                evidenceState={evidenceState}
-                onRectify={submitRectification}
-                onReview={submitReview}
-                onAssign={async () => {
-                  const candidates = await loadMembers();
-                  if (!candidates) return;
-                  setActionForm((current) => ({
-                    ...current,
-                    assigneeId: "",
-                  }));
-                  setModal("assign");
-                }}
-                onVoid={() => {
-                  setActionForm((current) => ({
-                    ...current,
-                    comment: "",
-                    files: [],
-                  }));
-                  setModal("void");
-                }}
-                onDelete={() => removeIssue(selectedIssue)}
-              />
-            )
-          )}
+      {modal === "detail" && selectedIssue && (
+        <Modal T={T} title="质量问题详情" onClose={closeModal}>
+          <IssueDetail
+            T={T}
+            issue={selectedIssue}
+            actionForm={actionForm}
+            setActionForm={setActionForm}
+            canManage={canManage}
+            canRectify={canRectify}
+            canReview={canReview}
+            canDelete={canDelete}
+            submitting={submitting}
+            buttonStyle={buttonStyle}
+            fieldStyle={fieldStyle}
+            pill={pill}
+            evidenceState={evidenceState}
+            onRectify={submitRectification}
+            onReview={submitReview}
+            onAssign={async () => {
+              const candidates = await loadMembers();
+              if (!candidates) return;
+              setActionForm((current) => ({ ...current, assigneeId: "" }));
+              setModal("assign");
+            }}
+            onVoid={() => {
+              setActionForm((current) => ({
+                ...current,
+                comment: "",
+                files: [],
+              }));
+              setModal("void");
+            }}
+            onDelete={() => removeIssue(selectedIssue)}
+          />
         </Modal>
       )}
       {modal === "assign" && selectedIssue && (
@@ -1745,6 +1596,11 @@ function IssueDetail({
   onDelete,
 }) {
   const evidenceStages = buildEvidenceStages(issue);
+  const originalEvidence = evidenceStages.find((stage) => stage.type === "CREATE");
+  const rectificationStages = evidenceStages.filter(
+    (stage) => stage.type === "RECTIFY",
+  );
+  const latestRectification = rectificationStages[rectificationStages.length - 1];
   const evidenceCheck = reviewEvidenceCheck(issue, evidenceState);
   const openEvidence = (fileId) => {
     const evidence = evidenceState.files[fileId];
@@ -1800,6 +1656,13 @@ function IssueDetail({
           ["期限", issue.deadline],
           ["发起人", issue.createdByName],
           ["发起时间", formatTime(issue.createTime)],
+          [
+            "问题来源",
+            issue.weeklyInspectionNo
+              || (issue.weeklyInspectionId
+                ? `质量周检 #${issue.weeklyInspectionId}`
+                : "历史独立问题"),
+          ],
         ].map(([label, value]) => (
           <div
             key={label}
@@ -1830,13 +1693,59 @@ function IssueDetail({
       >
         {issue.description || "无问题描述"}
       </p>
+      <div style={{ marginBottom: 14 }}>
+        <strong style={{ color: T.textPrimary, fontSize: 13 }}>
+          整改前后照片对比
+        </strong>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(2,minmax(0,1fr))",
+            gap: 10,
+            marginTop: 8,
+          }}
+        >
+          <div>
+            <div style={{ marginBottom: 5, color: T.textMuted, fontSize: 11 }}>
+              原始问题照片
+            </div>
+            <EvidenceStage
+              T={T}
+              stage={originalEvidence || {
+                key: "missing-original",
+                title: "问题发起",
+                required: true,
+                photoIds: [],
+              }}
+              evidenceState={evidenceState}
+              onOpen={openEvidence}
+            />
+          </div>
+          <div>
+            <div style={{ marginBottom: 5, color: T.textMuted, fontSize: 11 }}>
+              最新一轮整改照片
+            </div>
+            <EvidenceStage
+              T={T}
+              stage={latestRectification || {
+                key: "missing-rectification",
+                title: "尚未提交整改",
+                required: true,
+                photoIds: [],
+              }}
+              evidenceState={evidenceState}
+              onOpen={openEvidence}
+            />
+          </div>
+        </div>
+      </div>
       <div
         style={{
           marginBottom: 12,
           paddingTop: 4,
         }}
       >
-        <strong style={{ color: T.textPrimary, fontSize: 13 }}>过程证据</strong>
+        <strong style={{ color: T.textPrimary, fontSize: 13 }}>完整证据时间线</strong>
         <div
           style={{
             marginTop: 8,

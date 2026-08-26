@@ -11,11 +11,14 @@ import java.util.List;
 public class QualityIssueVO {
     private Long id;
     private Long projectId;
+    private Long weeklyInspectionId;
+    private Integer inspectionItemOrder;
     private String issueNo;
     private String title;
     private String location;
     private String description;
     private List<Long> issuePhotoFileIds;
+    private List<Long> originalProblemPhotoFileIds;
     private String severity;
     private String status;
     private Long assigneeId;
@@ -23,6 +26,7 @@ public class QualityIssueVO {
     private LocalDate deadline;
     private String rectificationDescription;
     private List<Long> rectificationPhotoFileIds;
+    private List<Long> latestRectificationPhotoFileIds;
     private LocalDateTime rectifiedTime;
     private String reviewerName;
     private String reviewComment;

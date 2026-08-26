@@ -26,7 +26,9 @@ public class QualityStagingFileCleanupService {
     private static final Set<String> QUALITY_STAGING_TYPES = Set.of(
             "QUALITY_PENDING",
             "QUALITY_RECTIFICATION_PENDING",
-            "QUALITY_REVIEW_PENDING"
+            "QUALITY_REVIEW_PENDING",
+            "QUALITY_WEEKLY_PENDING",
+            "QUALITY_WEEKLY_ITEM_PENDING"
     );
 
     private final FileResourceMapper fileMapper;
@@ -82,6 +84,47 @@ public class QualityStagingFileCleanupService {
         return new CleanupResult(candidates.size(), deletedCount, failedCount, skippedCount);
     }
 
+    /**
+     * Recovers physical cleanup jobs whose transaction committed but whose
+     * in-process afterCommit callback did not finish (for example, a process
+     * exit immediately after commit). A grace cutoff avoids racing a live
+     * callback; failures become DELETE_FAILED and remain available to the
+     * existing administrator retry endpoint.
+     */
+    public CleanupResult cleanupPendingDeletes(LocalDateTime cutoff, int batchSize) {
+        if (cutoff == null) throw new IllegalArgumentException("pending-delete cutoff cannot be null");
+        int limit = Math.max(1, Math.min(batchSize, MAX_BATCH_SIZE));
+        List<FileResource> candidates = fileMapper.selectStalePendingDeleteFiles(cutoff, limit);
+        if (candidates == null || candidates.isEmpty()) {
+            return new CleanupResult(0, 0, 0, 0);
+        }
+
+        int deletedCount = 0;
+        int failedCount = 0;
+        int skippedCount = 0;
+        for (FileResource file : candidates) {
+            if (!isPendingDeleteEligible(file, cutoff)) {
+                skippedCount++;
+                continue;
+            }
+            try {
+                storageManager.delete(file);
+                int purged = fileMapper.purgeStalePendingDeleteFile(file.getId(), cutoff);
+                if (purged == 1) {
+                    deletedCount++;
+                } else {
+                    skippedCount++;
+                }
+            } catch (RuntimeException exception) {
+                failedCount++;
+                fileMapper.markPhysicalDeleteFailed(file.getId());
+                log.error("恢复提交后物理文件清理失败，已保留DELETE_FAILED元数据: fileId={}, projectId={}",
+                        file.getId(), file.getProjectId(), exception);
+            }
+        }
+        return new CleanupResult(candidates.size(), deletedCount, failedCount, skippedCount);
+    }
+
     private boolean isEligible(FileResource file, LocalDateTime cutoff) {
         if (file == null
                 || file.getId() == null
@@ -92,6 +135,15 @@ public class QualityStagingFileCleanupService {
             return false;
         }
         return file.getDeleted() == null || file.getDeleted() == 0 || file.getDeleted() == 1;
+    }
+
+    private boolean isPendingDeleteEligible(FileResource file, LocalDateTime cutoff) {
+        return file != null
+                && file.getId() != null
+                && Integer.valueOf(1).equals(file.getDeleted())
+                && "PENDING_DELETE".equals(file.getStatus())
+                && file.getUpdateTime() != null
+                && file.getUpdateTime().isBefore(cutoff);
     }
 
     public record CleanupResult(int scannedCount, int deletedCount, int failedCount, int skippedCount) {

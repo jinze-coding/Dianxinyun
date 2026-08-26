@@ -4,7 +4,7 @@ import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.auth.service.AuthService;
 import com.example.siteplatform.common.PageResult;
 import com.example.siteplatform.common.Result;
-import com.example.siteplatform.quality.dto.QualityIssueCreateRequest;
+import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.quality.dto.QualityAssignRequest;
 import com.example.siteplatform.quality.dto.QualityRectificationRequest;
 import com.example.siteplatform.quality.dto.QualityReviewRequest;
@@ -50,9 +50,10 @@ public class QualityIssueController {
             @RequestParam Long projectId,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String keyword,
+            @RequestParam(required = false, defaultValue = "ALL") String source,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
-        return Result.success(qualityIssueService.listIssues(projectId, status, keyword, currentUser));
+        return Result.success(qualityIssueService.listIssues(projectId, status, keyword, source, currentUser));
     }
 
     @Operation(summary = "分页获取质量问题列表")
@@ -61,12 +62,13 @@ public class QualityIssueController {
             @RequestParam Long projectId,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String keyword,
+            @RequestParam(required = false, defaultValue = "ALL") String source,
             @RequestParam(defaultValue = "1") Integer pageNo,
             @RequestParam(defaultValue = "20") Integer pageSize,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
         return Result.success(qualityIssueService.pageIssues(
-                projectId, status, keyword, pageNo, pageSize, currentUser));
+                projectId, status, keyword, source, pageNo, pageSize, currentUser));
     }
 
     @Operation(summary = "获取质量问题统计")
@@ -108,10 +110,8 @@ public class QualityIssueController {
     @Operation(summary = "发起质量检查问题")
     @PostMapping
     public Result<QualityIssueVO> createIssue(
-            @Valid @RequestBody QualityIssueCreateRequest request,
             @RequestHeader(value = "Authorization", required = false) String token) {
-        SysUser currentUser = authService.getCurrentUser(token);
-        return Result.success(qualityIssueService.createIssue(request, currentUser));
+        throw BusinessException.of(410, "质量问题已改为通过质量周检整批提交");
     }
 
     @Operation(summary = "提交质量整改")

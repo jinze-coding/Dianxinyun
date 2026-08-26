@@ -9,17 +9,18 @@ import WorkspaceMetricStrip, { type WorkspaceMetric } from '@/components/workspa
 import WorkspaceSegmentControl from '@/components/workspace/WorkspaceSegmentControl.vue';
 import WorkspaceStatusPill from '@/components/workspace/WorkspaceStatusPill.vue';
 import { WORKSPACE_THEME } from '@/constants/workspaceTheme';
-import { assignQualityIssue, createQualityIssue, getQualityAssignees, getQualityIssue, getQualityIssuePage, getQualitySummary, getQualityTodos, reviewQualityIssue, submitQualityRectification, voidQualityIssue } from '@/api/quality';
+import { assignQualityIssue, getQualityAssignees, getQualityIssue, getQualityIssuePage, getQualitySummary, getQualityTodos, getQualityWeeklyInspectionPage, reviewQualityIssue, submitQualityRectification, voidQualityIssue } from '@/api/quality';
 import { deleteFileResources, downloadFileResults, downloadFileToTempPath, getFileResources, uploadPhotoIds, type FileResourceItem } from '@/api/file';
 import { useProjectStore } from '@/stores/project';
 import { useAuthStore } from '@/stores/auth';
-import type { QualityAssignee, QualityIssue, QualityIssueStatus, QualitySummary, TodoItem } from '@/types';
+import type { QualityAssignee, QualityIssue, QualityIssueStatus, QualitySummary, QualityWeeklyInspection, TodoItem } from '@/types';
 import { extensionOf } from '@/utils/documentFile';
 import { usePageScrollHeight } from '@/utils/navLayout';
 import { showToast } from '@/utils/navigation';
 
 type QualityFilter = 'ALL' | QualityIssueStatus;
-type SheetMode = 'create' | 'detail' | 'assign' | 'void' | 'todos' | 'documents' | null;
+type QualitySource = 'ALL' | 'WEEKLY' | 'HISTORICAL';
+type SheetMode = 'detail' | 'assign' | 'void' | 'todos' | 'documents' | null;
 interface EvidenceGroup {
   key: string;
   title: string;
@@ -36,13 +37,16 @@ const projectStore = useProjectStore();
 const authStore = useAuthStore();
 const summary = ref<QualitySummary | null>(null);
 const issues = ref<QualityIssue[]>([]);
+const weeklyInspections = ref<QualityWeeklyInspection[]>([]);
 const assignees = ref<QualityAssignee[]>([]);
 const selectedIssue = ref<QualityIssue | null>(null);
 const activeFilter = ref<QualityFilter>('ALL');
+const activeSource = ref<QualitySource>('ALL');
 const keyword = ref('');
 const submittedKeyword = ref('');
 const loading = ref(false);
 const loadingMore = ref(false);
+const weeklyLoadingMore = ref(false);
 const submitting = ref(false);
 const errorMessage = ref('');
 const sheetMode = ref<SheetMode>(null);
@@ -57,21 +61,22 @@ const openingDocumentId = ref<number | null>(null);
 const issuePageNo = ref(1);
 const issueTotal = ref(0);
 const ISSUE_PAGE_SIZE = 20;
+const weeklyPageNo = ref(1);
+const weeklyTotal = ref(0);
+const WEEKLY_PAGE_SIZE = 6;
 const qualityTodos = ref<TodoItem[]>([]);
 const todosLoading = ref(false);
 const todosError = ref('');
-const createPhotoPaths = ref<string[]>([]);
 const rectificationPhotoPaths = ref<string[]>([]);
 const reviewPhotoPaths = ref<string[]>([]);
-const createRequestKey = ref('');
 const evidenceGroups = ref<EvidenceGroup[]>([]);
+const comparisonGroups = ref<EvidenceGroup[]>([]);
 const evidenceLoading = ref(false);
 const { scrollStyle } = usePageScrollHeight({ bottomRpx: 124, minHeight: 320 });
 let qualityRequestSequence = 0;
 let documentRequestSequence = 0;
 let todoRequestSequence = 0;
 
-const createForm = reactive({ title: '', location: '', description: '', severity: 'NORMAL' as 'NORMAL' | 'WARNING' | 'DANGER', assigneeIndex: -1, deadline: '' });
 const assignForm = reactive({ assigneeIndex: -1, deadline: '', comment: '' });
 const projects = computed(() => projectStore.state.projects);
 const currentProject = computed(() => projects.value.find((item) => item.id === projectStore.state.currentProjectId));
@@ -83,6 +88,11 @@ const canReview = computed(() => Boolean(selectedIssue.value)
   && authStore.hasProjectPermission(selectedIssue.value!.projectId, 'quality.review'));
 const filteredIssues = computed(() => issues.value);
 const hasMoreIssues = computed(() => issues.value.length < issueTotal.value);
+const hasMoreWeeklyInspections = computed(() => weeklyInspections.value.length < weeklyTotal.value);
+const currentDateText = computed(() => {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+});
 const evidenceFailureCount = computed(() =>
   evidenceGroups.value.reduce((total, group) => total + group.failedCount, 0));
 const metrics = computed<WorkspaceMetric[]>(() => [
@@ -97,6 +107,11 @@ const filters = computed(() => [
   { value: 'RECHECK', label: '待复查', badge: summary.value?.recheckCount || 0 },
   { value: 'CLOSED', label: '已关闭', badge: summary.value?.closedCount || 0 }
 ]);
+const sourceFilters = [
+  { value: 'ALL', label: '全部问题' },
+  { value: 'WEEKLY', label: '周检问题' },
+  { value: 'HISTORICAL', label: '历史独立' }
+];
 
 function hideNativeTabBar() { uni.hideTabBar({ animation: false, fail: () => undefined }); }
 onShow(async () => {
@@ -121,12 +136,16 @@ async function refresh() {
     if (projectStore.state.errorMessage) {
       summary.value = null;
       issues.value = [];
+      weeklyInspections.value = [];
+      weeklyTotal.value = 0;
       errorMessage.value = projectStore.state.errorMessage;
       return;
     }
     if (!projectStore.state.currentProjectId) {
       summary.value = null;
       issues.value = [];
+      weeklyInspections.value = [];
+      weeklyTotal.value = 0;
       errorMessage.value = '当前账号暂无可访问的施工区域';
       return;
     }
@@ -137,20 +156,26 @@ async function refresh() {
       if (!authorizedProject) {
         summary.value = null;
         issues.value = [];
+        weeklyInspections.value = [];
+        weeklyTotal.value = 0;
         errorMessage.value = '当前账号暂无质量管理查看权限';
         return;
       }
       projectStore.setCurrentProject(authorizedProject.id);
       projectId = authorizedProject.id;
     }
-    const [summaryResult, issuePage] = await Promise.all([
+    const [summaryResult, issuePage, weeklyPage] = await Promise.all([
       getQualitySummary(projectId),
-      getQualityIssuePage(projectId, activeFilter.value, submittedKeyword.value, 1, ISSUE_PAGE_SIZE)
+      getQualityIssuePage(projectId, activeFilter.value, submittedKeyword.value, 1, ISSUE_PAGE_SIZE, activeSource.value),
+      getQualityWeeklyInspectionPage(projectId, 1, WEEKLY_PAGE_SIZE)
     ]);
     if (requestSequence !== qualityRequestSequence
       || projectStore.state.currentProjectId !== projectId) return;
     summary.value = summaryResult;
     issues.value = issuePage.records;
+    weeklyInspections.value = weeklyPage.records;
+    weeklyPageNo.value = weeklyPage.pageNo;
+    weeklyTotal.value = weeklyPage.total;
     issuePageNo.value = issuePage.pageNo;
     issueTotal.value = issuePage.total;
     void loadQualityTodos(projectId);
@@ -158,6 +183,8 @@ async function refresh() {
     if (requestSequence !== qualityRequestSequence) return;
     summary.value = null;
     issues.value = [];
+    weeklyInspections.value = [];
+    weeklyTotal.value = 0;
     errorMessage.value = error instanceof Error ? error.message : '质量数据加载失败';
   } finally {
     if (requestSequence === qualityRequestSequence) loading.value = false;
@@ -169,9 +196,12 @@ async function selectProject(projectId: number) {
   ++documentRequestSequence;
   ++todoRequestSequence;
   projectStore.setCurrentProject(projectId);
-  activeFilter.value = 'ALL'; keyword.value = ''; submittedKeyword.value = '';
+  activeFilter.value = 'ALL'; activeSource.value = 'ALL'; keyword.value = ''; submittedKeyword.value = '';
   summary.value = null;
   issues.value = [];
+  weeklyInspections.value = [];
+  weeklyPageNo.value = 1;
+  weeklyTotal.value = 0;
   issuePageNo.value = 1;
   issueTotal.value = 0;
   selectedIssue.value = null;
@@ -243,6 +273,15 @@ async function setFilter(value: string) {
   await refresh();
 }
 
+async function setSource(value: string) {
+  activeSource.value = value as QualitySource;
+  summary.value = null;
+  issues.value = [];
+  issuePageNo.value = 1;
+  issueTotal.value = 0;
+  await refresh();
+}
+
 async function applySearch() {
   const nextKeyword = keyword.value.trim();
   if (nextKeyword === submittedKeyword.value && issues.value.length) return;
@@ -258,14 +297,16 @@ async function loadMoreIssues() {
   const requestSequence = qualityRequestSequence;
   const projectId = currentProject.value.id;
   const filter = activeFilter.value;
+  const source = activeSource.value;
   const search = submittedKeyword.value;
   const nextPage = issuePageNo.value + 1;
   loadingMore.value = true;
   try {
-    const result = await getQualityIssuePage(projectId, filter, search, nextPage, ISSUE_PAGE_SIZE);
+    const result = await getQualityIssuePage(projectId, filter, search, nextPage, ISSUE_PAGE_SIZE, source);
     if (requestSequence !== qualityRequestSequence
       || projectStore.state.currentProjectId !== projectId
       || activeFilter.value !== filter
+      || activeSource.value !== source
       || submittedKeyword.value !== search) return;
     const knownIds = new Set(issues.value.map((item) => item.id));
     issues.value = [...issues.value, ...result.records.filter((item) => !knownIds.has(item.id))];
@@ -278,26 +319,66 @@ async function loadMoreIssues() {
   }
 }
 
+async function loadMoreWeeklyInspections() {
+  if (loading.value || weeklyLoadingMore.value || !hasMoreWeeklyInspections.value || !currentProject.value) return;
+  const requestSequence = qualityRequestSequence;
+  const projectId = currentProject.value.id;
+  const nextPage = weeklyPageNo.value + 1;
+  weeklyLoadingMore.value = true;
+  try {
+    const result = await getQualityWeeklyInspectionPage(projectId, nextPage, WEEKLY_PAGE_SIZE);
+    if (requestSequence !== qualityRequestSequence
+      || projectStore.state.currentProjectId !== projectId) return;
+    const knownIds = new Set(weeklyInspections.value.map((item) => item.id));
+    weeklyInspections.value = [
+      ...weeklyInspections.value,
+      ...result.records.filter((item) => !knownIds.has(item.id))
+    ];
+    weeklyPageNo.value = result.pageNo;
+    weeklyTotal.value = result.total;
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '更多周检记录加载失败');
+  } finally {
+    weeklyLoadingMore.value = false;
+  }
+}
+
 function statusLabel(issue: QualityIssue) { return issue.status === 'VOIDED' ? '已作废' : issue.overdue ? '已逾期' : issue.status === 'PENDING' ? '待整改' : issue.status === 'RECHECK' ? '待复查' : '已关闭'; }
 function statusTone(issue: QualityIssue) { return issue.status === 'VOIDED' ? 'gray' as const : issue.overdue ? 'red' as const : issue.status === 'PENDING' ? 'amber' as const : issue.status === 'RECHECK' ? 'blue' as const : 'green' as const; }
 
-async function openCreate() {
-  if (!canManage.value || !currentProject.value) { showToast('当前账号无质量问题发起权限'); return; }
-  try {
-    await loadAssignees(currentProject.value.id);
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : '整改负责人加载失败');
-    return;
-  }
-  if (!assignees.value.length) {
-    showToast('当前项目没有具备质量整改权限的负责人');
-    return;
-  }
-  const date = new Date(Date.now() + 3 * 86400000);
-  Object.assign(createForm, { title: '', location: '', description: '', severity: 'NORMAL', assigneeIndex: -1, deadline: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` });
-  createRequestKey.value = `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
-  createPhotoPaths.value = [];
-  sheetMode.value = 'create';
+function currentWeekStart() {
+  const date = new Date();
+  const day = date.getDay();
+  date.setDate(date.getDate() - (day === 0 ? 6 : day - 1));
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function openCreate() {
+  if (!canManage.value || !currentProject.value) { showToast('当前账号无质量周检发起权限'); return; }
+  uni.navigateTo({ url: `/pages/quality/weekly-edit?projectId=${currentProject.value.id}&weekStart=${currentWeekStart()}` });
+}
+
+function openSelectedWeek(event: unknown) {
+  if (!canManage.value || !currentProject.value) { showToast('当前账号无质量周检发起权限'); return; }
+  const value = String((event as { detail?: { value?: string } }).detail?.value || '');
+  if (!value) return;
+  const date = new Date(`${value}T00:00:00`);
+  const day = date.getDay();
+  date.setDate(date.getDate() - (day === 0 ? 6 : day - 1));
+  const weekStart = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  uni.navigateTo({ url: `/pages/quality/weekly-edit?projectId=${currentProject.value.id}&weekStart=${weekStart}` });
+}
+
+function openWeeklyInspection(item: QualityWeeklyInspection) {
+  const path = item.status === 'DRAFT' && canManage.value ? 'weekly-edit' : 'weekly-detail';
+  const query = path === 'weekly-edit'
+    ? `projectId=${item.projectId}&weekStart=${item.weekStart}`
+    : `id=${item.id}`;
+  uni.navigateTo({ url: `/pages/quality/${path}?${query}` });
+}
+
+function weeklyStatusLabel(item: QualityWeeklyInspection) {
+  return item.status === 'DRAFT' ? '共享草稿' : item.lateSubmission ? '已提交 · 补录' : '已提交';
 }
 
 async function loadAssignees(projectId: number) {
@@ -332,6 +413,7 @@ async function openDetail(issue: QualityIssue) {
     }
     selectedIssue.value = detail;
     rectificationText.value = ''; reviewComment.value = ''; rectificationPhotoPaths.value = []; reviewPhotoPaths.value = [];
+    comparisonGroups.value = [];
     sheetMode.value = 'detail';
     await loadEvidenceGroups();
   }
@@ -376,35 +458,39 @@ async function loadEvidenceGroups() {
   if (!selectedIssue.value) return;
   const issueId = selectedIssue.value.id;
   const groups = buildEvidenceGroups(selectedIssue.value);
+  const comparisons: EvidenceGroup[] = [
+    {
+      key: 'comparison-original',
+      title: '整改前（原始问题照片）',
+      fileIds: selectedIssue.value.originalProblemPhotoFileIds
+        || selectedIssue.value.issuePhotoFileIds
+        || [],
+      paths: [],
+      failedCount: 0
+    },
+    {
+      key: 'comparison-latest',
+      title: '最新一轮整改后',
+      fileIds: selectedIssue.value.latestRectificationPhotoFileIds || [],
+      paths: [],
+      failedCount: 0
+    }
+  ];
   evidenceGroups.value = groups;
+  comparisonGroups.value = comparisons;
   evidenceLoading.value = true;
   try {
-    await Promise.all(groups.map(async (group) => {
+    await Promise.all([...groups, ...comparisons].map(async (group) => {
       const results = await downloadFileResults(group.fileIds);
       if (selectedIssue.value?.id !== issueId) return;
       group.paths = results.flatMap((result) => result.path ? [result.path] : []);
       group.failedCount = results.filter((result) => !result.path).length;
     }));
     evidenceGroups.value = [...groups];
+    comparisonGroups.value = [...comparisons];
   } finally {
     if (selectedIssue.value?.id === issueId) evidenceLoading.value = false;
   }
-}
-
-async function submitCreate() {
-  if (submitting.value) return;
-  if (!currentProject.value || !createForm.title.trim()) { showToast('请填写质量问题标题'); return; }
-  const assignee = assignees.value[createForm.assigneeIndex];
-  if (!assignee) { showToast('请选择整改负责人'); return; }
-  if (!createPhotoPaths.value.length) { showToast('请上传至少一张问题照片'); return; }
-  submitting.value = true;
-  let photoFileIds: number[] = [];
-  try {
-    photoFileIds = await uploadPhotoIds(createPhotoPaths.value, '质量问题照片', { projectId: currentProject.value.id, businessType: 'QUALITY_PENDING' });
-    await createQualityIssue({ projectId: currentProject.value.id, requestKey: createRequestKey.value, title: createForm.title.trim(), location: createForm.location, description: createForm.description, severity: createForm.severity, assigneeId: assignee.userId, deadline: createForm.deadline, photoFileIds });
-    showToast('质量问题已发起'); sheetMode.value = null; await refresh();
-  } catch (error) { await deleteFileResources(photoFileIds); showToast(error instanceof Error ? error.message : '发起失败'); }
-  finally { submitting.value = false; }
 }
 
 async function submitAssign() {
@@ -487,9 +573,7 @@ async function submitReview(passed: boolean) {
   finally { submitting.value = false; }
 }
 
-function setAssignee(event: unknown) { createForm.assigneeIndex = Number((event as { detail?: { value?: number | string } }).detail?.value || 0); }
 function setAssignAssignee(event: unknown) { assignForm.assigneeIndex = Number((event as { detail?: { value?: number | string } }).detail?.value || 0); }
-function setDeadline(event: unknown) { createForm.deadline = String((event as { detail?: { value?: string } }).detail?.value || ''); }
 function setAssignDeadline(event: unknown) { assignForm.deadline = String((event as { detail?: { value?: string } }).detail?.value || ''); }
 function severityLabel(value: string) { return value === 'DANGER' ? '严重' : value === 'WARNING' ? '重要' : '一般'; }
 function formatTime(value?: string) { return value ? value.replace('T', ' ').slice(0, 16) : '时间未设置'; }
@@ -498,17 +582,16 @@ function previewEvidencePhoto(group: EvidenceGroup, path: string) {
   uni.previewImage({ urls: group.paths, current: path });
 }
 
-function localPhotoPaths(target: 'create' | 'rectification' | 'review') {
-  if (target === 'create') return createPhotoPaths;
+function localPhotoPaths(target: 'rectification' | 'review') {
   if (target === 'rectification') return rectificationPhotoPaths;
   return reviewPhotoPaths;
 }
 
-function previewLocalPhoto(target: 'create' | 'rectification' | 'review', path: string) {
+function previewLocalPhoto(target: 'rectification' | 'review', path: string) {
   uni.previewImage({ urls: localPhotoPaths(target).value, current: path });
 }
 
-function removeLocalPhoto(target: 'create' | 'rectification' | 'review', index: number) {
+function removeLocalPhoto(target: 'rectification' | 'review', index: number) {
   if (submitting.value) return;
   const paths = localPhotoPaths(target);
   paths.value = paths.value.filter((_, currentIndex) => currentIndex !== index);
@@ -535,11 +618,10 @@ function closeSheet() {
   sheetMode.value = null;
 }
 
-function choosePhotos(target: 'create' | 'rectification' | 'review') {
+function choosePhotos(target: 'rectification' | 'review') {
   if (submitting.value) return;
   uni.chooseImage({ count: 6, sizeType: ['compressed'], sourceType: ['camera', 'album'], success: (result) => {
     const paths = result.tempFilePaths || [];
-    if (target === 'create') createPhotoPaths.value = [...createPhotoPaths.value, ...paths].slice(0, 6);
     if (target === 'rectification') rectificationPhotoPaths.value = [...rectificationPhotoPaths.value, ...paths].slice(0, 6);
     if (target === 'review') reviewPhotoPaths.value = [...reviewPhotoPaths.value, ...paths].slice(0, 6);
   } });
@@ -578,7 +660,7 @@ async function openDocument(file: FileResourceItem) {
 
 <template>
   <view class="workspace-shell quality-page" :style="{ '--page-accent': ACCENT, '--page-accent-deep': WORKSPACE_THEME.accentDeep, '--page-tint': TINT, '--page-tint-strong': WORKSPACE_THEME.tintStrong, '--page-background': WORKSPACE_THEME.page }">
-    <AppNavBar title="质量管理" :show-back="false" />
+    <AppNavBar title="质量周检" :show-back="false" />
     <scroll-view class="workspace-scroll" scroll-y enable-flex lower-threshold="80" :style="scrollStyle" @scrolltolower="loadMoreIssues">
       <view class="workspace-content">
         <WorkspaceAreaSwitcher
@@ -597,15 +679,28 @@ async function openDocument(file: FileResourceItem) {
             <view class="quality-primary-main">
               <view class="action-icon-wrap"><image src="/static/design-preview-icons/quality-inspect.png" mode="aspectFit" /></view>
               <view class="quality-primary-copy">
-                <text class="quality-primary-title">发起质量检查</text>
-                <text class="quality-primary-subtitle">{{ canManage ? '记录现场问题并指派整改' : '当前账号暂无质量问题发起权限' }}</text>
+                <text class="quality-primary-title">新建 / 继续本周周检</text>
+                <text class="quality-primary-subtitle">{{ canManage ? '共享草稿整理完成后整批提交' : '当前账号暂无质量周检发起权限' }}</text>
               </view>
             </view>
             <view class="quality-primary-cta">
-              <text>{{ canManage ? '立即发起' : '暂无权限' }}</text>
+              <text>{{ canManage ? '进入周检' : '暂无权限' }}</text>
               <text v-if="canManage" class="quality-primary-arrow"></text>
             </view>
           </button>
+          <picker class="past-week-picker" mode="date" :end="currentDateText" @change="openSelectedWeek"><view>需要补录往期周检？选择日期后进入对应自然周</view></picker>
+          <view class="section-block weekly-section">
+            <view class="section-head"><view><text class="section-title">周检记录</text><text class="section-subtitle">共享草稿与已提交记录</text></view><text class="section-note">{{ weeklyInspections.length }}/{{ weeklyTotal }} 条</text></view>
+            <view class="plain-list">
+              <button v-for="item in weeklyInspections" :key="item.id" class="plain-row weekly-row" @tap="openWeeklyInspection(item)">
+                <view class="plain-copy"><text class="plain-title">{{ item.weekStart }} 至 {{ item.weekEnd }}</text><text class="plain-meta">{{ item.status === 'DRAFT' ? `共享整理中 · ${item.lastEditedByName || item.createdByName || '项目成员'}` : `${item.submittedIssueCount} 个问题 · ${item.submittedByName || '已提交'}` }}</text></view>
+                <WorkspaceStatusPill :label="weeklyStatusLabel(item)" :tone="item.status === 'DRAFT' ? 'amber' : 'green'" /><text class="row-arrow"></text>
+              </button>
+              <view v-if="!weeklyInspections.length" class="empty-line">暂无周检记录，可从上方创建本周或补录往期周检</view>
+              <button v-else-if="hasMoreWeeklyInspections" class="weekly-more" :disabled="weeklyLoadingMore" @tap="loadMoreWeeklyInspections">{{ weeklyLoadingMore ? '正在加载...' : '查看更多周检记录' }}</button>
+              <view v-else class="weekly-complete">已显示全部 {{ weeklyTotal }} 条周检记录</view>
+            </view>
+          </view>
           <button class="my-todo-banner" @tap="openQualityTodos">
             <view><text>我的质量待办</text><text>{{ qualityTodos.length ? `${qualityTodos.length} 项需要处理` : '当前没有待处理任务' }}</text></view>
             <view><text>{{ qualityTodos.length }}</text><text class="quality-document-arrow"></text></view>
@@ -613,12 +708,13 @@ async function openDocument(file: FileResourceItem) {
           <view class="section-block list-section">
             <view class="section-head">
               <view class="section-heading">
-                <view class="section-title-line"><text class="section-title">优先处理</text><WorkspaceStatusPill :label="`${summary.pendingCount + summary.recheckCount} 项未闭环`" tone="amber" /></view>
-                <text class="section-subtitle">按逾期和闭环期限排序</text>
+                <view class="section-title-line"><text class="section-title">整改闭环</text><WorkspaceStatusPill :label="`${summary.pendingCount + summary.recheckCount} 项未闭环`" tone="amber" /></view>
+                <text class="section-subtitle">周检问题与历史独立问题，按逾期和期限排序</text>
               </view>
               <button class="quality-document-link" @tap="openDocuments"><text>质量资料</text><text class="quality-document-arrow"></text></button>
             </view>
             <WorkspaceSegmentControl :model-value="activeFilter" :options="filters" :accent="ACCENT" :tint="TINT" @update:model-value="setFilter" />
+            <WorkspaceSegmentControl class="source-control" :model-value="activeSource" :options="sourceFilters" :accent="ACCENT" :tint="TINT" @update:model-value="setSource" />
             <view class="search-box"><text class="search-icon"></text><input v-model="keyword" class="search-input" confirm-type="search" placeholder="搜索问题、位置、负责人" placeholder-class="search-placeholder" @confirm="applySearch" /><button class="search-submit" @tap="applySearch">搜索</button></view>
             <view class="plain-list">
               <button v-for="issue in filteredIssues" :key="issue.id" class="plain-row issue-row" @tap="openDetail(issue)"><text class="issue-indicator" :class="statusTone(issue)"></text><view class="plain-copy"><view class="issue-title-line"><text class="plain-title">{{ issue.title }}</text><text class="severity-tag" :class="issue.severity.toLowerCase()">{{ severityLabel(issue.severity) }}</text></view><text class="plain-meta">{{ issue.location || '未设置位置' }} · {{ issue.assigneeName || '未指定负责人' }}</text><text class="due-text" :class="statusTone(issue)">{{ issue.dueText }}</text></view><WorkspaceStatusPill :label="statusLabel(issue)" :tone="statusTone(issue)" /><text class="row-arrow"></text></button>
@@ -643,17 +739,8 @@ async function openDocument(file: FileResourceItem) {
 
     <view v-if="sheetMode" class="form-overlay" @tap="closeSheet">
       <view class="form-sheet" @tap.stop>
-        <view class="sheet-handle"></view><view class="form-head"><text class="form-title">{{ sheetMode === 'create' ? '发起质量检查' : sheetMode === 'assign' ? '改派与调整期限' : sheetMode === 'void' ? '作废质量问题' : sheetMode === 'todos' ? '我的质量待办' : sheetMode === 'documents' ? '质量资料' : '质量问题详情' }}</text><button class="form-close" :disabled="submitting" @tap="closeSheet">×</button></view>
-        <template v-if="sheetMode === 'create'">
-          <view class="form-field"><text class="form-label">问题标题 *</text><input v-model="createForm.title" class="form-input" maxlength="200" placeholder="例如：防水层收口不完整" /></view>
-          <view class="form-field"><text class="form-label">问题位置</text><input v-model="createForm.location" class="form-input" maxlength="200" placeholder="楼层、轴线或作业面" /></view>
-          <view class="form-field"><text class="form-label">问题描述</text><textarea v-model="createForm.description" class="form-textarea" maxlength="1000" placeholder="描述检查发现和整改要求" /></view>
-          <view class="form-grid"><view class="form-field"><text class="form-label">整改负责人 *</text><picker :range="assignees" range-key="displayName" :value="Math.max(createForm.assigneeIndex, 0)" @change="setAssignee"><view class="form-picker">{{ assignees[createForm.assigneeIndex]?.displayName || '请选择整改负责人' }}</view></picker></view><view class="form-field"><text class="form-label">闭环期限</text><picker mode="date" :value="createForm.deadline" @change="setDeadline"><view class="form-picker">{{ createForm.deadline }}</view></picker></view></view>
-          <view class="severity-row"><button v-for="item in ['NORMAL','WARNING','DANGER']" :key="item" :class="{ active: createForm.severity === item }" @tap="createForm.severity = item as typeof createForm.severity">{{ severityLabel(item) }}</button></view>
-          <view class="form-field photo-field"><text class="form-label">问题照片 *</text><button class="photo-picker" :disabled="submitting" @tap="choosePhotos('create')">+ 拍摄/选择照片</button><view class="quality-photo-grid"><view v-for="(path, index) in createPhotoPaths" :key="path" class="local-photo"><image :src="path" mode="aspectFill" @tap="previewLocalPhoto('create', path)" /><button @tap.stop="removeLocalPhoto('create', index)">×</button></view></view></view>
-          <view class="form-actions"><button class="secondary-action" :disabled="submitting" @tap="closeSheet">取消</button><button class="primary-action" :disabled="submitting" @tap="submitCreate">确认发起</button></view>
-        </template>
-        <template v-else-if="sheetMode === 'documents'">
+        <view class="sheet-handle"></view><view class="form-head"><text class="form-title">{{ sheetMode === 'assign' ? '改派与调整期限' : sheetMode === 'void' ? '作废质量问题' : sheetMode === 'todos' ? '我的质量待办' : sheetMode === 'documents' ? '质量资料' : '质量问题详情' }}</text><button class="form-close" :disabled="submitting" @tap="closeSheet">×</button></view>
+        <template v-if="sheetMode === 'documents'">
           <view class="document-source-note"><text>资料来源</text><text>由项目质量管理员在 PC 端维护，小程序仅支持查看</text></view>
           <view v-if="documentsLoading" class="empty-line">正在加载质量资料</view>
           <view v-else-if="documentsError" class="document-error"><text>{{ documentsError }}</text><button @tap="openDocuments">重新加载</button></view>
@@ -688,8 +775,17 @@ async function openDocument(file: FileResourceItem) {
           <text class="issue-detail-title">{{ selectedIssue.title }}</text>
           <view class="detail-lines"><view><text>问题位置</text><text>{{ selectedIssue.location || '未设置' }}</text></view><view><text>整改负责人</text><text>{{ selectedIssue.assigneeName || '未指定' }}</text></view><view><text>闭环期限</text><text>{{ selectedIssue.deadline || '未设置' }}</text></view><view><text>问题描述</text><text>{{ selectedIssue.description || '无' }}</text></view></view>
           <view v-if="canManage && !['CLOSED', 'VOIDED'].includes(selectedIssue.status)" class="management-actions"><button class="outline-action" @tap="openAssign">改派 / 调整闭环期限</button><button class="outline-action danger" @tap="openVoid">作废问题</button></view>
+          <view class="comparison-section">
+            <text class="comparison-heading">整改前后照片对比</text>
+            <view v-for="group in comparisonGroups" :key="group.key" class="comparison-group">
+              <view class="evidence-group-head"><text>{{ group.title }}</text><text>{{ group.fileIds.length }} 张</text></view>
+              <view v-if="group.paths.length" class="quality-photo-grid"><image v-for="path in group.paths" :key="path" :src="path" mode="aspectFill" @tap="previewEvidencePhoto(group, path)" /></view>
+              <text v-else class="comparison-empty">{{ group.key === 'comparison-latest' ? '尚未提交整改照片' : '暂无原始问题照片' }}</text>
+              <text v-if="group.failedCount" class="evidence-error">{{ group.failedCount }} 张照片加载失败</text>
+            </view>
+          </view>
           <view class="evidence-section">
-            <view class="evidence-heading"><text>现场与整改证据</text><button v-if="evidenceFailureCount" @tap="loadEvidenceGroups">重新加载</button></view>
+            <view class="evidence-heading"><text>完整证据时间线</text><button v-if="evidenceFailureCount" @tap="loadEvidenceGroups">重新加载</button></view>
             <view v-if="evidenceLoading" class="evidence-loading">正在加载证据附件</view>
             <view v-for="group in evidenceGroups" :key="group.key" class="evidence-group">
               <view class="evidence-group-head"><text>{{ group.title }}</text><text>{{ group.operator || '-' }} · {{ formatTime(group.time) }}</text></view>
@@ -772,6 +868,14 @@ async function openDocument(file: FileResourceItem) {
 .quality-primary[disabled] .quality-primary-title { color: #5e6f7e; }
 .quality-primary[disabled] .quality-primary-subtitle { color: #7a8996; }
 .quality-primary[disabled] .quality-primary-cta { color: #7a8996; }
+.past-week-picker { margin-top: -7rpx; }
+.past-week-picker view { padding: 8rpx 4rpx; color: var(--page-accent-deep); font-size: 20rpx; font-weight: 700; text-align: center; }
+.weekly-section .plain-list { padding-top: 0; }
+.weekly-row { min-height: 100rpx; }
+.weekly-row :deep(.status-pill) { flex-shrink: 0; }
+.weekly-more { width: 100%; min-height: 68rpx; margin: 4rpx 0 0; border: 0; background: transparent; color: var(--page-accent-deep); font-size: 20rpx; font-weight: 750; }
+.weekly-more::after { border: 0; }
+.weekly-complete { padding: 18rpx 0 10rpx; color: var(--workspace-text-muted); font-size: 18rpx; text-align: center; }
 .my-todo-banner { display: flex; width: 100%; min-height: 72rpx; align-items: center; justify-content: space-between; margin: 0; padding: 12rpx 18rpx; border: 1rpx solid var(--workspace-divider); border-radius: 14rpx; background: #fff; color: var(--workspace-text); text-align: left; }
 .my-todo-banner::after { border: 0; }
 .my-todo-banner > view { display: flex; align-items: center; gap: 10rpx; }
@@ -866,6 +970,11 @@ async function openDocument(file: FileResourceItem) {
 .local-photo button { position: absolute; top: -8rpx; right: -8rpx; display: flex; width: 36rpx; height: 36rpx; align-items: center; justify-content: center; margin: 0; padding: 0; border: 2rpx solid #fff; border-radius: 999rpx; background: rgba(34, 50, 71, .82); color: #fff; font-size: 25rpx; line-height: 1; }
 .local-photo button::after { border: 0; }
 .detail-photos { margin: 18rpx 0; }
+.comparison-section { margin: 18rpx 0; padding: 16rpx 18rpx; border-radius: 14rpx; background: #f2f7f5; }
+.comparison-heading { display: block; margin-bottom: 6rpx; color: var(--workspace-text); font-size: 22rpx; font-weight: 800; }
+.comparison-group { padding: 14rpx 0; border-bottom: 1rpx solid var(--workspace-divider); }
+.comparison-group:last-child { border-bottom: 0; }
+.comparison-empty { display: block; padding: 20rpx 0 8rpx; color: var(--workspace-text-muted); font-size: 20rpx; text-align: center; }
 .evidence-section { margin: 18rpx 0; padding: 16rpx 18rpx; border-radius: 14rpx; background: #f7f9fb; }
 .evidence-heading { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; }
 .evidence-heading > text { color: var(--workspace-text); font-size: 22rpx; font-weight: 750; }

@@ -689,11 +689,62 @@ CREATE TABLE inspection_rectification_review_log (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='检查整改闭环留痕表';
 
 -- =============================================
--- 22. 质量问题闭环表
+-- 22. 质量周检共享草稿与正式记录
+-- =============================================
+CREATE TABLE quality_weekly_inspection (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '质量周检ID',
+    project_id BIGINT NOT NULL COMMENT '项目ID',
+    inspection_no VARCHAR(40) COMMENT '正式周检编号，草稿为空',
+    week_start DATE NOT NULL COMMENT '自然周周一',
+    inspection_date DATE COMMENT '实际检查日期',
+    conclusion VARCHAR(1000) COMMENT '周检结论',
+    status VARCHAR(20) NOT NULL DEFAULT 'DRAFT' COMMENT 'DRAFT/SUBMITTED',
+    submitted_issue_count INT NOT NULL DEFAULT 0 COMMENT '提交时问题数快照',
+    created_by_id BIGINT NOT NULL COMMENT '草稿创建人',
+    created_by_name VARCHAR(50) COMMENT '草稿创建人姓名快照',
+    last_edited_by_id BIGINT NOT NULL COMMENT '最近编辑人',
+    last_edited_by_name VARCHAR(50) COMMENT '最近编辑人姓名快照',
+    submitted_by_id BIGINT COMMENT '提交人',
+    submitted_by_name VARCHAR(50) COMMENT '提交人姓名快照',
+    submitted_time DATETIME COMMENT '实际提交时间',
+    version INT NOT NULL DEFAULT 0 COMMENT '共享草稿并发版本',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_quality_weekly_project_week (project_id, week_start),
+    UNIQUE KEY uk_quality_weekly_inspection_no (inspection_no),
+    KEY idx_quality_weekly_project_status (project_id, status, week_start),
+    KEY idx_quality_weekly_submitted_time (project_id, submitted_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='质量周检共享草稿与正式记录';
+
+CREATE TABLE quality_weekly_inspection_draft_item (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '周检问题草稿ID',
+    project_id BIGINT NOT NULL COMMENT '项目ID，服务端从父周检写入',
+    inspection_id BIGINT NOT NULL COMMENT '质量周检ID',
+    item_key VARCHAR(100) NOT NULL COMMENT '客户端稳定问题键',
+    item_order INT NOT NULL COMMENT '问题顺序1-50',
+    title VARCHAR(200) COMMENT '问题标题，草稿允许为空',
+    location VARCHAR(200) COMMENT '问题位置',
+    description VARCHAR(1000) COMMENT '问题描述',
+    severity VARCHAR(20) COMMENT 'NORMAL/WARNING/DANGER',
+    assignee_id BIGINT COMMENT '整改负责人',
+    assignee_name VARCHAR(50) COMMENT '整改负责人姓名快照',
+    deadline DATE COMMENT '闭环期限',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_quality_weekly_item_key (inspection_id, item_key),
+    UNIQUE KEY uk_quality_weekly_item_order (inspection_id, item_order),
+    KEY idx_quality_weekly_item_project (project_id, inspection_id),
+    KEY idx_quality_weekly_item_inspection (inspection_id, item_order)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='质量周检问题共享草稿';
+
+-- =============================================
+-- 23. 质量问题闭环表
 -- =============================================
 CREATE TABLE quality_issue (
     id                              BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '质量问题ID',
     project_id                      BIGINT NOT NULL COMMENT '施工区域/项目ID',
+    weekly_inspection_id            BIGINT COMMENT '所属质量周检ID，历史独立问题为空',
+    inspection_item_order           INT COMMENT '周检内问题顺序',
     issue_no                        VARCHAR(40) NOT NULL COMMENT '问题编号',
     request_key                     VARCHAR(100) COMMENT '客户端创建请求幂等键',
     title                           VARCHAR(200) NOT NULL COMMENT '问题标题',
@@ -721,11 +772,12 @@ CREATE TABLE quality_issue (
     UNIQUE KEY uk_quality_issue_request (project_id, created_by_id, request_key),
     KEY idx_quality_issue_project_status (project_id, status, deleted),
     KEY idx_quality_issue_assignee (assignee_id, status, deleted),
-    KEY idx_quality_issue_deadline (project_id, deadline, status, deleted)
+    KEY idx_quality_issue_deadline (project_id, deadline, status, deleted),
+    KEY idx_quality_issue_weekly (weekly_inspection_id, inspection_item_order, deleted)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='质量问题闭环';
 
 -- =============================================
--- 23. 质量问题操作留痕表
+-- 24. 质量问题操作留痕表
 -- =============================================
 CREATE TABLE quality_issue_log (
     id              BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '日志ID',
@@ -1429,3 +1481,16 @@ WHERE @baseline_platform_admin_role_id IS NOT NULL
 INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260808_SEAL_APPLICATION_V1');
 INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260810_SITE_ACCESS_VISITOR_IDENTITY_HMAC_V1');
 INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260814_SITE_ACCESS_GUARD_VISITOR_REGISTRATION_V1');
+
+-- 仅重命名已存在且启用的正式质量菜单；不创建或恢复历史入口。
+UPDATE sys_menu
+SET menu_name = '质量周检'
+WHERE menu_code = 'WEB_QUALITY' AND enabled = 1 AND deleted = 0;
+UPDATE sys_menu
+SET menu_name = '质量周检'
+WHERE menu_code = 'MINI_QUALITY' AND enabled = 1 AND deleted = 0;
+UPDATE sys_menu
+SET menu_name = '周检记录'
+WHERE menu_code = 'QUALITY_ISSUES' AND enabled = 1 AND deleted = 0;
+
+INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260826_QUALITY_WEEKLY_INSPECTION_V1');

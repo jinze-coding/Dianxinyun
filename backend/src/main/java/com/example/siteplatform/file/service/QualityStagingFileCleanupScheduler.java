@@ -18,6 +18,7 @@ import java.time.LocalDateTime;
 )
 public class QualityStagingFileCleanupScheduler {
     private static final Logger log = LoggerFactory.getLogger(QualityStagingFileCleanupScheduler.class);
+    private static final long PENDING_DELETE_RECOVERY_GRACE_MINUTES = 10;
 
     private final QualityStagingFileCleanupService cleanupService;
     private final long ttlHours;
@@ -43,13 +44,22 @@ public class QualityStagingFileCleanupScheduler {
             fixedDelayString = "${file.cleanup.quality-staging.fixed-delay-ms:3600000}"
     )
     public void cleanupExpiredFiles() {
-        LocalDateTime cutoff = LocalDateTime.now().minusHours(ttlHours);
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime cutoff = now.minusHours(ttlHours);
         QualityStagingFileCleanupService.CleanupResult result =
                 cleanupService.cleanupExpired(cutoff, batchSize);
         if (result.scannedCount() > 0) {
             log.info("质量暂存附件清理完成: scanned={}, deleted={}, failed={}, skipped={}",
                     result.scannedCount(), result.deletedCount(),
                     result.failedCount(), result.skippedCount());
+        }
+        QualityStagingFileCleanupService.CleanupResult recovery =
+                cleanupService.cleanupPendingDeletes(
+                        now.minusMinutes(PENDING_DELETE_RECOVERY_GRACE_MINUTES), batchSize);
+        if (recovery.scannedCount() > 0) {
+            log.info("提交后物理文件清理恢复完成: scanned={}, deleted={}, failed={}, skipped={}",
+                    recovery.scannedCount(), recovery.deletedCount(),
+                    recovery.failedCount(), recovery.skippedCount());
         }
     }
 }

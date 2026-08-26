@@ -720,11 +720,14 @@ export interface QualityIssueLog {
 export interface QualityIssue {
   id: number;
   projectId: number;
+  weeklyInspectionId?: number;
+  inspectionItemOrder?: number;
   issueNo: string;
   title: string;
   location?: string;
   description?: string;
   issuePhotoFileIds?: number[];
+  originalProblemPhotoFileIds?: number[];
   severity: 'NORMAL' | 'WARNING' | 'DANGER';
   status: QualityIssueStatus;
   assigneeId?: number;
@@ -732,6 +735,7 @@ export interface QualityIssue {
   deadline?: string;
   rectificationDescription?: string;
   rectificationPhotoFileIds?: number[];
+  latestRectificationPhotoFileIds?: number[];
   rectifiedTime?: string;
   reviewerName?: string;
   reviewComment?: string;
@@ -753,6 +757,68 @@ export interface QualitySummary {
   recheckCount: number;
   closedCount: number;
   closureRate: number;
+  canManage: boolean;
+}
+
+export type QualityWeeklyInspectionStatus = 'DRAFT' | 'SUBMITTED';
+
+export interface QualityWeeklyDraftItem {
+  id?: number;
+  itemKey: string;
+  itemOrder: number;
+  title?: string;
+  location?: string;
+  description?: string;
+  severity?: 'NORMAL' | 'WARNING' | 'DANGER';
+  assigneeId?: number;
+  assigneeName?: string;
+  deadline?: string;
+  beforePhotoFileIds: number[];
+}
+
+export interface QualityWeeklyInspection {
+  id: number;
+  projectId: number;
+  inspectionNo?: string;
+  weekStart: string;
+  weekEnd: string;
+  inspectionDate?: string;
+  status: QualityWeeklyInspectionStatus;
+  conclusion?: string;
+  overviewPhotoFileIds: number[];
+  submittedIssueCount: number;
+  pendingCount: number;
+  recheckCount: number;
+  closedCount: number;
+  voidedCount: number;
+  createdByName?: string;
+  lastEditedByName?: string;
+  submittedByName?: string;
+  createTime?: string;
+  updateTime?: string;
+  submittedTime?: string;
+  version: number;
+  lateSubmission: boolean;
+  draftItems: QualityWeeklyDraftItem[];
+  issues: QualityIssue[];
+}
+
+export interface QualityWeeklySummary {
+  projectId: number;
+  weekStart: string;
+  weekEnd: string;
+  hasInspection: boolean;
+  inspectionId?: number;
+  inspectionNo?: string;
+  status?: QualityWeeklyInspectionStatus;
+  version?: number;
+  draftItemCount: number;
+  submittedIssueCount: number;
+  pendingCount: number;
+  recheckCount: number;
+  closedCount: number;
+  voidedCount: number;
+  lateSubmission: boolean;
   canManage: boolean;
 }
 

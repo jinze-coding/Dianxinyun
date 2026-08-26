@@ -350,6 +350,36 @@ class AdministrativeDeletionServiceTest {
     }
 
     @Test
+    void projectPreviewIncludesWeeklyDraftIssuesAndQualityLogsInDeletionSignature() {
+        when(jdbc.queryForList(org.mockito.ArgumentMatchers.argThat(
+                sql -> sql != null && sql.contains("SELECT id, project_name FROM project_info")),
+                any(Object[].class))).thenReturn(List.of(Map.of(
+                        "id", 12L,
+                        "project_name", "质量周检项目")));
+        when(jdbc.queryForObject(anyString(),
+                org.mockito.ArgumentMatchers.eq(Long.class), any(Object[].class))).thenAnswer(invocation -> {
+            String sql = invocation.getArgument(0);
+            if (sql.contains("`quality_weekly_inspection_draft_item`")) return 2L;
+            if (sql.contains("`quality_weekly_inspection`")) return 1L;
+            if (sql.contains("`quality_issue_log`")) return 4L;
+            if (sql.contains("`quality_issue`")) return 3L;
+            return 0L;
+        });
+        when(jdbc.queryForMap(anyString(), any(Object[].class)))
+                .thenReturn(Map.of("file_count", 0L, "file_bytes", 0L));
+        AdministrativeDeletionPreviewRequest request = new AdministrativeDeletionPreviewRequest();
+        request.setTargetType("PROJECT");
+        request.setTargetId(12L);
+
+        var impact = service.preview(request, operator);
+
+        assertEquals(10L, impact.getItems().stream()
+                .filter(item -> "quality".equals(item.getCode()))
+                .findFirst().orElseThrow().getCount());
+        assertNotNull(impact.getConfirmationToken());
+    }
+
+    @Test
     void projectWithSubmittedSealHistoryCannotBePhysicallyDeleted() {
         when(jdbc.queryForList(org.mockito.ArgumentMatchers.argThat(
                 sql -> sql != null && sql.contains("SELECT id, project_name FROM project_info")),

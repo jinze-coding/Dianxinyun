@@ -90,19 +90,30 @@ public class QualityIssueService {
     private WechatNotificationService wechatNotificationService;
 
     public List<QualityIssueVO> listIssues(Long projectId, String status, String keyword, SysUser currentUser) {
+        return listIssues(projectId, status, keyword, "ALL", currentUser);
+    }
+
+    public List<QualityIssueVO> listIssues(Long projectId, String status, String keyword,
+                                           String source, SysUser currentUser) {
         requireProject(projectId, currentUser);
-        return issueMapper.selectList(buildIssueQuery(projectId, status, keyword)).stream()
+        return issueMapper.selectList(buildIssueQuery(projectId, status, keyword, source)).stream()
                 .map(issue -> toVO(issue, currentUser, false))
                 .toList();
     }
 
     public PageResult<QualityIssueVO> pageIssues(Long projectId, String status, String keyword,
                                                   Integer pageNo, Integer pageSize, SysUser currentUser) {
+        return pageIssues(projectId, status, keyword, "ALL", pageNo, pageSize, currentUser);
+    }
+
+    public PageResult<QualityIssueVO> pageIssues(Long projectId, String status, String keyword,
+                                                  String source, Integer pageNo, Integer pageSize,
+                                                  SysUser currentUser) {
         requireProject(projectId, currentUser);
         int page = pageNo == null ? 1 : Math.max(1, pageNo);
         int size = pageSize == null ? 20 : Math.max(1, Math.min(pageSize, 100));
         Page<QualityIssue> result = issueMapper.selectPage(
-                new Page<>(page, size), buildIssueQuery(projectId, status, keyword));
+                new Page<>(page, size), buildIssueQuery(projectId, status, keyword, source));
         return PageResult.of(page, size, result.getTotal(), result.getRecords().stream()
                 .map(issue -> toVO(issue, currentUser, false))
                 .toList());
@@ -148,7 +159,8 @@ public class QualityIssueService {
     }
 
     @Transactional
-    public QualityIssueVO createIssue(QualityIssueCreateRequest request, SysUser currentUser) {
+    @Deprecated(forRemoval = false)
+    QualityIssueVO createIssue(QualityIssueCreateRequest request, SysUser currentUser) {
         validateCreateRequest(request);
         requireManage(currentUser, request.getProjectId());
         String requestKey = normalizeRequestKey(request.getRequestKey());
@@ -456,9 +468,18 @@ public class QualityIssueService {
         }
     }
 
-    private LambdaQueryWrapper<QualityIssue> buildIssueQuery(Long projectId, String status, String keyword) {
+    private LambdaQueryWrapper<QualityIssue> buildIssueQuery(Long projectId, String status,
+                                                               String keyword, String source) {
         LambdaQueryWrapper<QualityIssue> wrapper = new LambdaQueryWrapper<QualityIssue>()
                 .eq(QualityIssue::getProjectId, projectId);
+        String normalizedSource = StringUtils.hasText(source) ? source.trim().toUpperCase() : "ALL";
+        if ("WEEKLY".equals(normalizedSource)) {
+            wrapper.isNotNull(QualityIssue::getWeeklyInspectionId);
+        } else if ("HISTORICAL".equals(normalizedSource)) {
+            wrapper.isNull(QualityIssue::getWeeklyInspectionId);
+        } else if (!"ALL".equals(normalizedSource)) {
+            throw new BusinessException("质量问题来源只支持 ALL、WEEKLY 或 HISTORICAL");
+        }
         if (StringUtils.hasText(status) && !"ALL".equalsIgnoreCase(status)) {
             if ("OVERDUE".equalsIgnoreCase(status)) {
                 wrapper.in(QualityIssue::getStatus, List.of(STATUS_PENDING, STATUS_RECHECK))
@@ -606,8 +627,10 @@ public class QualityIssueService {
         List<Long> issuePhotos = includeLogs ? attachmentIds(issue.getId(), "QUALITY_ISSUE") : Collections.emptyList();
         List<Long> rectificationPhotos = includeLogs ? attachmentIds(issue.getId(), "QUALITY_RECTIFICATION") : Collections.emptyList();
         vo.setIssuePhotoFileIds(issuePhotos);
+        vo.setOriginalProblemPhotoFileIds(issuePhotos);
         vo.setRectificationPhotoFileIds(rectificationPhotos.isEmpty()
                 ? splitIds(issue.getRectificationPhotoFileIds()) : rectificationPhotos);
+        vo.setLatestRectificationPhotoFileIds(splitIds(issue.getRectificationPhotoFileIds()));
         vo.setReviewPhotoFileIds(includeLogs ? attachmentIds(issue.getId(), "QUALITY_REVIEW") : Collections.emptyList());
         boolean overdue = isOverdue(issue);
         boolean pending = STATUS_PENDING.equals(issue.getStatus());
@@ -626,6 +649,10 @@ public class QualityIssueService {
                 .eq(QualityIssueLog::getIssueId, issue.getId())
                 .orderByDesc(QualityIssueLog::getCreateTime)) : Collections.emptyList());
         return vo;
+    }
+
+    QualityIssueVO toWeeklyIssueVO(QualityIssue issue, SysUser currentUser, boolean includeLogs) {
+        return toVO(issue, currentUser, includeLogs);
     }
 
     private String buildDueText(QualityIssue issue, boolean overdue) {

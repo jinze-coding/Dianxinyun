@@ -17,6 +17,8 @@ public class QualityIssue {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long projectId;
+    private Long weeklyInspectionId;
+    private Integer inspectionItemOrder;
     private String issueNo;
     private String requestKey;
     private String title;

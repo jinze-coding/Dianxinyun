@@ -32,6 +32,7 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
     static final String ELECTRIC_BOXES = "/api/v1/electric-boxes";
     static final String FILES = "/api/v1/files";
     static final String QUALITY_ISSUES = "/api/v1/quality/issues";
+    static final String QUALITY_WEEKLY_INSPECTIONS = "/api/v1/quality/weekly-inspections";
     static final String SITE_ACCESS = "/api/v1/site-access";
 
     private final AuthService authService;
@@ -130,6 +131,9 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
                 return SystemPermissionCodes.QUALITY_REVIEW;
             }
             return SystemPermissionCodes.QUALITY_MANAGE;
+        }
+        if (matchesModule(normalizedPath, QUALITY_WEEKLY_INSPECTIONS)) {
+            return read ? SystemPermissionCodes.QUALITY_VIEW : SystemPermissionCodes.QUALITY_MANAGE;
         }
         if (matchesModule(normalizedPath, SITE_ACCESS)) {
             if (normalizedPath.equals(SITE_ACCESS + "/visitors/export")) {
