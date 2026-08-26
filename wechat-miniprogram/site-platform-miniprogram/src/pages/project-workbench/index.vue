@@ -15,7 +15,7 @@ const actions = workbenchActions;
 const projectStats = computed(() => [
   { label: '启用电箱', value: project.value?.electricBoxTotal || 0, tone: 'green' },
   { label: '今日巡检', value: project.value?.todayInspectionCount || 0, tone: 'blue' },
-  { label: '待复核', value: project.value?.pendingReviewCount || 0, tone: 'amber' },
+  { label: '今日待检', value: project.value?.pendingTodoCount || 0, tone: 'amber' },
   { label: '待整改', value: project.value?.pendingRectificationCount || 0, tone: 'red' }
 ]);
 

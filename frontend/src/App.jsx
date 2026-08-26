@@ -5085,7 +5085,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     try {
       const [res] = await Promise.all([getInspectionRecord(record.id)]);
       const detail = res.code === 200 ? res.data : record;
-      setSelectedRecord({ ...detail, status: 'COMPLETED', reviewLogs: [] });
+      setSelectedRecord({ ...detail, reviewLogs: [] });
     } catch (err) {
       console.error('获取巡检记录详情失败', err);
       setSelectedRecord(record);
@@ -6091,7 +6091,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14, fontSize: 12 }}>
           <div style={{ color: T.textSecondary }}>巡检员：<span style={{ color: T.textPrimary }}>{selectedRecord.inspectorName || '-'}</span></div>
-          <div style={{ color: T.textSecondary }}>记录状态：<InspectionPill status="ACTIVE" theme={T}>已完成</InspectionPill></div>
+          <div style={{ color: T.textSecondary }}>记录状态：<InspectionPill status={selectedRecord.status} theme={T}>{RECORD_STATUS_TEXT[selectedRecord.status] || selectedRecord.status || '-'}</InspectionPill></div>
           <div style={{ color: T.textSecondary }}>外观照片：{selectedRecord.outerPhotoCount || selectedRecord.outerPhotoFileIds?.length || 0}</div>
           <div style={{ color: T.textSecondary }}>内部照片：{selectedRecord.innerPhotoCount || selectedRecord.innerPhotoFileIds?.length || 0}</div>
         </div>

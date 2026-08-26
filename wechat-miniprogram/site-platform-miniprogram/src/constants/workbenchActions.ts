@@ -31,14 +31,6 @@ export const workbenchActions: WorkbenchAction[] = [
     appendProjectId: true
   },
   {
-    title: '安全复核',
-    icon: 'review',
-    tone: 'amber',
-    url: '/pages/inspection/review?from=project',
-    targetType: 'navigate',
-    appendProjectId: true
-  },
-  {
     title: '项目巡检汇总',
     icon: 'summary',
     tone: 'purple',

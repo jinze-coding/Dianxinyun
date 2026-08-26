@@ -95,6 +95,7 @@ public class InspectionService {
     public static final String SOURCE_ELECTRICIAN_DAILY = "ELECTRICIAN_DAILY";
     public static final String SOURCE_SAFETY_SPOT_CHECK = "SAFETY_SPOT_CHECK";
 
+    private static final String STATUS_DRAFT = "DRAFT";
     private static final String STATUS_COMPLETED = "COMPLETED";
     private static final String STATUS_REVIEW_PENDING = "REVIEW_PENDING";
     private static final String STATUS_REVIEW_PASSED = "REVIEW_PASSED";
@@ -336,12 +337,20 @@ public class InspectionService {
 
     @Transactional
     public InspectionRecordVO submitRecord(Long id, SysUser currentUser) {
-        InspectionRecord record = requireRecord(id);
+        InspectionRecord record = requireRecordForUpdate(id);
         projectPermissionService.checkProjectPermission(currentUser.getId(), record.getProjectId());
         requireDailySubmitPermission(currentUser, record.getProjectId());
         if (!Objects.equals(record.getInspectorId(), currentUser.getId())
                 && !projectPermissionService.hasInspectionPermission(currentUser.getId(), record.getProjectId(), InspectionPermissionCodes.INSPECTION_RECORD_VIEW)) {
             throw BusinessException.forbidden("只能提交自己的检查记录");
+        }
+        if (STATUS_COMPLETED.equals(record.getStatus())
+                || STATUS_RECTIFICATION_PENDING.equals(record.getStatus())
+                || STATUS_CLOSED.equals(record.getStatus())) {
+            return toRecordVO(record, null, false);
+        }
+        if (!STATUS_DRAFT.equals(record.getStatus())) {
+            throw BusinessException.of(409, "检查记录状态已变化，兼容提交仅支持历史草稿");
         }
         validateRequiredStoredPhotoIds(record.getOuterPhotoFileIds(), "外观照片");
         validateRequiredStoredPhotoIds(record.getInnerPhotoFileIds(), "内部照片");
@@ -2411,6 +2420,14 @@ public class InspectionService {
 
     private InspectionRecord requireRecord(Long id) {
         InspectionRecord record = inspectionRecordMapper.selectById(id);
+        if (record == null) {
+            throw BusinessException.notFound("检查记录不存在");
+        }
+        return record;
+    }
+
+    private InspectionRecord requireRecordForUpdate(Long id) {
+        InspectionRecord record = inspectionRecordMapper.selectByIdForUpdate(id);
         if (record == null) {
             throw BusinessException.notFound("检查记录不存在");
         }

@@ -310,9 +310,10 @@ class InspectionServiceWriteIntegrityTest {
         record.setProjectId(1L);
         record.setElectricBoxId(10L);
         record.setInspectorId(7L);
+        record.setStatus("DRAFT");
         record.setOuterPhotoFileIds("11");
         record.setInnerPhotoFileIds("12");
-        when(recordMapper.selectById(100L)).thenReturn(record);
+        when(recordMapper.selectByIdForUpdate(100L)).thenReturn(record);
         when(recordMapper.updateById(record)).thenReturn(0);
 
         BusinessException error = assertThrows(BusinessException.class,
@@ -328,14 +329,57 @@ class InspectionServiceWriteIntegrityTest {
         record.setProjectId(1L);
         record.setElectricBoxId(10L);
         record.setInspectorId(7L);
+        record.setStatus("DRAFT");
         record.setOuterPhotoFileIds("11");
-        when(recordMapper.selectById(100L)).thenReturn(record);
+        when(recordMapper.selectByIdForUpdate(100L)).thenReturn(record);
 
         BusinessException error = assertThrows(BusinessException.class,
                 () -> service.submitRecord(100L, operator));
 
         assertTrue(error.getMessage().contains("至少上传一张内部照片"));
         verify(recordMapper, never()).updateById(any());
+    }
+
+    @Test
+    void compatibleSubmitReturnsCurrentStatesWithoutLegacyDraftValidationOrWrite() {
+        List<InspectionRecord> records = List.of(
+                recordWithStatus("COMPLETED"),
+                recordWithStatus("RECTIFICATION_PENDING"),
+                recordWithStatus("CLOSED")
+        );
+        when(recordMapper.selectByIdForUpdate(100L)).thenReturn(
+                records.get(0), records.get(1), records.get(2));
+
+        for (InspectionRecord record : records) {
+            assertEquals(record.getStatus(), service.submitRecord(100L, operator).getStatus());
+        }
+
+        verify(recordMapper, never()).updateById(any());
+    }
+
+    @Test
+    void compatibleSubmitRejectsNonDraftHistoricalWorkflowState() {
+        InspectionRecord record = recordWithStatus("REVIEW_PENDING");
+        record.setOuterPhotoFileIds("11");
+        record.setInnerPhotoFileIds("12");
+        when(recordMapper.selectByIdForUpdate(100L)).thenReturn(record);
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.submitRecord(100L, operator));
+
+        assertEquals(409, error.getCode());
+        assertTrue(error.getMessage().contains("仅支持历史草稿"));
+        verify(recordMapper, never()).updateById(any());
+    }
+
+    private InspectionRecord recordWithStatus(String status) {
+        InspectionRecord record = new InspectionRecord();
+        record.setId(100L);
+        record.setProjectId(1L);
+        record.setElectricBoxId(10L);
+        record.setInspectorId(7L);
+        record.setStatus(status);
+        return record;
     }
 
     private InspectionRecordRequest request() {
