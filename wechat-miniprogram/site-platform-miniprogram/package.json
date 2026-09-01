@@ -1,6 +1,6 @@
 {
   "name": "site-platform-miniprogram",
-  "version": "0.1.4",
+  "version": "0.1.8",
   "description": "电信云平台现场端小程序",
   "type": "module",
   "scripts": {
@@ -15,7 +15,8 @@
     "type-check": "vue-tsc --noEmit",
     "test:project-location": "node --experimental-strip-types scripts/test-project-map-navigation.mjs",
     "test:visitor-profile": "node --experimental-strip-types scripts/test-visitor-profile-flow.mjs",
-    "test:scan": "node --experimental-strip-types scripts/test-electric-box-scene.mjs && node --experimental-strip-types scripts/test-visitor-invite-scene.mjs && node --experimental-strip-types scripts/test-guard-visitor-scene.mjs && npm run test:visitor-profile && npm run test:project-location && node --experimental-strip-types scripts/test-seal-scene.mjs",
+    "test:edge-inspection": "node --experimental-strip-types scripts/test-edge-inspection-view.mjs",
+    "test:scan": "node --experimental-strip-types scripts/test-electric-box-scene.mjs && node --experimental-strip-types scripts/test-visitor-invite-scene.mjs && node --experimental-strip-types scripts/test-meeting-invite-scene.mjs && node --experimental-strip-types scripts/test-guard-visitor-scene.mjs && npm run test:visitor-profile && npm run test:project-location && node --experimental-strip-types scripts/test-seal-scene.mjs",
     "verify:mp-weixin:real": "node scripts/verify-mp-weixin-real.mjs"
   },
   "dependencies": {

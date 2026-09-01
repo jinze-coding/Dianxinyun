@@ -13,6 +13,7 @@ public class QualityIssueVO {
     private Long projectId;
     private Long weeklyInspectionId;
     private Integer inspectionItemOrder;
+    private LocalDate recordDate;
     private String issueNo;
     private String title;
     private String location;

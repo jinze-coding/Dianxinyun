@@ -35,6 +35,8 @@
         <poi.version>5.4.1</poi.version>
         <pdfbox.version>3.0.5</pdfbox.version>
         <noto-sans-sc.version>6.1.0</noto-sans-sc.version>
+        <!-- 正式构建必须通过 -Dsource.manifest.sha256 注入 64 位源码清单摘要。 -->
+        <source.manifest.sha256>UNSET</source.manifest.sha256>
     </properties>
 
     <dependencies>
@@ -183,6 +185,19 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>release-build-info</id>
+                        <goals>
+                            <goal>build-info</goal>
+                        </goals>
+                        <configuration>
+                            <additionalProperties>
+                                <sourceManifestSha256>${source.manifest.sha256}</sourceManifestSha256>
+                            </additionalProperties>
+                        </configuration>
+                    </execution>
+                </executions>
                 <configuration>
                     <excludes>
                         <exclude>

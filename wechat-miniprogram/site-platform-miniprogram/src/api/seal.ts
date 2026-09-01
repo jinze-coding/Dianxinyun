@@ -16,7 +16,7 @@ export interface SealApplicationListParams {
   projectId?: number;
   status?: SealApplicationStatus | '';
   keyword?: string;
-  scope?: 'INITIATED' | 'PENDING_FOR_ME' | 'CC_TO_ME';
+  scope?: 'INITIATED' | 'PENDING_FOR_ME' | 'CC_TO_ME' | 'ALL';
   pageNo?: number;
   pageSize?: number;
 }

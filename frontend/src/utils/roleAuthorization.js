@@ -16,6 +16,7 @@ export const BUSINESS_MENU_DEFINITIONS = [
     pages: [
       { menuCode: 'DOCUMENT_LIBRARY', label: '资料库' },
       { menuCode: 'DOCUMENT_SEAL', label: '用印申请' },
+      { menuCode: 'DOCUMENT_CIRCULATION', label: '图纸收发' },
       { menuCode: 'DOCUMENT_RECYCLE', label: '回收站' },
     ],
   },
@@ -26,9 +27,24 @@ export const BUSINESS_MENU_DEFINITIONS = [
     backingMenuCodes: ['WEB_INSPECTION', 'MINI_INSPECTION'],
     pages: [
       { menuCode: 'INSPECTION_LEDGER', label: '电箱台账' },
-      { menuCode: 'INSPECTION_RECORDS', label: '巡检记录' },
-      { menuCode: 'INSPECTION_RECTIFICATIONS', label: '整改闭环' },
+      { menuCode: 'INSPECTION_RECORDS', label: '电箱巡检记录' },
+      { menuCode: 'INSPECTION_RECTIFICATIONS', label: '电箱整改闭环' },
       { menuCode: 'INSPECTION_EDGE', label: '临边巡检' },
+    ],
+    displayGroups: [
+      {
+        key: 'ELECTRIC_BOX_INSPECTION',
+        label: '电箱巡检',
+        description: '电箱台账、巡检记录与整改闭环',
+        menuCodes: ['INSPECTION_LEDGER', 'INSPECTION_RECORDS', 'INSPECTION_RECTIFICATIONS'],
+      },
+      {
+        key: 'EDGE_INSPECTION',
+        label: '临边巡检',
+        description: '临边点位、任务、记录与整改闭环',
+        menuCodes: ['INSPECTION_EDGE'],
+        direct: true,
+      },
     ],
   },
   {
@@ -53,6 +69,20 @@ const SYSTEM_MENU_ORDER = [
   'SYSTEM_APPROVAL',
 ];
 
+const SYSTEM_PERMISSION_CODES = [
+  'system.registration.review',
+  'system.user.view',
+  'system.user.manage',
+  'system.user.status',
+  'system.user.reset_password',
+  'system.role.manage',
+  'system.menu.manage',
+  'system.wechat.manage',
+  'system.audit.view',
+  'system.approval.view',
+  'system.approval.manage',
+];
+
 const ACTION_DEFINITIONS = [
   { key: 'site_access.view', label: '查看完整外访信息', group: '场内管理 · 外访管理', menuCodes: ['SITE_VISITOR'], primaryCodes: ['site_access.view'], codes: ['site_access.view'] },
   { key: 'site_access.manage', label: '创建、修改、作废及生成小程序码', group: '场内管理 · 外访管理', menuCodes: ['SITE_VISITOR'], primaryCodes: ['site_access.manage'], codes: ['site_access.manage', 'site_access.view'], requiresActions: ['site_access.view'] },
@@ -61,6 +91,10 @@ const ACTION_DEFINITIONS = [
   { key: 'document.view', label: '查看资料', group: '资料管理 · 通用操作', menuCodes: ['DOCUMENT_LIBRARY', 'DOCUMENT_RECYCLE'], primaryCodes: ['document.view'], codes: ['document.view'] },
   { key: 'document.upload', label: '上传资料及新版本', group: '资料管理 · 通用操作', menuCodes: ['DOCUMENT_LIBRARY'], primaryCodes: ['document.upload'], codes: ['document.upload', 'document.view'], requiresActions: ['document.view'] },
   { key: 'document.manage', label: '管理目录、归档和回收站', group: '资料管理 · 通用操作', menuCodes: ['DOCUMENT_LIBRARY', 'DOCUMENT_RECYCLE'], primaryCodes: ['document.manage'], codes: ['document.manage', 'document.view'], requiresActions: ['document.view'] },
+  { key: 'document.circulation.view', label: '查看图纸收发记录及台账', group: '资料管理 · 图纸收发', menuCodes: ['DOCUMENT_CIRCULATION'], primaryCodes: ['document.circulation.view'], codes: ['document.circulation.view', 'document.view'], requiresActions: ['document.view'] },
+  { key: 'document.receive', label: '登记收文、匹配版本并发布', group: '资料管理 · 图纸收发', menuCodes: ['DOCUMENT_CIRCULATION'], primaryCodes: ['document.receive'], codes: ['document.receive', 'document.circulation.view', 'document.view'], requiresActions: ['document.circulation.view'] },
+  { key: 'document.issue', label: '再次发放、二维码与批次作废', group: '资料管理 · 图纸收发', menuCodes: ['DOCUMENT_CIRCULATION'], primaryCodes: ['document.issue'], codes: ['document.issue', 'document.circulation.view', 'document.view'], requiresActions: ['document.circulation.view'] },
+  { key: 'document.circulation.export', label: '导出图纸收发综合台账', group: '资料管理 · 图纸收发', menuCodes: ['DOCUMENT_CIRCULATION'], primaryCodes: ['document.circulation.export'], codes: ['document.circulation.export', 'document.circulation.view', 'document.view'], requiresActions: ['document.circulation.view'] },
   { key: 'seal.view', label: '查看项目全部用印申请', group: '资料管理 · 用印申请', menuCodes: ['DOCUMENT_SEAL'], primaryCodes: ['seal.view'], codes: ['seal.view'] },
   { key: 'seal.manage', label: '管理项目用印与盖章件', group: '资料管理 · 用印申请', menuCodes: ['DOCUMENT_SEAL'], primaryCodes: ['seal.manage'], codes: ['seal.manage', 'seal.view'], requiresActions: ['seal.view'] },
   { key: 'seal.export', label: '导出项目用印台账', group: '资料管理 · 用印申请', menuCodes: ['DOCUMENT_SEAL'], primaryCodes: ['seal.export'], codes: ['seal.export', 'seal.view'], requiresActions: ['seal.view'] },
@@ -68,21 +102,22 @@ const ACTION_DEFINITIONS = [
   { key: 'system.approval.view', label: '查看印章与审批配置', group: '系统管理 · 用印审批', menuCodes: ['SYSTEM_APPROVAL'], primaryCodes: ['system.approval.view'], codes: ['system.approval.view'] },
   { key: 'system.approval.manage', label: '维护印章、审批配置与二维码', group: '系统管理 · 用印审批', menuCodes: ['SYSTEM_APPROVAL'], primaryCodes: ['system.approval.manage'], codes: ['system.approval.manage'] },
 
-  { key: 'inspection.ledger.view', label: '查看电箱台账', group: '巡检管理 · 电箱台账', menuCodes: ['INSPECTION_LEDGER'], primaryCodes: ['BOX_VIEW'], codes: ['BOX_VIEW', 'inspection.view'] },
-  { key: 'inspection.ledger.manage', label: '新增、编辑、停用和导入电箱', group: '巡检管理 · 电箱台账', menuCodes: ['INSPECTION_LEDGER'], primaryCodes: ['BOX_MANAGE'], codes: ['BOX_MANAGE', 'BOX_VIEW', 'inspection.manage', 'inspection.view'], requiresActions: ['inspection.ledger.view'] },
-  { key: 'inspection.ledger.qr', label: '二维码与贴纸管理', group: '巡检管理 · 电箱台账', menuCodes: ['INSPECTION_LEDGER'], primaryCodes: ['BOX_QR_MANAGE'], codes: ['BOX_QR_MANAGE', 'BOX_VIEW', 'inspection.view'], requiresActions: ['inspection.ledger.view'] },
-  { key: 'inspection.ledger.public', label: '外部公开访问启停', group: '巡检管理 · 电箱台账', menuCodes: ['INSPECTION_LEDGER'], primaryCodes: ['BOX_PUBLIC_ACCESS'], codes: ['BOX_PUBLIC_ACCESS', 'BOX_VIEW', 'inspection.view'], requiresActions: ['inspection.ledger.view'] },
-  { key: 'inspection.records.submit', label: '提交电箱日检', group: '巡检管理 · 巡检记录', menuCodes: ['INSPECTION_RECORDS'], primaryCodes: ['INSPECTION_DAILY_SUBMIT'], codes: ['INSPECTION_DAILY_SUBMIT', 'inspection.submit'] },
-  { key: 'inspection.records.view', label: '查看巡检记录', group: '巡检管理 · 巡检记录', menuCodes: ['INSPECTION_RECORDS'], primaryCodes: ['INSPECTION_RECORD_VIEW'], codes: ['INSPECTION_RECORD_VIEW', 'inspection.view'] },
-  { key: 'inspection.summary.view', label: '查看巡检汇总', group: '巡检管理 · 巡检记录', menuCodes: ['INSPECTION_RECORDS'], primaryCodes: ['SUMMARY_VIEW'], codes: ['SUMMARY_VIEW', 'inspection.view'] },
-  { key: 'inspection.summary.export', label: '导出巡检汇总', group: '巡检管理 · 巡检记录', menuCodes: ['INSPECTION_RECORDS'], primaryCodes: ['SUMMARY_EXPORT'], codes: ['SUMMARY_EXPORT', 'SUMMARY_VIEW', 'inspection.export', 'inspection.view'], requiresActions: ['inspection.summary.view'] },
-  { key: 'inspection.rectify', label: '提交分配给自己的巡检整改', group: '巡检管理 · 整改闭环', menuCodes: ['INSPECTION_RECTIFICATIONS'], primaryCodes: ['inspection.rectify'], codes: ['inspection.rectify', 'inspection.view'] },
-  { key: 'inspection.review', label: '复查、退回和改派巡检整改', group: '巡检管理 · 整改闭环', menuCodes: ['INSPECTION_RECTIFICATIONS'], primaryCodes: ['inspection.review'], codes: ['inspection.review', 'inspection.view'] },
+  { key: 'inspection.ledger.view', label: '查看电箱台账', group: '巡检管理 · 电箱巡检', menuCodes: ['INSPECTION_LEDGER'], primaryCodes: ['BOX_VIEW'], codes: ['BOX_VIEW', 'inspection.view'] },
+  { key: 'inspection.ledger.manage', label: '新增、编辑、停用和导入电箱', group: '巡检管理 · 电箱巡检', menuCodes: ['INSPECTION_LEDGER'], primaryCodes: ['BOX_MANAGE'], codes: ['BOX_MANAGE', 'BOX_VIEW', 'inspection.manage', 'inspection.view'], requiresActions: ['inspection.ledger.view'] },
+  { key: 'inspection.ledger.qr', label: '管理电箱二维码与贴纸', group: '巡检管理 · 电箱巡检', menuCodes: ['INSPECTION_LEDGER'], primaryCodes: ['BOX_QR_MANAGE'], codes: ['BOX_QR_MANAGE', 'BOX_VIEW', 'inspection.view'], requiresActions: ['inspection.ledger.view'] },
+  { key: 'inspection.ledger.public', label: '启停电箱外部公开访问', group: '巡检管理 · 电箱巡检', menuCodes: ['INSPECTION_LEDGER'], primaryCodes: ['BOX_PUBLIC_ACCESS'], codes: ['BOX_PUBLIC_ACCESS', 'BOX_VIEW', 'inspection.view'], requiresActions: ['inspection.ledger.view'] },
+  { key: 'inspection.records.submit', label: '提交电箱日检', group: '巡检管理 · 电箱巡检', menuCodes: ['INSPECTION_RECORDS'], primaryCodes: ['INSPECTION_DAILY_SUBMIT'], codes: ['INSPECTION_DAILY_SUBMIT', 'inspection.submit'] },
+  { key: 'inspection.records.view', label: '查看电箱巡检记录', group: '巡检管理 · 电箱巡检', menuCodes: ['INSPECTION_RECORDS'], primaryCodes: ['INSPECTION_RECORD_VIEW'], codes: ['INSPECTION_RECORD_VIEW', 'inspection.view'] },
+  { key: 'inspection.summary.view', label: '查看电箱巡检统计', group: '巡检管理 · 电箱巡检', menuCodes: ['INSPECTION_RECORDS'], primaryCodes: ['SUMMARY_VIEW'], codes: ['SUMMARY_VIEW', 'inspection.view'] },
+  { key: 'inspection.summary.export', label: '导出电箱巡检汇总', group: '巡检管理 · 电箱巡检', menuCodes: ['INSPECTION_RECORDS'], primaryCodes: ['SUMMARY_EXPORT'], codes: ['SUMMARY_EXPORT', 'SUMMARY_VIEW', 'inspection.export', 'inspection.view'], requiresActions: ['inspection.summary.view'] },
+  { key: 'inspection.rectify', label: '提交分配给自己的电箱整改', group: '巡检管理 · 电箱巡检', menuCodes: ['INSPECTION_RECTIFICATIONS'], primaryCodes: ['inspection.rectify'], codes: ['inspection.rectify', 'inspection.view'] },
+  { key: 'inspection.review', label: '复查、退回和改派电箱整改', group: '巡检管理 · 电箱巡检', menuCodes: ['INSPECTION_RECTIFICATIONS'], primaryCodes: ['inspection.review'], codes: ['inspection.review', 'inspection.view'] },
   { key: 'inspection.edge.view', label: '查看临边点位、记录、整改和统计', group: '巡检管理 · 临边巡检', menuCodes: ['INSPECTION_EDGE'], primaryCodes: ['EDGE_INSPECTION_VIEW'], codes: ['EDGE_INSPECTION_VIEW'] },
   { key: 'inspection.edge.manage', label: '管理临边点位、周期、取消和改派', group: '巡检管理 · 临边巡检', menuCodes: ['INSPECTION_EDGE'], primaryCodes: ['EDGE_INSPECTION_MANAGE'], codes: ['EDGE_INSPECTION_MANAGE', 'EDGE_INSPECTION_VIEW'], requiresActions: ['inspection.edge.view'] },
   { key: 'inspection.edge.submit', label: '提交分配给自己的临边巡检', group: '巡检管理 · 临边巡检', menuCodes: ['INSPECTION_EDGE'], primaryCodes: ['EDGE_INSPECTION_SUBMIT'], codes: ['EDGE_INSPECTION_SUBMIT', 'EDGE_INSPECTION_VIEW'], requiresActions: ['inspection.edge.view'] },
   { key: 'inspection.edge.rectify', label: '提交分配给自己的临边整改', group: '巡检管理 · 临边巡检', menuCodes: ['INSPECTION_EDGE'], primaryCodes: ['EDGE_INSPECTION_RECTIFY'], codes: ['EDGE_INSPECTION_RECTIFY', 'EDGE_INSPECTION_VIEW'], requiresActions: ['inspection.edge.view'] },
   { key: 'inspection.edge.review', label: '复查分配给自己的临边整改', group: '巡检管理 · 临边巡检', menuCodes: ['INSPECTION_EDGE'], primaryCodes: ['EDGE_INSPECTION_REVIEW'], codes: ['EDGE_INSPECTION_REVIEW', 'EDGE_INSPECTION_VIEW'], requiresActions: ['inspection.edge.view'] },
+  { key: 'inspection.edge.export', label: '导出临边巡检含图报表', group: '巡检管理 · 临边巡检', menuCodes: ['INSPECTION_EDGE'], primaryCodes: ['EDGE_INSPECTION_EXPORT'], codes: ['EDGE_INSPECTION_EXPORT', 'EDGE_INSPECTION_VIEW'], requiresActions: ['inspection.edge.view'] },
 
   { key: 'quality.view', label: '查看质量周检、问题和质量资料', group: '质量周检 · 通用操作', menuCodes: ['QUALITY_ISSUES', 'QUALITY_DOCUMENTS'], primaryCodes: ['quality.view'], codes: ['quality.view'] },
   { key: 'quality.manage', label: '编辑提交周检、改派及管理质量资料', group: '质量周检 · 通用操作', menuCodes: ['QUALITY_ISSUES', 'QUALITY_DOCUMENTS'], primaryCodes: ['quality.manage'], codes: ['quality.manage', 'quality.view'], requiresActions: ['quality.view'] },
@@ -139,6 +174,15 @@ export function buildRoleMenuTree(menus = [], role = null) {
         unavailable: !menu && hasPageCatalog,
       };
     });
+    const pageByCode = new Map(pages.map((page) => [page.menuCode, page]));
+    const displayGroups = (definition.displayGroups || []).map((group) => ({
+      key: `menu-group:${definition.moduleCode}:${group.key}`,
+      type: 'PAGE_GROUP',
+      label: group.label,
+      description: group.description,
+      direct: Boolean(group.direct),
+      children: group.menuCodes.map((code) => pageByCode.get(code)).filter(Boolean),
+    }));
     return {
       key: `module:${definition.moduleCode}`,
       type: 'BUSINESS_MODULE',
@@ -147,6 +191,7 @@ export function buildRoleMenuTree(menus = [], role = null) {
       moduleCode: definition.moduleCode,
       backingMenuIds: backingMenus.map(itemId).filter(Boolean),
       children: pages,
+      displayGroups,
     };
   });
 
@@ -188,6 +233,20 @@ export function menuNodeState(node, selectedMenuIds = [], businessModuleCodes = 
   return {
     checked,
     indeterminate: childStates.some(Boolean) && !childStates.every(Boolean),
+    childStates,
+  };
+}
+
+export function menuDisplayGroupState(node, group, selectedMenuIds = [], businessModuleCodes = []) {
+  const nodeState = menuNodeState(node, selectedMenuIds, businessModuleCodes);
+  const childStates = (group.children || []).map((child) => {
+    const index = (node.children || []).findIndex((item) => item.key === child.key);
+    return index >= 0 ? nodeState.childStates[index] : false;
+  });
+  return {
+    checked: childStates.length > 0 && childStates.every(Boolean),
+    indeterminate: childStates.some(Boolean) && !childStates.every(Boolean),
+    disabled: !(group.children || []).some((child) => !child.legacy && !child.unavailable),
     childStates,
   };
 }
@@ -245,6 +304,26 @@ export function toggleMenuChild({ parent, child, checked, selectedMenuIds = [], 
   return { menuIds: [...ids], businessModuleCodes: [...modules] };
 }
 
+export function toggleMenuDisplayGroup({
+  parent,
+  group,
+  checked,
+  selectedMenuIds = [],
+  businessModuleCodes = [],
+}) {
+  let next = { menuIds: selectedMenuIds, businessModuleCodes };
+  (group.children || []).forEach((child) => {
+    next = toggleMenuChild({
+      parent,
+      child,
+      checked,
+      selectedMenuIds: next.menuIds,
+      businessModuleCodes: next.businessModuleCodes,
+    });
+  });
+  return next;
+}
+
 export function selectedLogicalMenuCodes(tree, selectedMenuIds = [], businessModuleCodes = []) {
   const result = new Set();
   tree.forEach((node) => {
@@ -263,6 +342,7 @@ export function buildPermissionActions(permissions = []) {
   const actions = ACTION_DEFINITIONS.filter((action) => action.primaryCodes.every((code) => byCode.has(normalize(code))))
     .map((action) => ({
       ...action,
+      standard: true,
       permissionIds: action.codes.map((code) => itemId(byCode.get(normalize(code)))).filter(Boolean),
       primaryPermissionIds: action.primaryCodes.map((code) => itemId(byCode.get(normalize(code)))).filter(Boolean),
     }));
@@ -284,6 +364,7 @@ export function buildPermissionActions(permissions = []) {
       menuCodes,
       primaryCodes: [code],
       codes: [code],
+      standard: false,
       permissionIds: [itemId(permission)].filter(Boolean),
       primaryPermissionIds: [itemId(permission)].filter(Boolean),
     });
@@ -293,6 +374,113 @@ export function buildPermissionActions(permissions = []) {
 
 export function filterActionsByMenus(actions = [], logicalMenuCodes = new Set()) {
   return actions.filter((action) => action.menuCodes.some((code) => logicalMenuCodes.has(code)));
+}
+
+const catalogItemEnabled = (item) => item && item.enabled !== 0 && item.enabled !== '0'
+  && item.enabled !== false && item.visible !== 0 && item.visible !== '0'
+  && item.visible !== false && !integerLikeDeleted(item.deleted);
+
+function integerLikeDeleted(value) {
+  return value === 1 || value === '1' || value === true;
+}
+
+function menuLabels(menuTree = []) {
+  const result = new Map();
+  BUSINESS_MENU_DEFINITIONS.forEach((definition) => {
+    result.set(normalize(definition.moduleCode), definition.label);
+    definition.pages.forEach((page) => result.set(normalize(page.menuCode), page.label));
+  });
+  menuTree.forEach((node) => {
+    if (node.moduleCode || node.menuCode) result.set(normalize(node.moduleCode || node.menuCode), node.label);
+    (node.children || []).forEach((child) => result.set(normalize(child.menuCode), child.label));
+  });
+  return result;
+}
+
+/**
+ * Detect permissions that cannot be represented safely in the permission dialog.
+ * Hidden actions have a selected primary permission but no assigned page menu;
+ * orphan permissions are selected catalog entries not covered by any selected action.
+ */
+export function permissionSelectionIssues({
+  selectedPermissionIds = [],
+  actions = [],
+  logicalMenuCodes = new Set(),
+  permissions = [],
+  menuTree = [],
+} = {}) {
+  const selectedIds = new Set(selectedPermissionIds.map(Number).filter(Number.isFinite));
+  const selectedCodes = new Set([...logicalMenuCodes].map(normalize));
+  const visibleKeys = new Set(filterActionsByMenus(actions, selectedCodes).map((action) => action.key));
+  const labels = menuLabels(menuTree);
+  const candidateSelectedActions = actions.filter((action) => action.primaryPermissionIds.length
+    && action.primaryPermissionIds.every((id) => selectedIds.has(Number(id))));
+  const visibleSelectedActions = candidateSelectedActions.filter((action) => visibleKeys.has(action.key));
+  const visibleDependencyIds = new Set(visibleSelectedActions
+    .flatMap((action) => action.permissionIds.map(Number)));
+  // A shared technical permission may also be the primary permission of another
+  // workflow action. When a visible selected action already requires it, do not
+  // misclassify that shadow action as a hidden grant merely because its page menu
+  // is absent.
+  const selectedActions = candidateSelectedActions.filter((action) => visibleKeys.has(action.key)
+    || !action.primaryPermissionIds.every((id) => visibleDependencyIds.has(Number(id))));
+  const hiddenActions = selectedActions.filter((action) => !visibleKeys.has(action.key)).map((action) => {
+    const missingMenuCodes = action.menuCodes.filter((code) => !selectedCodes.has(normalize(code)));
+    return {
+      ...action,
+      missingMenuCodes,
+      missingMenuLabels: missingMenuCodes.map((code) => labels.get(normalize(code)) || code),
+    };
+  });
+  const coveredPermissionIds = new Set(selectedActions.flatMap((action) => action.permissionIds.map(Number)));
+  const permissionById = new Map(permissions.map((permission) => [Number(itemId(permission)), permission]));
+  const orphanPermissions = [...selectedIds]
+    .filter((id) => !coveredPermissionIds.has(id) && permissionById.has(id))
+    .map((id) => {
+      const permission = permissionById.get(id);
+      const relatedMenuCodes = [...new Set(actions.filter((action) => action.permissionIds.map(Number).includes(id))
+        .flatMap((action) => action.menuCodes))];
+      return {
+        id,
+        permissionCode: permissionCode(permission),
+        label: permission.permissionName || permission.name || permissionCode(permission),
+        missingMenuCodes: relatedMenuCodes.filter((code) => !selectedCodes.has(normalize(code))),
+        missingMenuLabels: relatedMenuCodes.filter((code) => !selectedCodes.has(normalize(code)))
+          .map((code) => labels.get(normalize(code)) || code),
+      };
+    });
+  return { selectedActions, hiddenActions, orphanPermissions };
+}
+
+/** A compact health check for the standard business authorization catalog. */
+export function authorizationCatalogStatus(menus = [], permissions = []) {
+  const menuByCode = new Map(menus.map((menu) => [menuCode(menu), menu]));
+  const permissionByCode = new Map(permissions.map((permission) => [normalize(permissionCode(permission)), permission]));
+  const expectedMenuCodes = [...new Set(BUSINESS_MENU_DEFINITIONS.flatMap((definition) => [
+    ...definition.backingMenuCodes,
+    ...definition.pages.map((page) => page.menuCode),
+  ]).concat(['WEB_SYSTEM', ...SYSTEM_MENU_ORDER]).map(normalize))];
+  const expectedPermissionCodes = [...new Set([
+    ...ACTION_DEFINITIONS.flatMap((action) => action.primaryCodes),
+    ...SYSTEM_PERMISSION_CODES,
+  ].map(normalize))];
+  const missingMenuCodes = expectedMenuCodes.filter((code) => !menuByCode.has(code));
+  const disabledMenuCodes = expectedMenuCodes.filter((code) => menuByCode.has(code) && !catalogItemEnabled(menuByCode.get(code)));
+  const missingPermissionCodes = expectedPermissionCodes.filter((code) => !permissionByCode.has(code));
+  const disabledPermissionCodes = expectedPermissionCodes.filter((code) => permissionByCode.has(code)
+    && !catalogItemEnabled(permissionByCode.get(code)));
+  return {
+    healthy: !missingMenuCodes.length && !disabledMenuCodes.length
+      && !missingPermissionCodes.length && !disabledPermissionCodes.length,
+    expectedMenuCount: expectedMenuCodes.length,
+    availableMenuCount: expectedMenuCodes.length - missingMenuCodes.length - disabledMenuCodes.length,
+    expectedPermissionCount: expectedPermissionCodes.length,
+    availablePermissionCount: expectedPermissionCodes.length - missingPermissionCodes.length - disabledPermissionCodes.length,
+    missingMenuCodes,
+    disabledMenuCodes,
+    missingPermissionCodes,
+    disabledPermissionCodes,
+  };
 }
 
 export function selectedActionKeys(permissionIds = [], actions = []) {

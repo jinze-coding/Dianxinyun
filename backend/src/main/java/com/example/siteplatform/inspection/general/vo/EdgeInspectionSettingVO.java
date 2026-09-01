@@ -3,6 +3,7 @@ package com.example.siteplatform.inspection.general.vo;
 import lombok.Data;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
 
@@ -25,6 +26,9 @@ public class EdgeInspectionSettingVO {
     private String reviewerName;
     private Integer rectificationDays;
     private Boolean enabled;
+    private Boolean submissionReminderEnabled;
+    private LocalDateTime reminderEffectiveTime;
+    private LocalDateTime nextReminderTime;
     private String status;
     private Integer version;
 }

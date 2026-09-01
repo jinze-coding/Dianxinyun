@@ -14,6 +14,7 @@ import {
 } from '@/api/edgeInspection';
 import { deleteFileResources, downloadFilePaths, uploadPhotoIds } from '@/api/file';
 import { useAuthStore } from '@/stores/auth';
+import { isEdgeTaskBeforeWindow, isEdgeTaskOverdue } from '@/utils/edgeInspectionView';
 import { getQueryNumber, showToast, switchTab } from '@/utils/navigation';
 import { usePageScrollHeight } from '@/utils/navLayout';
 
@@ -216,6 +217,8 @@ function formatExecutionSlot(current: EdgeInspectionTask) {
 }
 
 function statusLabel(current: EdgeInspectionTask) {
+  if (current.status === 'PENDING' && isEdgeTaskOverdue(current)) return '逾期未检';
+  if (current.status === 'PENDING' && isEdgeTaskBeforeWindow(current)) return '待开始';
   const displayStatus = current.displayStatus?.trim().toUpperCase();
   if (displayStatus && taskStatusLabels[displayStatus]) return taskStatusLabels[displayStatus];
   if (current.status === 'COMPLETED' && current.lateSubmission) return '逾期补检';

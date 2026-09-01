@@ -28,6 +28,10 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
 
     static final String PROJECT_DOCUMENTS = "/api/v1/project-documents";
     static final String DOCUMENT_FOLDERS = "/api/v1/document-folders";
+    static final String DOCUMENT_INCOMING = "/api/v1/document-incoming-batches";
+    static final String DOCUMENT_DISTRIBUTIONS = "/api/v1/document-distributions";
+    static final String DOCUMENT_UPLOADS = "/api/v1/document-uploads";
+    static final String DOCUMENT_LEDGER = "/api/v1/document-circulation-ledger";
     static final String INSPECTION = "/api/v1/inspection";
     static final String EDGE_INSPECTIONS = "/api/v1/edge-inspections";
     static final String ELECTRIC_BOXES = "/api/v1/electric-boxes";
@@ -100,6 +104,24 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
         if (matchesModule(normalizedPath, DOCUMENT_FOLDERS)) {
             return read ? SystemPermissionCodes.DOCUMENT_VIEW : SystemPermissionCodes.DOCUMENT_MANAGE;
         }
+        if (matchesModule(normalizedPath, DOCUMENT_INCOMING)) {
+            return read ? SystemPermissionCodes.DOCUMENT_CIRCULATION_VIEW : SystemPermissionCodes.DOCUMENT_RECEIVE;
+        }
+        if (matchesModule(normalizedPath, DOCUMENT_UPLOADS)) {
+            return SystemPermissionCodes.DOCUMENT_RECEIVE;
+        }
+        if (matchesModule(normalizedPath, DOCUMENT_DISTRIBUTIONS)) {
+            if (normalizedPath.equals(DOCUMENT_DISTRIBUTIONS + "/recipient-candidates")
+                    || normalizedPath.matches(DOCUMENT_DISTRIBUTIONS + "/[^/]+/qr")) {
+                return SystemPermissionCodes.DOCUMENT_ISSUE;
+            }
+            return read ? SystemPermissionCodes.DOCUMENT_CIRCULATION_VIEW : SystemPermissionCodes.DOCUMENT_ISSUE;
+        }
+        if (matchesModule(normalizedPath, DOCUMENT_LEDGER)) {
+            return normalizedPath.equals(DOCUMENT_LEDGER + "/export")
+                    ? SystemPermissionCodes.DOCUMENT_CIRCULATION_EXPORT
+                    : SystemPermissionCodes.DOCUMENT_CIRCULATION_VIEW;
+        }
         if (matchesModule(normalizedPath, INSPECTION)) {
             if (normalizedPath.equals(INSPECTION + "/records/export")) {
                 return SystemPermissionCodes.INSPECTION_EXPORT;
@@ -139,11 +161,23 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
             return SystemPermissionCodes.QUALITY_MANAGE;
         }
         if (matchesModule(normalizedPath, QUALITY_WEEKLY_INSPECTIONS)) {
+            if (HttpMethod.GET.matches(method)
+                    && (normalizedPath.equals(QUALITY_WEEKLY_INSPECTIONS + "/reminder-assignees")
+                    || normalizedPath.matches(QUALITY_WEEKLY_INSPECTIONS + "/reminder-setting/[^/]+"))) {
+                return SystemPermissionCodes.QUALITY_MANAGE;
+            }
             return read ? SystemPermissionCodes.QUALITY_VIEW : SystemPermissionCodes.QUALITY_MANAGE;
         }
         if (matchesModule(normalizedPath, SITE_ACCESS)) {
-            if (normalizedPath.equals(SITE_ACCESS + "/visitors/export")) {
+            if (normalizedPath.equals(SITE_ACCESS + "/visitors/export")
+                    || normalizedPath.equals(SITE_ACCESS + "/meeting-registrations/export")
+                    || normalizedPath.equals(SITE_ACCESS + "/guard/registrations/export")) {
                 return SystemPermissionCodes.SITE_ACCESS_EXPORT;
+            }
+            if (HttpMethod.GET.matches(method)
+                    && (normalizedPath.matches(SITE_ACCESS + "/invitations/[^/]+/mini-code")
+                    || normalizedPath.matches(SITE_ACCESS + "/guard/qr/[^/]+/mini-code"))) {
+                return SystemPermissionCodes.SITE_ACCESS_MANAGE;
             }
             return read ? SystemPermissionCodes.SITE_ACCESS_VIEW : SystemPermissionCodes.SITE_ACCESS_MANAGE;
         }

@@ -18,6 +18,13 @@ public class ProjectDocumentVersion {
     private Integer versionNo;
     private Long fileResourceId;
     private String changeNote;
+    private String externalRevision;
+    private String versionStatus;
+    private Long supersededByVersionId;
+    private Long publishedBy;
+    private String publishedByName;
+    private LocalDateTime publishedTime;
+    private String withdrawnReason;
     private Long createdBy;
     private String createdByName;
     @TableField(fill = FieldFill.INSERT)

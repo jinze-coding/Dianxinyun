@@ -7,8 +7,12 @@ import com.example.siteplatform.common.Result;
 import com.example.siteplatform.quality.dto.QualityWeeklyActionRequest;
 import com.example.siteplatform.quality.dto.QualityWeeklyDraftCreateRequest;
 import com.example.siteplatform.quality.dto.QualityWeeklyDraftSaveRequest;
+import com.example.siteplatform.quality.dto.QualityWeeklyReminderSettingRequest;
+import com.example.siteplatform.quality.service.QualityWeeklyReminderSettingService;
+import com.example.siteplatform.quality.vo.QualityAssigneeVO;
 import com.example.siteplatform.quality.service.QualityWeeklyInspectionService;
 import com.example.siteplatform.quality.vo.QualityWeeklyInspectionVO;
+import com.example.siteplatform.quality.vo.QualityWeeklyReminderSettingVO;
 import com.example.siteplatform.quality.vo.QualityWeeklySummaryVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -24,6 +28,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 @Tag(name = "质量周检", description = "质量周检共享草稿、批量问题提交与周检记录接口")
 @RestController
 @RequestMapping("/api/v1/quality/weekly-inspections")
@@ -33,7 +39,38 @@ public class QualityWeeklyInspectionController {
     private QualityWeeklyInspectionService weeklyInspectionService;
 
     @Autowired
+    private QualityWeeklyReminderSettingService reminderSettingService;
+
+    @Autowired
     private AuthService authService;
+
+    @Operation(summary = "获取质量周检未提交提醒设置")
+    @GetMapping("/reminder-setting/{projectId}")
+    public Result<QualityWeeklyReminderSettingVO> reminderSetting(
+            @PathVariable Long projectId,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(reminderSettingService.getSetting(projectId, currentUser));
+    }
+
+    @Operation(summary = "保存质量周检未提交提醒设置")
+    @PutMapping("/reminder-setting/{projectId}")
+    public Result<QualityWeeklyReminderSettingVO> saveReminderSetting(
+            @PathVariable Long projectId,
+            @Valid @RequestBody QualityWeeklyReminderSettingRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(reminderSettingService.updateSetting(projectId, request, currentUser));
+    }
+
+    @Operation(summary = "获取质量周检提醒责任人候选")
+    @GetMapping("/reminder-assignees")
+    public Result<List<QualityAssigneeVO>> reminderAssignees(
+            @RequestParam Long projectId,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        SysUser currentUser = authService.getCurrentUser(token);
+        return Result.success(reminderSettingService.listReminderAssignees(projectId, currentUser));
+    }
 
     @Operation(summary = "分页查询质量周检")
     @GetMapping("/page")

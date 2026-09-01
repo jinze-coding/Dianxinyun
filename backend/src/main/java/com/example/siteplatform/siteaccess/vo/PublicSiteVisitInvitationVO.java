@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 @Data
 public class PublicSiteVisitInvitationVO {
     private String inviteNo;
+    private String inviteType;
     private String status;
     private String projectName;
     private String projectShortName;

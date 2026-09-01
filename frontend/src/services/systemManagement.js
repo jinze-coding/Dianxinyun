@@ -28,6 +28,10 @@ export function updateSystemUserStatus(id, data) {
   return put(`/system/users/${id}/status`, data);
 }
 
+export function previewSystemUserStatusImpact(id, data) {
+  return post(`/system/users/${id}/status/preview`, data);
+}
+
 export function resetSystemUserPassword(id, data) {
   return post(`/system/users/${id}/reset-password`, data);
 }

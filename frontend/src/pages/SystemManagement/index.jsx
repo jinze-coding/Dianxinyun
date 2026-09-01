@@ -20,6 +20,7 @@ import {
   updateSystemRole,
   updateSystemRoleMenus,
   updateSystemRoleOperationPermissions,
+  previewSystemUserStatusImpact,
   previewSystemUserProjectRoleAssignments,
   updateSystemUserProjectRoleAssignments,
   updateSystemUserStatus,
@@ -35,6 +36,7 @@ import {
   isPlatformAdmin,
 } from '../../utils/permissions';
 import {
+  authorizationCatalogStatus,
   BUSINESS_MENU_DEFINITIONS,
   buildPermissionActions,
   buildPermissionActionTree,
@@ -42,13 +44,16 @@ import {
   buildRoleMenuTree,
   filterActionsByMenus,
   isDuplicateRoleName,
+  menuDisplayGroupState,
   menuNodeState,
   missingMenuCatalogCodes,
+  permissionSelectionIssues,
   permissionIdsForActionKeys,
   selectedActionKeys,
   selectedLogicalMenuCodes,
   toggleActionKey,
   toggleMenuChild,
+  toggleMenuDisplayGroup,
   toggleMenuNode,
 } from '../../utils/roleAuthorization';
 import {
@@ -62,6 +67,10 @@ import {
   passwordResetRequirements,
   validatePasswordReset,
 } from '../../utils/passwordReset';
+import {
+  responsibilityImpactLines,
+  responsibilityImpactTotal,
+} from '../../utils/responsibilityImpact';
 import ProjectRoleAssignmentTree from './ProjectRoleAssignmentTree';
 import ApprovalManagementPage from '../ApprovalManagement';
 import './index.css';
@@ -473,11 +482,25 @@ function RoleDefinitionDialog({ role, roles, onClose, onSave }) {
   );
 }
 
-function MenuAssignmentDialog({ role, menus, selectedMenuIds, businessModuleCodes, onClose, onSave }) {
+function MenuAssignmentDialog({
+  role,
+  menus,
+  permissions,
+  selectedMenuIds,
+  businessModuleCodes,
+  selectedPermissionIds,
+  onClose,
+  onSave,
+}) {
   const tree = useMemo(() => buildRoleMenuTree(menus, role), [menus, role]);
+  const allActions = useMemo(() => buildPermissionActions(permissions), [permissions]);
   const [menuIds, setMenuIds] = useState(() => selectedMenuIds.map(Number));
   const [moduleCodes, setModuleCodes] = useState(() => [...businessModuleCodes]);
-  const [expanded, setExpanded] = useState(() => new Set(tree.map((node) => node.key)));
+  const [expanded, setExpanded] = useState(() => new Set(tree.flatMap((node) => [
+    node.key,
+    ...(node.displayGroups || []).filter((group) => !group.direct).map((group) => group.key),
+  ])));
+  const [removalImpact, setRemovalImpact] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const legacyTabs = tree.some((node) => node.children?.some((child) => child.legacy));
@@ -486,11 +509,25 @@ function MenuAssignmentDialog({ role, menus, selectedMenuIds, businessModuleCode
     const next = toggleMenuNode({ node, checked, selectedMenuIds: menuIds, businessModuleCodes: moduleCodes });
     setMenuIds(next.menuIds);
     setModuleCodes(next.businessModuleCodes);
+    setRemovalImpact([]);
   };
   const updateChild = (parent, child, checked) => {
     const next = toggleMenuChild({ parent, child, checked, selectedMenuIds: menuIds, businessModuleCodes: moduleCodes });
     setMenuIds(next.menuIds);
     setModuleCodes(next.businessModuleCodes);
+    setRemovalImpact([]);
+  };
+  const updateDisplayGroup = (parent, group, checked) => {
+    const next = toggleMenuDisplayGroup({
+      parent,
+      group,
+      checked,
+      selectedMenuIds: menuIds,
+      businessModuleCodes: moduleCodes,
+    });
+    setMenuIds(next.menuIds);
+    setModuleCodes(next.businessModuleCodes);
+    setRemovalImpact([]);
   };
   const toggleAll = (checked) => {
     let next = { menuIds: checked ? [] : menuIds, businessModuleCodes: checked ? [] : moduleCodes };
@@ -499,8 +536,9 @@ function MenuAssignmentDialog({ role, menus, selectedMenuIds, businessModuleCode
     });
     setMenuIds(next.menuIds);
     setModuleCodes(next.businessModuleCodes);
+    setRemovalImpact([]);
   };
-  const submit = async () => {
+  const persist = async () => {
     setSubmitting(true);
     setError('');
     try {
@@ -512,17 +550,38 @@ function MenuAssignmentDialog({ role, menus, selectedMenuIds, businessModuleCode
       setSubmitting(false);
     }
   };
+  const reviewRemovalImpact = () => {
+    const logicalMenuCodes = selectedLogicalMenuCodes(tree, menuIds, moduleCodes);
+    const issues = permissionSelectionIssues({
+      selectedPermissionIds,
+      actions: allActions,
+      logicalMenuCodes,
+      permissions,
+      menuTree: tree,
+    });
+    if (issues.hiddenActions.length) {
+      setRemovalImpact(issues.hiddenActions);
+      setError('');
+      return;
+    }
+    persist();
+  };
   return (
     <ModalFrame
       title={`分配菜单 - ${roleName(role)}`}
       description="控制角色能看到的模块和页面；取消菜单会同步清除该菜单下不再有效的操作权限。"
       wide
       onClose={onClose}
-      footer={<><button className="plain" onClick={onClose}>取消</button><button className="primary" disabled={submitting} onClick={submit}>{submitting ? '保存中…' : '保存'}</button></>}
+      footer={<><button className="plain" onClick={onClose}>取消</button>{removalImpact.length > 0 && <button className="plain" disabled={submitting} onClick={() => setRemovalImpact([])}>继续调整</button>}<button className={removalImpact.length ? 'danger' : 'primary'} disabled={submitting} onClick={removalImpact.length ? persist : reviewRemovalImpact}>{submitting ? '保存中…' : removalImpact.length ? `确认保存并清理 ${removalImpact.length} 项` : '保存菜单'}</button></>}
     >
       <div className="system-tree-toolbar"><span>已启用 {moduleCodes.length} 个业务模块</span><div><button onClick={() => toggleAll(true)}>全选</button><button onClick={() => toggleAll(false)}>清空</button></div></div>
       {legacyTabs && <div className="system-inline-notice warning">当前数据库尚未安装页签菜单迁移；灰色页签按父模块兼容显示，执行迁移后可单独分配。</div>}
       {!!missingTabs.length && <div className="system-inline-notice warning">当前菜单目录只完成了部分迁移，缺少：{missingTabs.join('、')}。缺失页面暂不可分配，请先补齐页签菜单迁移。</div>}
+      {!!removalImpact.length && <div className="system-authorization-warning" role="alert">
+        <strong>保存后将清理以下操作权限</strong>
+        <p>这些权限已配置，但修改后的菜单不再包含对应页面。请核对后再次确认保存。</p>
+        <ul>{removalImpact.map((action) => <li key={action.key}><b>{action.label}</b><span>缺少页面：{action.missingMenuLabels.join(' / ') || action.missingMenuCodes.join(' / ')}</span></li>)}</ul>
+      </div>}
       <div className="system-config-tree">
         {tree.map((node) => {
           const state = menuNodeState(node, menuIds, moduleCodes);
@@ -533,7 +592,31 @@ function MenuAssignmentDialog({ role, menus, selectedMenuIds, businessModuleCode
               <IndeterminateCheckbox checked={state.checked} indeterminate={state.indeterminate} onChange={(event) => updateNode(node, event.target.checked)} />
               <span><strong>{node.label}</strong><small>{node.description}</small></span>
             </div>
-            {open && <div className="system-tree-children">{node.children?.map((child, index) => <label className={`system-tree-row${child.legacy ? ' legacy' : ''}${child.unavailable ? ' unavailable' : ''}`} key={child.key}>
+            {open && node.displayGroups?.length > 0 && <div className="menu-assignment-groups">{node.displayGroups.map((group) => {
+              const groupState = menuDisplayGroupState(node, group, menuIds, moduleCodes);
+              const groupOpen = expanded.has(group.key);
+              if (group.direct) {
+                const child = group.children[0];
+                return <label className={`system-tree-row menu-group-row direct${child?.legacy ? ' legacy' : ''}${child?.unavailable ? ' unavailable' : ''}`} key={group.key}>
+                  <span className="system-tree-spacer" />
+                  <input type="checkbox" checked={groupState.checked} disabled={groupState.disabled} onChange={(event) => updateDisplayGroup(node, group, event.target.checked)} />
+                  <span><strong>{group.label}</strong><small>{child?.legacy ? '随父模块显示' : child?.unavailable ? '菜单数据缺失，暂不可分配' : group.description}</small></span>
+                </label>;
+              }
+              return <div className="menu-assignment-group" key={group.key}>
+                <div className="system-tree-row menu-group-row">
+                  <button className="system-tree-expand" onClick={() => setExpanded((current) => { const next = new Set(current); if (next.has(group.key)) next.delete(group.key); else next.add(group.key); return next; })}>{groupOpen ? '⌄' : '›'}</button>
+                  <IndeterminateCheckbox checked={groupState.checked} indeterminate={groupState.indeterminate} disabled={groupState.disabled} onChange={(event) => updateDisplayGroup(node, group, event.target.checked)} />
+                  <span><strong>{group.label}</strong><small>{group.description}</small></span>
+                </div>
+                {groupOpen && <div className="menu-assignment-group-children">{group.children.map((child, index) => <label className={`system-tree-row${child.legacy ? ' legacy' : ''}${child.unavailable ? ' unavailable' : ''}`} key={child.key}>
+                  <span className="system-tree-spacer" />
+                  <input type="checkbox" checked={groupState.childStates[index]} disabled={child.legacy || child.unavailable} onChange={(event) => updateChild(node, child, event.target.checked)} />
+                  <span>{child.label}{child.legacy && <small>随父模块显示</small>}{child.unavailable && <small>菜单数据缺失，暂不可分配</small>}</span>
+                </label>)}</div>}
+              </div>;
+            })}</div>}
+            {open && !node.displayGroups?.length && <div className="system-tree-children">{node.children?.map((child, index) => <label className={`system-tree-row${child.legacy ? ' legacy' : ''}${child.unavailable ? ' unavailable' : ''}`} key={child.key}>
               <span className="system-tree-spacer" />
               <input type="checkbox" checked={state.childStates[index]} disabled={child.legacy || child.unavailable} onChange={(event) => updateChild(node, child, event.target.checked)} />
               <span>{child.label}{child.legacy && <small>随父模块显示</small>}{child.unavailable && <small>菜单数据缺失，暂不可分配</small>}</span>
@@ -546,13 +629,21 @@ function MenuAssignmentDialog({ role, menus, selectedMenuIds, businessModuleCode
   );
 }
 
-function PermissionAssignmentDialog({ role, menus, permissions, selectedMenuIds, businessModuleCodes, selectedPermissionIds, onClose, onSave }) {
+function PermissionAssignmentDialog({ role, menus, permissions, selectedMenuIds, businessModuleCodes, selectedPermissionIds, onClose, onSave, onOpenMenus }) {
   const tree = useMemo(() => buildRoleMenuTree(menus, role), [menus, role]);
   const menuCodes = useMemo(() => selectedLogicalMenuCodes(tree, selectedMenuIds, businessModuleCodes), [businessModuleCodes, selectedMenuIds, tree]);
   const allActions = useMemo(() => buildPermissionActions(permissions), [permissions]);
   const visibleActions = useMemo(() => filterActionsByMenus(allActions, menuCodes), [allActions, menuCodes]);
   const permissionTree = useMemo(() => buildPermissionActionTree(tree, allActions, menuCodes), [allActions, menuCodes, tree]);
   const missingTabs = useMemo(() => missingMenuCatalogCodes(tree), [tree]);
+  const selectionIssues = useMemo(() => permissionSelectionIssues({
+    selectedPermissionIds,
+    actions: allActions,
+    logicalMenuCodes: menuCodes,
+    permissions,
+    menuTree: tree,
+  }), [allActions, menuCodes, permissions, selectedPermissionIds, tree]);
+  const blockingIssues = [...selectionIssues.hiddenActions, ...selectionIssues.orphanPermissions];
   const [selectedKeys, setSelectedKeys] = useState(() => selectedActionKeys(selectedPermissionIds, visibleActions));
   const expandableKeys = useMemo(() => permissionTree.flatMap((node) => [
     node.key,
@@ -567,6 +658,10 @@ function PermissionAssignmentDialog({ role, menus, permissions, selectedMenuIds,
     setSelectedKeys(next);
   };
   const submit = async () => {
+    if (blockingIssues.length) {
+      setError('请先补齐对应页面菜单，再保存操作权限。');
+      return;
+    }
     setSubmitting(true);
     setError('');
     try {
@@ -584,10 +679,19 @@ function PermissionAssignmentDialog({ role, menus, permissions, selectedMenuIds,
       description="按已分配菜单的一级、二级层级配置页面操作；保存不会改变菜单可见性。"
       wide
       onClose={onClose}
-      footer={<><button className="plain" onClick={onClose}>取消</button><button className="primary" disabled={submitting || !permissionTree.length} onClick={submit}>{submitting ? '保存中…' : '保存'}</button></>}
+      footer={<><button className="plain" onClick={onClose}>取消</button><button className="primary" disabled={submitting || !permissionTree.length || blockingIssues.length > 0} onClick={submit}>{submitting ? '保存中…' : '保存'}</button></>}
     >
       <div className="system-tree-toolbar"><span>已选择 {selectedKeys.size} 项操作权限</span><div><button onClick={() => setExpanded(new Set(expandableKeys))}>展开全部</button><button onClick={() => setExpanded(new Set())}>收起全部</button></div></div>
       {!!missingTabs.length && <div className="system-inline-notice warning">当前菜单目录不完整，缺少：{missingTabs.join('、')}。这些页面的操作权限已隐藏，避免保存出现在错误菜单下。</div>}
+      {!!blockingIssues.length && <div className="system-authorization-warning" role="alert">
+        <strong>检测到 {blockingIssues.length} 项不可安全展示的已有权限</strong>
+        <p>角色已持有权限，但对应页面菜单未分配或权限无法映射。为避免整表保存时静默清除，当前禁止保存。</p>
+        <ul>
+          {selectionIssues.hiddenActions.map((action) => <li key={action.key}><b>{action.label}</b><span>需要页面：{action.missingMenuLabels.join(' / ') || action.missingMenuCodes.join(' / ')}</span></li>)}
+          {selectionIssues.orphanPermissions.map((permission) => <li key={`permission-${permission.id}`}><b>{permission.label}</b><span>{permission.missingMenuLabels.length ? `需要页面：${permission.missingMenuLabels.join(' / ')}` : `权限码：${permission.permissionCode}`}</span></li>)}
+        </ul>
+        <button type="button" onClick={onOpenMenus}>打开菜单分配</button>
+      </div>}
       {!permissionTree.length && <Empty text="请先为该角色分配可用的页面菜单" />}
       <div className="system-config-tree permission-tree">{permissionTree.map((node) => {
         const checkedCount = node.items.filter((action) => selectedKeys.has(action.key)).length;
@@ -793,18 +897,9 @@ function UserProjectAccessDialog({
     setError('');
     try {
       const impacts = await onPreview({ changes });
-      const responsibilityTotal = impacts.reduce((total, impact) => total + Number(impact.totalCount || 0), 0);
+      const responsibilityTotal = responsibilityImpactTotal(impacts);
       if (responsibilityTotal > 0) {
-        const lines = impacts.map((impact) => {
-          const detail = [
-            ['负责电箱', impact.responsibleElectricBoxCount],
-            ['安全负责人', impact.safetyManagedElectricBoxCount],
-            ['待复核', impact.pendingInspectionReviewCount],
-            ['整改任务', impact.openRectificationCount],
-            ['质量整改', impact.openQualityIssueCount],
-          ].filter(([, count]) => Number(count || 0) > 0).map(([label, count]) => `${label}${count}项`).join('、');
-          return `${impact.projectName || `项目 ${impact.projectId}`}：${detail}`;
-        }).join('\n');
+        const lines = responsibilityImpactLines(impacts).join('\n');
         if (!window.confirm(`撤权后以下责任人将被清空，任务保留并转为待重新分配：\n${lines}\n\n确认继续吗？`)) return;
       } else if (summary.removed > 0
         && !window.confirm(`本次将移出 ${summary.removed} 个项目，相关项目角色会一并移除。确认继续吗？`)) return;
@@ -913,6 +1008,7 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
   const projectRoleOptions = useMemo(() => {
     return roles.filter((role) => isProjectRole(role) && isEnabledValue(role.enabled ?? 1));
   }, [roles]);
+  const catalogStatus = useMemo(() => authorizationCatalogStatus(menus, permissions), [menus, permissions]);
 
   useEffect(() => {
     if (!availableTabs.some((tab) => tab.id === activeTab)) setActiveTab(availableTabs[0]?.id || '');
@@ -973,6 +1069,8 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
           getSystemPermissions({ pageSize: 500 }),
         ]);
         if (permissionRes.code !== 200) throw new Error(permissionRes.message || '操作权限目录加载失败');
+        if (!menuRes || menuRes.code !== 200) throw new Error(menuRes?.message || '菜单目录加载失败');
+        setMenus(extractList(menuRes.data).filter((menu) => !isRetiredMenu(menu)));
         setPermissions(extractList(permissionRes.data).filter((permission) => !isRetiredPermission(permission)));
         res = menuRes;
       }
@@ -1055,7 +1153,24 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
     const reason = window.prompt(active ? '请输入停用原因' : '请输入恢复说明（可留空）', active ? '管理员停用账号' : '');
     if (reason === null || (active && !reason.trim())) return;
     try {
-      const res = await updateSystemUserStatus(getId(user), { status: nextStatus, reason });
+      let confirmResponsibilityRelease;
+      if (active) {
+        const previewRes = await previewSystemUserStatusImpact(getId(user), { status: nextStatus, reason });
+        if (!previewRes || previewRes.code !== 200) {
+          throw new Error(previewRes?.message || '责任影响预览失败');
+        }
+        const impacts = extractList(previewRes.data);
+        const responsibilityTotal = responsibilityImpactTotal(impacts);
+        const impactLines = responsibilityImpactLines(impacts);
+        const confirmation = responsibilityTotal > 0
+          ? `停用账号将解除以下 ${responsibilityTotal} 项现有责任：\n${impactLines.join('\n')}\n\n相关任务和业务记录保留，责任人将被清空或按现有规则处理。确认继续停用吗？`
+          : '未发现需要释放的现有业务责任。停用后该账号的全部登录会话将失效，确认继续停用吗？';
+        if (!window.confirm(confirmation)) return;
+        confirmResponsibilityRelease = true;
+      }
+      const payload = { status: nextStatus, reason };
+      if (confirmResponsibilityRelease) payload.confirmResponsibilityRelease = true;
+      const res = await updateSystemUserStatus(getId(user), payload);
       if (res.code !== 200) throw new Error(res.message || '用户状态更新失败');
       await loadData();
     } catch (err) {
@@ -1339,12 +1454,13 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
           const moduleCodes = role.businessModuleCodes || [];
           const roleMenus = role.menuIds || [];
           const rolePermissions = rolePermissionIdsFor(role);
+          const authorizationPending = roleMenus.length > 0 && rolePermissions.length === 0;
           const moduleLabels = moduleCodes.map((code) => BUSINESS_MODULES.find((module) => module.code === code)?.label).filter(Boolean);
           return <tr key={getId(role)} className={getId(selectedRole) === getId(role) ? 'selected' : ''} onClick={() => setSelectedRole(role)}>
             <td><strong className={`system-role-name tone-${roleNameTone(role)}`}>{roleName(role)}</strong><small>{roleCode(role)}{Number(role.builtin || 0) === 1 ? ' · 内置' : ''}</small></td>
             <td>{isProjectRole(role) ? (Number(role.projectManagerRole || 0) === 1 ? '项目经理' : '项目角色') : '平台保护角色'}</td>
             <td><div className="system-role-tags">{moduleLabels.length ? moduleLabels.map((label) => <span key={label}>{label}</span>) : <em>未分配</em>}</div></td>
-            <td>{roleMenus.length} 项</td><td>{rolePermissions.length} 项</td><td><StatusTag status={isEnabledValue(role.enabled) ? 'ENABLED' : 'DISABLED'} /></td>
+            <td>{roleMenus.length} 项</td><td><div className="system-role-permission-status"><span>{rolePermissions.length} 项</span>{authorizationPending && <em>授权待完善</em>}</div></td><td><StatusTag status={isEnabledValue(role.enabled) ? 'ENABLED' : 'DISABLED'} /></td>
             <td><div className="system-row-actions" onClick={(event) => event.stopPropagation()}>
               <button disabled={protectedRole} onClick={() => { setSelectedRole(role); setRoleDefinitionDialog(role); }}>编辑</button>
               <button disabled={protectedRole} onClick={() => { setSelectedRole(role); setRoleMenuDialog(role); }}>分配菜单</button>
@@ -1365,6 +1481,15 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
         {hasPermission(currentUser, 'system.menu.manage') && <button onClick={() => editPermissionDefinition(null)}>新增操作权限</button>}
         <SearchBar value={keyword} onChange={setKeyword} placeholder="菜单名称或编码" onSearch={runSearch} />
       </PageBar>
+      <div className={`system-catalog-health ${catalogStatus.healthy ? 'healthy' : 'warning'}`}>
+        <div><strong>业务授权目录一致性：{catalogStatus.healthy ? '完整' : '需要处理'}</strong><span>标准菜单 {catalogStatus.availableMenuCount}/{catalogStatus.expectedMenuCount} · 标准操作权限 {catalogStatus.availablePermissionCount}/{catalogStatus.expectedPermissionCount}</span></div>
+        {!catalogStatus.healthy && <ul>
+          {!!catalogStatus.missingMenuCodes.length && <li>缺少菜单：{catalogStatus.missingMenuCodes.join('、')}</li>}
+          {!!catalogStatus.disabledMenuCodes.length && <li>停用菜单：{catalogStatus.disabledMenuCodes.join('、')}</li>}
+          {!!catalogStatus.missingPermissionCodes.length && <li>缺少权限：{catalogStatus.missingPermissionCodes.join('、')}</li>}
+          {!!catalogStatus.disabledPermissionCodes.length && <li>停用权限：{catalogStatus.disabledPermissionCodes.join('、')}</li>}
+        </ul>}
+      </div>
       <div className="system-table-wrap"><table><thead><tr><th>菜单/功能</th><th>编码</th><th>客户端</th><th>类型</th><th>关联权限</th><th>排序</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>{rows.map((menu) => <tr key={getId(menu)}><td><strong style={{ paddingLeft: `${Number(menu.level || 0) * 16}px` }}>{menu.menuName || menu.name}</strong></td><td>{menu.menuCode || menu.code}</td><td>{menu.clientType || 'WEB'}</td><td>{menu.resourceType || menu.type || 'MENU'}</td><td>{menu.permissionCode || '-'}</td><td>{menu.sortOrder ?? menu.sort ?? '-'}</td><td><StatusTag status={isEnabledValue(menu.enabled ?? menu.status) ? 'ENABLED' : 'DISABLED'} /></td><td>{hasPermission(currentUser, 'system.menu.manage') ? <div className="system-row-actions"><button onClick={() => editMenuDefinition(menu)}>编辑</button><button onClick={() => toggleMenu(menu)}>{isEnabledValue(menu.enabled ?? menu.status) ? '停用' : '启用'}</button></div> : <span className="system-hint">只读</span>}</td></tr>)}</tbody></table></div>
       <div className="system-subsection-title"><strong>操作权限目录</strong><span>{permissions.length} 项</span></div>
@@ -1417,8 +1542,8 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
       {reviewing && <ReviewDialog application={reviewing} roles={roles} permissions={permissions} projectList={projectList} onClose={() => setReviewing(null)} onApproved={async () => { setReviewing(null); await loadData(); }} />}
       {passwordResetUser && <PasswordResetDialog user={passwordResetUser} onClose={() => setPasswordResetUser(null)} onSubmit={(newPassword) => resetPassword(passwordResetUser, newPassword)} />}
       {roleDefinitionDialog !== undefined && <RoleDefinitionDialog role={roleDefinitionDialog} roles={roles} onClose={() => setRoleDefinitionDialog(undefined)} onSave={saveRoleDefinition} />}
-      {roleMenuDialog && <MenuAssignmentDialog role={roleMenuDialog} menus={menus} selectedMenuIds={(roleMenuDialog.menuIds || []).filter((id) => id !== undefined)} businessModuleCodes={deriveRoleBusinessModuleCodes(roleMenuDialog, menus)} onClose={() => setRoleMenuDialog(null)} onSave={(values) => saveRoleMenus(roleMenuDialog, values)} />}
-      {rolePermissionDialog && <PermissionAssignmentDialog role={rolePermissionDialog} menus={menus} permissions={roleAssignablePermissions(rolePermissionDialog, permissions)} selectedMenuIds={(rolePermissionDialog.menuIds || []).filter((id) => id !== undefined)} businessModuleCodes={deriveRoleBusinessModuleCodes(rolePermissionDialog, menus)} selectedPermissionIds={rolePermissionIdsFor(rolePermissionDialog)} onClose={() => setRolePermissionDialog(null)} onSave={(values) => saveRoleOperationPermissions(rolePermissionDialog, values)} />}
+      {roleMenuDialog && <MenuAssignmentDialog role={roleMenuDialog} menus={menus} permissions={roleAssignablePermissions(roleMenuDialog, permissions)} selectedMenuIds={(roleMenuDialog.menuIds || []).filter((id) => id !== undefined)} businessModuleCodes={deriveRoleBusinessModuleCodes(roleMenuDialog, menus)} selectedPermissionIds={rolePermissionIdsFor(roleMenuDialog)} onClose={() => setRoleMenuDialog(null)} onSave={(values) => saveRoleMenus(roleMenuDialog, values)} />}
+      {rolePermissionDialog && <PermissionAssignmentDialog role={rolePermissionDialog} menus={menus} permissions={roleAssignablePermissions(rolePermissionDialog, permissions)} selectedMenuIds={(rolePermissionDialog.menuIds || []).filter((id) => id !== undefined)} businessModuleCodes={deriveRoleBusinessModuleCodes(rolePermissionDialog, menus)} selectedPermissionIds={rolePermissionIdsFor(rolePermissionDialog)} onClose={() => setRolePermissionDialog(null)} onOpenMenus={() => { setRolePermissionDialog(null); setRoleMenuDialog(rolePermissionDialog); }} onSave={(values) => saveRoleOperationPermissions(rolePermissionDialog, values)} />}
       {userProjectAccessDialog && (
         <UserProjectAccessDialog
           key={getId(userProjectAccessDialog)}

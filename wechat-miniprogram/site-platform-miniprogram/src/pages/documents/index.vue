@@ -21,6 +21,7 @@ type SheetMode = 'folder' | 'filter' | null;
 const ACCENT = WORKSPACE_THEME.accent;
 const TINT = WORKSPACE_THEME.tint;
 const PAGE_SIZE = 20;
+const TODO_BUSINESS_FILTER_KEY = 'site_platform_todo_business_filter';
 const projectStore = useProjectStore();
 const authStore = useAuthStore();
 const summary = ref<ProjectDocumentSummary | null>(null);
@@ -155,6 +156,11 @@ function formatTime(value?: string) { return value ? value.replace('T', ' ').sli
 function fileMark(document: ProjectDocument) { return (extensionOf(document.currentVersion?.fileName) || document.currentVersion?.fileExtension || 'FILE').slice(0, 5).toUpperCase(); }
 function openUpload() { navigateTo(`/pages/documents/upload?projectId=${currentProject.value?.id || 0}&folderId=${selectedFolderId.value || 0}`); }
 function openDetail(document: ProjectDocument) { navigateTo(`/pages/documents/detail?id=${document.id}`); }
+function openSealManagement() { navigateTo(`/pages/seal/list?projectId=${currentProject.value?.id || 0}`); }
+function openDocumentCirculation() {
+  uni.setStorageSync(TODO_BUSINESS_FILTER_KEY, 'DOCUMENT');
+  uni.switchTab({ url: '/pages/todo/index' });
+}
 </script>
 
 <template>
@@ -172,14 +178,25 @@ function openDetail(document: ProjectDocument) { navigateTo(`/pages/documents/de
           @open="areaSheetOpen = true"
         />
 
+        <view class="business-domain-nav">
+          <button class="active" type="button">
+            <text class="domain-mark document-mark">资</text><view><text>工程资料</text><text>目录、版本与文件</text></view>
+          </button>
+          <button type="button" @tap="openSealManagement">
+            <text class="domain-mark seal-mark">印</text><view><text>用印管理</text><text>申请、审批与台账</text></view>
+          </button>
+          <button type="button" @tap="openDocumentCirculation">
+            <text class="domain-mark circulation-mark">图</text><view><text>图纸收发</text><text>通知、下载与签收</text></view>
+          </button>
+        </view>
+
         <view v-if="loading && !summary" class="state-panel"><text class="state-title">正在加载工程资料</text></view>
         <view v-else-if="errorMessage" class="state-panel"><text class="state-title">资料加载失败</text><text class="state-desc">{{ errorMessage }}</text><button class="retry-button" @tap="refreshAll">重新加载</button></view>
         <template v-else-if="summary && currentProject">
           <WorkspaceMetricStrip :metrics="metrics" :accent="ACCENT" :motion-key="`${currentProject.id}-${summary.total}`" />
 
-          <view class="document-toolbar">
+          <view v-if="canUpload || canManage" class="document-toolbar">
             <button v-if="canUpload" class="upload-entry" @tap="openUpload"><text class="upload-plus">＋</text><view><text>上传资料</text><text>微信文件、拍照或相册</text></view></button>
-            <button class="tool-entry seal-entry" @tap="navigateTo(`/pages/seal/list?projectId=${currentProject.id}`)"><text class="tool-icon seal-icon">印</text><text>用印</text></button>
             <button v-if="canManage" class="tool-entry" @tap="navigateTo(`/pages/documents/folders?projectId=${currentProject.id}`)"><text class="tool-icon folder-icon"></text><text>目录</text></button>
             <button v-if="canManage" class="tool-entry" @tap="navigateTo(`/pages/documents/recycle?projectId=${currentProject.id}`)"><text class="tool-icon recycle-icon"></text><text>回收站</text></button>
           </view>
@@ -247,6 +264,18 @@ function openDetail(document: ProjectDocument) { navigateTo(`/pages/documents/de
 
 <style scoped src="../../styles/workspace-page.css"></style>
 <style scoped>
+.business-domain-nav { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12rpx; }
+.business-domain-nav button { display: flex; min-width: 0; min-height: 112rpx; align-items: center; gap: 12rpx; padding: 15rpx 13rpx; border: 1rpx solid #e0e6ea; border-radius: 17rpx; background: #fff; color: #536678; text-align: left; box-shadow: 0 8rpx 24rpx rgba(43,56,72,.045); }
+.business-domain-nav button::after { border: 0; }
+.business-domain-nav button.active { border-color: #a9c2d2; background: #eaf2f6; color: #315f86; }
+.business-domain-nav button:active { transform: scale(.985); }
+.business-domain-nav view { min-width: 0; }
+.business-domain-nav view text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.business-domain-nav view text:first-child { font-size: 22rpx; font-weight: 820; }
+.business-domain-nav view text:last-child { margin-top: 6rpx; color: #8a97a4; font-size: 17rpx; }
+.domain-mark { display: flex; width: 42rpx; height: 42rpx; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 11rpx; background: #edf2f5; color: #5d7486; font-size: 19rpx; font-weight: 900; }
+.seal-mark { background: #f7efe3; color: #8a612c; }
+.circulation-mark { background: #e9eff9; color: #486b9a; }
 .document-toolbar { display: flex; gap: 12rpx; }
 .document-toolbar button::after,.filter-row button::after,.search-clear::after,.sheet-option::after,.choice-grid button::after { border: 0; }
 .upload-entry { display: flex; min-height: 92rpx; align-items: center; justify-content: flex-start; flex: 1; gap: 14rpx; padding: 14rpx 18rpx; border-radius: 16rpx; background: var(--workspace-tint-strong); color: var(--page-accent-deep); text-align: left; box-shadow: var(--workspace-shadow); }
@@ -263,7 +292,6 @@ function openDetail(document: ProjectDocument) { navigateTo(`/pages/documents/de
 .recycle-icon { border-width: 0 3rpx 3rpx; border-radius: 0 0 5rpx 5rpx; }
 .recycle-icon::before { position: absolute; top: -6rpx; left: -4rpx; width: 37rpx; height: 3rpx; border-radius: 99rpx; background: #68869b; content: ''; }
 .recycle-icon::after { position: absolute; top: -11rpx; left: 9rpx; width: 12rpx; height: 5rpx; border: 3rpx solid #68869b; border-bottom: 0; border-radius: 4rpx 4rpx 0 0; content: ''; }
-.seal-entry { background: #fbf7f0; color: #8a612c; }.seal-icon { display: flex; height: 34rpx; align-items: center; justify-content: center; border: 2rpx solid #9a6b2d; border-radius: 7rpx; color: #9a6b2d; font-size: 18rpx; font-weight: 900; transform: rotate(-3deg); }
 .document-section { overflow: visible; }
 .document-section .section-head { border-radius: 16rpx 16rpx 0 0; }
 .search-box { margin-top: 15rpx; }

@@ -331,7 +331,9 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
 
   const download = async (document, version) => {
     try {
-      const blob = await downloadProjectDocument(document.id, version?.id);
+      const superseded = String(version?.versionStatus || '').toUpperCase() === 'SUPERSEDED';
+      if (superseded && !window.confirm(`你正在下载已被替代的${version?.versionLabel || '历史版本'}。请优先使用当前版本，仍要继续吗？`)) return;
+      const blob = await downloadProjectDocument(document.id, version?.id, superseded);
       const url = URL.createObjectURL(blob);
       const anchor = window.document.createElement('a');
       anchor.href = url;
@@ -347,6 +349,8 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
   };
 
   const openPreview = async (document, version = document.currentVersion) => {
+    const superseded = String(version?.versionStatus || '').toUpperCase() === 'SUPERSEDED';
+    if (superseded && !window.confirm(`你正在查看已被替代的${version?.versionLabel || '历史版本'}。请优先使用当前版本，仍要继续吗？`)) return;
     const fileName = version?.fileName || document.title;
     const extension = extensionOf(fileName);
     const kind = extension === 'pdf' ? 'pdf'
@@ -356,7 +360,7 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
             : AUDIO_EXTENSIONS.includes(extension) ? 'audio' : 'unsupported';
     if (kind === 'unsupported') return setPreview({ document, version, kind, fileName });
     try {
-      const blob = await previewProjectDocument(document.id, version?.id);
+      const blob = await previewProjectDocument(document.id, version?.id, superseded);
       const next = { document, version, kind, fileName, objectUrl: null, text: '' };
       if (kind === 'text') next.text = await blob.text();
       else next.objectUrl = URL.createObjectURL(blob);

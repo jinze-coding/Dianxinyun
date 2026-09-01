@@ -8,7 +8,6 @@ import com.example.siteplatform.auth.mapper.SysUserMapper;
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.inspection.general.dto.EdgeInspectionPointSaveRequest;
 import com.example.siteplatform.inspection.general.dto.EdgeInspectionSettingRequest;
-import com.example.siteplatform.inspection.general.dto.GeneralInspectionFeatureRequest;
 import com.example.siteplatform.inspection.general.dto.GeneralInspectionPlanConfig;
 import com.example.siteplatform.inspection.general.dto.GeneralInspectionPointActionRequest;
 import com.example.siteplatform.inspection.general.entity.*;
@@ -29,6 +28,7 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.*;
 
 /**
@@ -45,6 +45,7 @@ public class EdgeInspectionConfigService {
 
     public static final String EDGE_PLAN_CODE = "EDGE_PROJECT_SCHEDULE";
     public static final String EDGE_TEMPLATE_PREFIX = "EDGE_";
+    private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final String EDGE_SLOT_CODE = "EDGE_SLOT";
     private static final LinkedHashMap<String, String> POINT_TYPES = new LinkedHashMap<>();
 
@@ -60,8 +61,6 @@ public class EdgeInspectionConfigService {
     }
 
     private final GeneralInspectionPermissionService permissionService;
-    private final GeneralInspectionConfigService legacyConfigService;
-    private final GeneralInspectionProjectSettingMapper settingMapper;
     private final GeneralInspectionTemplateMapper templateMapper;
     private final GeneralInspectionTemplateVersionMapper templateVersionMapper;
     private final GeneralInspectionTemplateItemMapper templateItemMapper;
@@ -74,50 +73,6 @@ public class EdgeInspectionConfigService {
     private final SysUserMapper userMapper;
     private final SysUserProjectMapper userProjectMapper;
     private final ObjectMapper objectMapper;
-
-    public GeneralInspectionProjectSetting getFeature(Long projectId, SysUser user) {
-        permissionService.requireFeatureView(projectId, user);
-        return legacyConfigService.getFeature(projectId, user);
-    }
-
-    @Transactional
-    public GeneralInspectionProjectSetting updateFeature(Long projectId, GeneralInspectionFeatureRequest request,
-                                                          SysUser user) {
-        permissionService.requirePlatformAdmin(user);
-        if (settingMapper.lockPilotGuard() == null) {
-            throw conflict("平台管理员角色配置缺失，无法安全更新临边巡检试点");
-        }
-        GeneralInspectionProjectSetting existing = settingMapper.selectById(projectId);
-        boolean requestedEnabled = Boolean.TRUE.equals(request.getEnabled());
-        boolean currentlyEnabled = existing != null && Integer.valueOf(1).equals(existing.getEnabled());
-        boolean stateChanging = requestedEnabled != currentlyEnabled;
-        boolean reEnabling = requestedEnabled && !currentlyEnabled;
-        LocalDateTime enabledAt = reEnabling ? LocalDateTime.now() : null;
-        // 启停两方向都与生成器共用计划行锁。关闭请求返回后，不能再有一个已经读到
-        // enabled=1 的生成事务越过关闭边界提交新任务。
-        GeneralInspectionPlan plan = stateChanging ? planMapper.selectEdgePlanForUpdate(projectId) : null;
-
-        GeneralInspectionProjectSetting updated = legacyConfigService.updateFeature(projectId, request, user);
-        if (reEnabling && plan != null) {
-            LocalDateTime previousCursor = plan.getGeneratedThroughTime();
-            LocalDateTime previousLowerBound = plan.getEdgeGenerationLowerBoundTime();
-            LocalDateTime cursor = advanceLowerBound(previousCursor, enabledAt);
-            LocalDateTime lowerBound = advanceLowerBound(previousLowerBound, enabledAt);
-            if (!Objects.equals(previousCursor, cursor)
-                    || !Objects.equals(previousLowerBound, lowerBound)) {
-                plan.setGeneratedThroughTime(cursor);
-                plan.setEdgeGenerationLowerBoundTime(lowerBound);
-                plan.setVersion(value(plan.getVersion()) + 1);
-                plan.setUpdatedById(user.getId());
-                plan.setUpdatedByName(userName(user));
-                requireOne(planMapper.updateById(plan), "临边巡检重启用生成下界更新");
-            }
-            record(projectId, "PLAN", plan.getId(), "FEATURE_REENABLE_BOUND", user,
-                    String.valueOf(previousLowerBound), String.valueOf(lowerBound),
-                    "临边巡检重新启用，仅生成启用时刻之后的任务；游标=" + cursor);
-        }
-        return updated;
-    }
 
     public List<EdgeInspectionPointTypeVO> listPointTypes(Long projectId, SysUser user) {
         permissionService.requireView(projectId, user);
@@ -271,9 +226,19 @@ public class EdgeInspectionConfigService {
     @Transactional
     public EdgeInspectionSettingVO saveSetting(Long projectId, EdgeInspectionSettingRequest request, SysUser user) {
         permissionService.requireManage(projectId, user);
-        GeneralInspectionPlanConfig config = buildAndValidateConfig(projectId, request);
         GeneralInspectionPlan plan = planMapper.selectEdgePlanForUpdate(projectId);
-        LocalDateTime savedAt = LocalDateTime.now();
+        LocalDateTime savedAt = LocalDateTime.now(BUSINESS_ZONE);
+        GeneralInspectionPlanConfig previousConfig = plan == null ? null : parseConfig(plan.getDraftConfigJson());
+        GeneralInspectionPlanConfig config = buildAndValidateConfig(projectId, request);
+        boolean previousReminderEnabled = previousConfig != null
+                && Boolean.TRUE.equals(previousConfig.getSubmissionReminderEnabled());
+        boolean reminderEnabled = request.getSubmissionReminderEnabled() == null
+                ? previousReminderEnabled : Boolean.TRUE.equals(request.getSubmissionReminderEnabled());
+        config.setSubmissionReminderEnabled(reminderEnabled);
+        config.setReminderEffectiveTime(resolveReminderEffectiveTime(
+                previousReminderEnabled,
+                previousConfig == null ? null : previousConfig.getReminderEffectiveTime(),
+                request.getSubmissionReminderEnabled(), savedAt));
         boolean resumed = plan != null && !"PUBLISHED".equals(plan.getStatus())
                 && Boolean.TRUE.equals(request.getEnabled());
         LocalDateTime previousCursor = plan == null ? null : plan.getGeneratedThroughTime();
@@ -458,6 +423,10 @@ public class EdgeInspectionConfigService {
         vo.setReviewerName(userName(userMapper.selectById(config.getReviewerId())));
         vo.setRectificationDays(config.getRectificationDays());
         vo.setEnabled("PUBLISHED".equals(plan.getStatus()));
+        vo.setSubmissionReminderEnabled(Boolean.TRUE.equals(config.getSubmissionReminderEnabled()));
+        vo.setReminderEffectiveTime(config.getReminderEffectiveTime());
+        vo.setNextReminderTime("PUBLISHED".equals(plan.getStatus())
+                ? nextReminderTime(config, LocalDateTime.now(BUSINESS_ZONE)) : null);
         vo.setStatus(plan.getStatus());
         vo.setVersion(plan.getVersion());
         return vo;
@@ -474,6 +443,7 @@ public class EdgeInspectionConfigService {
         vo.setDueTime(LocalTime.of(18, 0));
         vo.setRectificationDays(3);
         vo.setEnabled(false);
+        vo.setSubmissionReminderEnabled(false);
         vo.setStatus("UNCONFIGURED");
         vo.setVersion(0);
         return vo;
@@ -605,6 +575,49 @@ public class EdgeInspectionConfigService {
         } catch (JsonProcessingException ex) {
             throw conflict("临边巡检设置快照无法解析");
         }
+    }
+
+    static LocalDateTime resolveReminderEffectiveTime(boolean previousEnabled, LocalDateTime previousEffectiveTime,
+                                                      Boolean requestedEnabled, LocalDateTime savedAt) {
+        boolean enabled = requestedEnabled == null ? previousEnabled : Boolean.TRUE.equals(requestedEnabled);
+        if (!enabled) return null;
+        if (!previousEnabled) return savedAt;
+        return previousEffectiveTime == null ? savedAt : previousEffectiveTime;
+    }
+
+    static LocalDateTime nextReminderTime(GeneralInspectionPlanConfig config, LocalDateTime now) {
+        if (config == null || now == null || !Boolean.TRUE.equals(config.getSubmissionReminderEnabled())
+                || config.getReminderEffectiveTime() == null || config.getSlots() == null
+                || config.getSlots().isEmpty() || config.getEffectiveStart() == null) {
+            return null;
+        }
+        LocalDate start = now.toLocalDate().minusDays(1);
+        if (start.isBefore(config.getEffectiveStart())) start = config.getEffectiveStart();
+        for (LocalDate date = start; !date.isAfter(start.plusDays(370)); date = date.plusDays(1)) {
+            if (!matchesSchedule(config, date)) continue;
+            for (GeneralInspectionPlanConfig.Slot slot : config.getSlots()) {
+                if (slot == null || slot.getDueTime() == null) continue;
+                int offset = slot.getDueDayOffset() == null ? 0 : slot.getDueDayOffset();
+                LocalDateTime due = LocalDateTime.of(date.plusDays(offset), slot.getDueTime());
+                if (due.isAfter(now) && due.isAfter(config.getReminderEffectiveTime())) return due;
+            }
+        }
+        return null;
+    }
+
+    private static boolean matchesSchedule(GeneralInspectionPlanConfig config, LocalDate date) {
+        if (date.isBefore(config.getEffectiveStart())
+                || config.getEffectiveEnd() != null && date.isAfter(config.getEffectiveEnd())) return false;
+        return switch (config.getFrequency()) {
+            case "DAILY" -> true;
+            case "WEEKLY" -> config.getWeekdays() != null
+                    && config.getWeekdays().contains(date.getDayOfWeek().getValue());
+            case "MONTHLY" -> config.getMonthDays() != null
+                    && (config.getMonthDays().contains(date.getDayOfMonth())
+                    || config.getMonthDays().contains(-1)
+                    && date.getDayOfMonth() == date.lengthOfMonth());
+            default -> false;
+        };
     }
 
     private String json(Object value) {

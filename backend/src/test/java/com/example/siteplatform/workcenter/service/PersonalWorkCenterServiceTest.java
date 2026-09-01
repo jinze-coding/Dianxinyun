@@ -2,10 +2,13 @@ package com.example.siteplatform.workcenter.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.common.PageResult;
 import com.example.siteplatform.inspection.service.InspectionService;
+import com.example.siteplatform.inspection.general.service.GeneralInspectionTaskService;
+import com.example.siteplatform.inspection.general.vo.GeneralInspectionTaskVO;
 import com.example.siteplatform.inspection.vo.InspectionTodoVO;
 import com.example.siteplatform.notification.entity.UserNotification;
 import com.example.siteplatform.notification.mapper.UserNotificationMapper;
@@ -39,7 +42,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.LocalDateTime;
 import java.time.Duration;
 import java.time.ZoneId;
+import java.util.Collection;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -236,6 +242,42 @@ class PersonalWorkCenterServiceTest {
     }
 
     @Test
+    void inboxBusinessGroupIncludesEveryQualityNotificationType() {
+        when(projectInfoMapper.selectById(10L)).thenReturn(project(10L, "项目甲"));
+        when(userProjectMapper.selectList(any(LambdaQueryWrapper.class)))
+                .thenReturn(List.of(membership(7L, 10L)));
+        when(notificationMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class)))
+                .thenReturn(new Page<>(1, 20));
+
+        service.inbox("ALL", null, "quality", 10L, 1, 20, currentUser);
+
+        ArgumentCaptor<LambdaQueryWrapper<UserNotification>> queryCaptor =
+                ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(notificationMapper).selectPage(any(Page.class), queryCaptor.capture());
+        LambdaQueryWrapper<UserNotification> query = queryCaptor.getValue();
+        assertTrue(query.getSqlSegment().contains(" IN "));
+        Set<Object> parameters = query.getParamNameValuePairs().values().stream()
+                .flatMap(value -> value instanceof Collection<?> values
+                        ? values.stream() : java.util.stream.Stream.of(value))
+                .collect(Collectors.toSet());
+        assertTrue(parameters.containsAll(Set.of(
+                "QUALITY_ISSUE", "QUALITY_WEEKLY_INSPECTION", "QUALITY_ISSUE_EXPORT")));
+    }
+
+    @Test
+    void inboxRejectsExactBusinessTypeTogetherWithBusinessGroup() {
+        when(projectInfoMapper.selectById(10L)).thenReturn(project(10L, "项目甲"));
+        when(userProjectMapper.selectList(any(LambdaQueryWrapper.class)))
+                .thenReturn(List.of(membership(7L, 10L)));
+
+        BusinessException error = assertThrows(BusinessException.class, () -> service.inbox(
+                "ALL", "QUALITY_ISSUE", "QUALITY", 10L, 1, 20, currentUser));
+
+        assertEquals("业务类型与业务分组不能同时筛选", error.getMessage());
+        verify(notificationMapper, never()).selectPage(any(Page.class), any(LambdaQueryWrapper.class));
+    }
+
+    @Test
     void markReadDoesNotExposeAnotherUsersNotification() {
         when(notificationMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(null);
 
@@ -256,6 +298,25 @@ class PersonalWorkCenterServiceTest {
         assertTrue(result.getRead());
         assertEquals(null, result.getProjectName());
         verify(projectInfoMapper, never()).selectById(anyLong());
+    }
+
+    @Test
+    void qualityWeeklyReminderKeepsOnlyTheControlledWeekRouteAndScalarParameters() {
+        when(projectInfoMapper.selectById(10L)).thenReturn(project(10L, "项目甲"));
+        when(userProjectMapper.selectList(any(LambdaQueryWrapper.class)))
+                .thenReturn(List.of(membership(7L, 10L)));
+        UserNotification notification = notification(23L, 7L, 10L, 1);
+        notification.setBusinessType("QUALITY_WEEKLY_INSPECTION");
+        notification.setRouteCode("QUALITY_WEEKLY_INSPECTION_WEEK");
+        notification.setRouteParamsJson("{\"projectId\":10,\"weekStart\":\"2026-08-24\",\"nested\":{\"ignored\":true}}");
+        when(notificationMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(notification);
+
+        InboxNotificationVO result = service.markRead(23L, currentUser);
+
+        assertEquals("QUALITY_WEEKLY_INSPECTION_WEEK", result.getRouteCode());
+        assertEquals(10L, result.getRouteParams().get("projectId"));
+        assertEquals("2026-08-24", result.getRouteParams().get("weekStart"));
+        assertFalse(result.getRouteParams().containsKey("nested"));
     }
 
     @Test
@@ -304,6 +365,36 @@ class PersonalWorkCenterServiceTest {
         assertEquals(1L, summary.getByBusinessType().get("SEAL_APPLICATION"));
         assertEquals(1L, summary.getByBusinessType().get("QUALITY_ISSUE"));
         assertEquals(1L, summary.getByTaskType().get("SEAL_APPROVAL"));
+    }
+
+    @Test
+    void edgeInspectionTodoExcludesTasksBeforeAvailableTime() {
+        GeneralInspectionTaskService edgeTaskService = org.mockito.Mockito.mock(GeneralInspectionTaskService.class);
+        service.setGeneralInspectionTaskService(edgeTaskService);
+        when(projectInfoMapper.selectById(10L)).thenReturn(project(10L, "项目甲"));
+        when(userProjectMapper.selectList(any(LambdaQueryWrapper.class)))
+                .thenReturn(List.of(membership(7L, 10L)));
+        when(inspectionService.listTodos(10L, currentUser)).thenReturn(List.of());
+        when(projectPermissionService.hasSystemPermission(
+                7L, 10L, SystemPermissionCodes.QUALITY_VIEW)).thenReturn(false);
+        LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Shanghai"));
+        GeneralInspectionTaskVO future = edgeTask(301L, now.plusHours(1), now.plusHours(10), false);
+        GeneralInspectionTaskVO current = edgeTask(302L, now.minusMinutes(1), now.plusHours(8), false);
+        GeneralInspectionTaskVO overdue = edgeTask(303L, now.minusDays(1), now.minusHours(1), true);
+        GeneralInspectionTaskVO futureUnassigned = edgeTask(304L, now.plusHours(1), now.plusHours(10), false);
+        when(edgeTaskService.listTasks(null, "PENDING", null, null, true, currentUser))
+                .thenReturn(List.of(future, current, overdue));
+        when(edgeTaskService.listTasksNeedingAssignment(10L, currentUser))
+                .thenReturn(List.of(futureUnassigned));
+
+        PageResult<PersonalTodoVO> result = service.listTodos(
+                "PENDING", 10L, "EDGE_INSPECTION_TASK", 1, 20, currentUser);
+
+        assertEquals(2L, result.getTotal());
+        assertTrue(result.getRecords().stream().noneMatch(todo -> todo.getTargetId().equals(301L)));
+        assertTrue(result.getRecords().stream().anyMatch(todo -> todo.getTargetId().equals(302L)));
+        assertTrue(result.getRecords().stream().anyMatch(todo -> todo.getTargetId().equals(303L)
+                && "danger".equals(todo.getPriority())));
     }
 
     @Test
@@ -397,6 +488,22 @@ class PersonalWorkCenterServiceTest {
         todo.setBusinessType("QUALITY_ISSUE");
         todo.setPriority("danger");
         return todo;
+    }
+
+    private GeneralInspectionTaskVO edgeTask(Long id, LocalDateTime availableTime,
+                                              LocalDateTime dueTime, boolean overdue) {
+        GeneralInspectionTaskVO task = new GeneralInspectionTaskVO();
+        task.setId(id);
+        task.setProjectId(10L);
+        task.setPointName("临边点位-" + id);
+        task.setPointTypeName("楼层临边");
+        task.setSlotName("08:00—18:00");
+        task.setAvailableTime(availableTime);
+        task.setStartTime(availableTime);
+        task.setDueTime(dueTime);
+        task.setOverdue(overdue);
+        task.setStatus("PENDING");
+        return task;
     }
 
     private void stubMixedTodoSources() {

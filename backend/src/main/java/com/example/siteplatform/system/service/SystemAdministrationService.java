@@ -10,6 +10,7 @@ import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.common.PageResult;
 import com.example.siteplatform.log.entity.OperationLog;
 import com.example.siteplatform.log.mapper.OperationLogMapper;
+import com.example.siteplatform.project.dto.ResponsibilityImpactVO;
 import com.example.siteplatform.project.entity.SysUserProject;
 import com.example.siteplatform.project.entity.SysUserProjectRole;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
@@ -49,13 +50,18 @@ public class SystemAdministrationService {
 
     private static final Set<String> INSPECTION_LEDGER_PERMISSION_CODES = Set.of(
             "BOX_VIEW", "BOX_MANAGE", "BOX_QR_MANAGE", "BOX_PUBLIC_ACCESS");
-    private static final Set<String> INSPECTION_RECORD_PERMISSION_CODES = Set.of(
-            "INSPECTION_DAILY_SUBMIT", "INSPECTION_RECORD_VIEW", "SUMMARY_VIEW", "SUMMARY_EXPORT");
+    private static final Set<String> ELECTRIC_BOX_INSPECTION_RECORD_PERMISSION_CODES = Set.of(
+            "INSPECTION_DAILY_SUBMIT", "INSPECTION_RECORD_VIEW");
+    private static final Set<String> INSPECTION_SUMMARY_PERMISSION_CODES = Set.of(
+            "SUMMARY_VIEW", "SUMMARY_EXPORT");
     private static final Set<String> INSPECTION_RECTIFICATION_PERMISSION_CODES = Set.of(
             "INSPECTION.RECTIFY", "INSPECTION.REVIEW");
-    private static final Set<String> GENERAL_INSPECTION_PERMISSION_CODES = Set.of(
+    private static final Set<String> EDGE_INSPECTION_PERMISSION_CODES = Set.of(
             "EDGE_INSPECTION_VIEW", "EDGE_INSPECTION_MANAGE", "EDGE_INSPECTION_SUBMIT",
-            "EDGE_INSPECTION_RECTIFY", "EDGE_INSPECTION_REVIEW");
+            "EDGE_INSPECTION_RECTIFY", "EDGE_INSPECTION_REVIEW", "EDGE_INSPECTION_EXPORT");
+    private static final Set<String> DOCUMENT_CIRCULATION_PERMISSION_CODES = Set.of(
+            "DOCUMENT.CIRCULATION.VIEW", "DOCUMENT.RECEIVE", "DOCUMENT.ISSUE",
+            "DOCUMENT.CIRCULATION.EXPORT");
     private static final String RETIRED_PROJECT_MEMBER_MENU = "SYSTEM_PROJECT";
     private static final String RETIRED_PROJECT_MEMBER_PERMISSION = "project.member.manage";
     private static final String GENERATED_ROLE_CODE_PREFIX = "ROLE_";
@@ -121,6 +127,12 @@ public class SystemAdministrationService {
 
     @Transactional
     public void changeUserStatus(Long userId, Object rawStatus, String reason, SysUser operator) {
+        changeUserStatus(userId, rawStatus, reason, false, operator);
+    }
+
+    @Transactional
+    public void changeUserStatus(Long userId, Object rawStatus, String reason,
+                                 boolean confirmResponsibilityRelease, SysUser operator) {
         Integer status = normalizeUserStatus(rawStatus);
         if (Objects.equals(userId, operator.getId()) && status == 0) throw new BusinessException("不能停用自己的账号");
         if (status == 0) lockPlatformAdministratorMutex();
@@ -128,6 +140,13 @@ public class SystemAdministrationService {
         if (status == 0 && isEffectivePlatformAdministrator(user)
                 && activePlatformAdministratorCount() <= 1) {
             throw new BusinessException("不能停用最后一个可用的平台管理员");
+        }
+        List<ResponsibilityImpactVO> impacts = status == 0
+                ? responsibilityImpactsForUser(userId) : List.of();
+        if (!impacts.isEmpty() && !confirmResponsibilityRelease) {
+            long total = impacts.stream().mapToLong(ResponsibilityImpactVO::getTotalCount).sum();
+            throw BusinessException.of(409, "停用账号将解除" + total
+                    + "项现有责任，请先预览影响并确认后再停用");
         }
         user.setStatus(status);
         user.setUpdateTime(LocalDateTime.now());
@@ -137,18 +156,28 @@ public class SystemAdministrationService {
             // including direct-user approval configuration and pending seal tasks.
             // The release remains in this transaction, so a failure also rolls the
             // status write back instead of leaving a half-disabled account.
-            List<SysUserProject> memberships = userProjectMapper.selectList(
-                    new LambdaQueryWrapper<SysUserProject>().eq(SysUserProject::getUserId, userId));
-            if (memberships != null) {
-                memberships.stream().map(SysUserProject::getProjectId)
-                        .filter(Objects::nonNull).distinct()
-                        .forEach(projectId -> responsibilityReleaseService.releaseAll(projectId, userId));
-            }
+            impacts.stream().map(ResponsibilityImpactVO::getProjectId)
+                    .filter(Objects::nonNull).distinct().forEach(projectId ->
+                            responsibilityReleaseService.releaseAll(projectId, userId));
         }
         authService.logout(userId);
         authService.repeatLogoutAfterCommit(userId);
         record(operator, status == 1 ? "ENABLE_USER" : "DISABLE_USER", "SYS_USER", userId,
                 (status == 1 ? "启用账号" : "停用账号") + reasonSuffix(reason));
+    }
+
+    public List<ResponsibilityImpactVO> previewUserStatusImpact(Long userId, Object rawStatus,
+                                                                 SysUser operator) {
+        Integer status = normalizeUserStatus(rawStatus);
+        if (operator == null || operator.getId() == null) {
+            throw BusinessException.unauthorized("请先登录");
+        }
+        SysUser user = requireUser(userId);
+        if (Objects.equals(userId, operator.getId()) && status == 0) {
+            throw new BusinessException("不能停用自己的账号");
+        }
+        if (status != 0 || Integer.valueOf(0).equals(user.getStatus())) return List.of();
+        return responsibilityImpactsForUser(userId);
     }
 
     @Transactional
@@ -190,6 +219,8 @@ public class SystemAdministrationService {
         lockPlatformAdministratorMutex();
         SystemRole role = id == null ? new SystemRole() : roleMapper.selectByIdForUpdate(id);
         if (id != null && role == null) throw BusinessException.notFound("角色不存在");
+        List<SysUserProjectRole> affectedProjectAssignments = id == null
+                ? List.of() : projectAssignmentsForRole(id);
         Long duplicateName = roleMapper.selectCount(new LambdaQueryWrapper<SystemRole>()
                 .apply("LOWER(TRIM(role_name)) = LOWER({0})", normalizedRoleName)
                 .ne(id != null, SystemRole::getId, id));
@@ -198,6 +229,7 @@ public class SystemAdministrationService {
         }
         String previousRoleCode = role.getRoleCode();
         String previousScopeType = role.getScopeType();
+        Integer previousEnabled = role.getEnabled();
         String scopeType = id == null ? "PROJECT" : role.getScopeType();
         if (id != null && isProtectedPlatformAdministratorRole(role)) {
             scopeType = "PLATFORM";
@@ -295,6 +327,9 @@ public class SystemAdministrationService {
             replaceRoleMenus(role.getId(), normalizedMenuIds, businessModuleCodes);
             replaceRolePermissions(role.getId(), normalizedPermissionIds);
         }
+        if (authorizationSupplied || (id != null && !Objects.equals(previousEnabled, enabled))) {
+            requireNoResponsibilityImpactAfterRoleAuthorizationChange(affectedProjectAssignments);
+        }
         Set<Long> affectedUserIds = affectedRoleUserIds(role.getId(), previousScopeType, previousRoleCode);
         affectedUserIds.addAll(affectedRoleUserIds(role.getId(), role.getScopeType(), role.getRoleCode()));
         logoutUsers(affectedUserIds);
@@ -335,6 +370,7 @@ public class SystemAdministrationService {
         SystemRole role = roleMapper.selectByIdForUpdate(roleId);
         if (role == null) throw BusinessException.notFound("角色不存在");
         requireRoleAuthorizationEditable(role);
+        List<SysUserProjectRole> affectedProjectAssignments = projectAssignmentsForRole(roleId);
         Set<String> businessModuleCodes = resolveBusinessModuleCodes(role, requestedBusinessModuleCodes, menuIds);
         List<Long> normalizedMenuIds = normalizeRoleMenuIds(menuIds, businessModuleCodes);
         List<Long> normalizedPermissionIds = normalizeRolePermissionIds(permissionIds);
@@ -344,6 +380,7 @@ public class SystemAdministrationService {
         validatePermissionsMatchMenus(normalizedPermissionIds, normalizedMenuIds, businessModuleCodes, false);
         replaceRolePermissions(roleId, normalizedPermissionIds);
         replaceRoleMenus(roleId, normalizedMenuIds, businessModuleCodes);
+        requireNoResponsibilityImpactAfterRoleAuthorizationChange(affectedProjectAssignments);
         logoutUsers(affectedRoleUserIds(role.getId(), role.getScopeType(), role.getRoleCode()));
         record(operator, "UPDATE_ROLE_PERMISSIONS", "SYS_ROLE", roleId, "更新角色业务模块、菜单和操作权限");
     }
@@ -354,6 +391,7 @@ public class SystemAdministrationService {
         SystemRole role = roleMapper.selectByIdForUpdate(roleId);
         if (role == null) throw BusinessException.notFound("角色不存在");
         requireRoleAuthorizationEditable(role);
+        List<SysUserProjectRole> affectedProjectAssignments = projectAssignmentsForRole(roleId);
         Set<String> businessModuleCodes = resolveBusinessModuleCodes(role, requestedBusinessModuleCodes, menuIds);
         List<Long> normalizedMenuIds = normalizeRoleMenuIds(menuIds, businessModuleCodes);
         validateRoleMenus(role.getScopeType(), normalizedMenuIds);
@@ -364,6 +402,7 @@ public class SystemAdministrationService {
                 currentPermissionIds, normalizedMenuIds, businessModuleCodes, true);
         replaceRoleMenus(roleId, normalizedMenuIds, businessModuleCodes);
         replaceRolePermissions(roleId, retainedPermissionIds);
+        requireNoResponsibilityImpactAfterRoleAuthorizationChange(affectedProjectAssignments);
         logoutUsers(affectedRoleUserIds(role.getId(), role.getScopeType(), role.getRoleCode()));
         record(operator, "UPDATE_ROLE_MENUS", "SYS_ROLE", roleId, "更新角色菜单并清理失效操作权限");
     }
@@ -373,6 +412,7 @@ public class SystemAdministrationService {
         SystemRole role = roleMapper.selectByIdForUpdate(roleId);
         if (role == null) throw BusinessException.notFound("角色不存在");
         requireRoleAuthorizationEditable(role);
+        List<SysUserProjectRole> affectedProjectAssignments = projectAssignmentsForRole(roleId);
         List<Long> menuIds = safeList(roleMapper.selectMenuIds(roleId));
         Set<String> businessModuleCodes = new LinkedHashSet<>(
                 safeList(roleBusinessModuleMapper.selectModuleCodesByRoleId(roleId)));
@@ -380,6 +420,7 @@ public class SystemAdministrationService {
         validateRolePermissions(role.getScopeType(), normalizedPermissionIds);
         validatePermissionsMatchMenus(normalizedPermissionIds, menuIds, businessModuleCodes, true);
         replaceRolePermissions(roleId, normalizedPermissionIds);
+        requireNoResponsibilityImpactAfterRoleAuthorizationChange(affectedProjectAssignments);
         logoutUsers(affectedRoleUserIds(role.getId(), role.getScopeType(), role.getRoleCode()));
         record(operator, "UPDATE_ROLE_OPERATION_PERMISSIONS", "SYS_ROLE", roleId, "更新角色操作权限");
     }
@@ -416,6 +457,9 @@ public class SystemAdministrationService {
             }
         }
         projectPermissionService.clearUserProjectsCache(userId);
+        if (removingPlatformAdmin) {
+            requireNoResponsibilityImpactForUsers(Set.of(userId));
+        }
         authService.logout(userId);
         authService.repeatLogoutAfterCommit(userId);
         record(operator, "UPDATE_USER_ROLES", "SYS_USER", userId, "更新用户平台角色");
@@ -494,6 +538,8 @@ public class SystemAdministrationService {
         SystemPermission permission = id == null ? new SystemPermission() : permissionMapper.selectById(id);
         if (id != null && permission == null) throw BusinessException.notFound("权限不存在");
         List<Long> affectedRoleIds = id == null ? List.of() : roleMapper.selectRoleIdsByPermissionId(id);
+        Integer previousEnabled = permission.getEnabled();
+        String previousPermissionCode = permission.getPermissionCode();
         if (!StringUtils.hasText(request.getPermissionCode()) || !StringUtils.hasText(request.getPermissionName())) {
             throw new BusinessException("权限编码和名称不能为空");
         }
@@ -513,6 +559,21 @@ public class SystemAdministrationService {
             requireSingleWrite(permissionMapper.insert(request), "操作权限保存失败，请重试");
         } else {
             requireSingleWrite(permissionMapper.updateById(request), "操作权限状态已变化，请刷新后重试");
+        }
+        boolean capabilityMayBeRemoved = id != null
+                && (Integer.valueOf(1).equals(previousEnabled) && !Integer.valueOf(1).equals(request.getEnabled())
+                || !Objects.equals(normalizePermissionCode(previousPermissionCode),
+                normalizePermissionCode(request.getPermissionCode())));
+        if (capabilityMayBeRemoved) {
+            Set<Long> affectedUserIds = new LinkedHashSet<>();
+            for (Long roleId : safeList(affectedRoleIds)) {
+                SystemRole affectedRole = roleMapper.selectById(roleId);
+                if (affectedRole != null) {
+                    affectedUserIds.addAll(affectedRoleUserIds(affectedRole.getId(),
+                            affectedRole.getScopeType(), affectedRole.getRoleCode()));
+                }
+            }
+            requireNoResponsibilityImpactForUsers(affectedUserIds);
         }
         logoutUsersForRoles(affectedRoleIds);
         record(operator, "SAVE_PERMISSION", "SYS_PERMISSION", request.getId(),
@@ -821,62 +882,69 @@ public class SystemAdministrationService {
             selectedByCode.put(normalizePermissionCode(permission.getPermissionCode()), permission);
         }
 
-        Set<String> requiredCodes = new LinkedHashSet<>();
-        for (String code : selectedByCode.keySet()) {
-            if ("BOX_VIEW".equals(code)) requiredCodes.add("INSPECTION.VIEW");
-            if ("BOX_MANAGE".equals(code)) {
-                requiredCodes.add("BOX_VIEW");
-                requiredCodes.add("INSPECTION.VIEW");
-                requiredCodes.add("INSPECTION.MANAGE");
-            }
-            if (Set.of("BOX_QR_MANAGE", "BOX_PUBLIC_ACCESS").contains(code)) {
-                requiredCodes.add("BOX_VIEW");
-                requiredCodes.add("INSPECTION.VIEW");
-            }
-            if ("INSPECTION_DAILY_SUBMIT".equals(code)) requiredCodes.add("INSPECTION.SUBMIT");
-            if ("EDGE_INSPECTION_VIEW".equals(code)) requiredCodes.add("INSPECTION.VIEW");
-            if ("EDGE_INSPECTION_MANAGE".equals(code)) requiredCodes.add("INSPECTION.MANAGE");
-            if ("EDGE_INSPECTION_SUBMIT".equals(code)) requiredCodes.add("INSPECTION.SUBMIT");
-            if ("EDGE_INSPECTION_RECTIFY".equals(code)) requiredCodes.add("INSPECTION.RECTIFY");
-            if ("EDGE_INSPECTION_REVIEW".equals(code)) requiredCodes.add("INSPECTION.REVIEW");
-            if (Set.of("INSPECTION.RECTIFY", "INSPECTION.REVIEW").contains(code)) {
-                requiredCodes.add("INSPECTION.VIEW");
-            }
-            if (Set.of("INSPECTION_RECORD_VIEW", "SUMMARY_VIEW").contains(code)) {
-                requiredCodes.add("INSPECTION.VIEW");
-            }
-            if ("SUMMARY_EXPORT".equals(code)) {
-                requiredCodes.add("SUMMARY_VIEW");
-                requiredCodes.add("INSPECTION.VIEW");
-                requiredCodes.add("INSPECTION.EXPORT");
-            }
-            if (Set.of("DOCUMENT.UPLOAD", "DOCUMENT.MANAGE").contains(code)) {
-                requiredCodes.add("DOCUMENT.VIEW");
-            }
-            if (Set.of("SEAL.MANAGE", "SEAL.EXPORT").contains(code)) {
-                requiredCodes.add("SEAL.VIEW");
-            }
-            if (Set.of("QUALITY.MANAGE", "QUALITY.RECTIFY", "QUALITY.REVIEW").contains(code)) {
-                requiredCodes.add("QUALITY.VIEW");
-            }
-            if (Set.of("SITE_ACCESS.MANAGE", "SITE_ACCESS.EXPORT").contains(code)) {
-                requiredCodes.add("SITE_ACCESS.VIEW");
-            }
-        }
-        if (!requiredCodes.isEmpty()) {
-            Map<String, SystemPermission> enabledByCode = new LinkedHashMap<>();
-            permissionMapper.selectList(new LambdaQueryWrapper<SystemPermission>()
-                    .eq(SystemPermission::getEnabled, 1)).forEach(permission ->
-                    enabledByCode.put(normalizePermissionCode(permission.getPermissionCode()), permission));
-            for (String code : requiredCodes) {
+        if (selectedByCode.isEmpty()) return List.of();
+
+        Map<String, SystemPermission> enabledByCode = new LinkedHashMap<>();
+        permissionMapper.selectList(new LambdaQueryWrapper<SystemPermission>()
+                .eq(SystemPermission::getEnabled, 1)).forEach(permission ->
+                enabledByCode.put(normalizePermissionCode(permission.getPermissionCode()), permission));
+        Set<String> resolvedCodes = new LinkedHashSet<>(selectedByCode.keySet());
+        List<String> pendingCodes = new ArrayList<>(selectedByCode.keySet());
+        for (int index = 0; index < pendingCodes.size(); index++) {
+            for (String code : requiredPermissionCodes(pendingCodes.get(index))) {
                 SystemPermission required = enabledByCode.get(code);
                 if (required == null || Integer.valueOf(1).equals(required.getDeleted())) {
                     throw new BusinessException("操作权限前置项不存在或已停用：" + code);
                 }
                 normalizedIds.add(required.getId());
+                if (resolvedCodes.add(code)) pendingCodes.add(code);
             }
         }
         return List.copyOf(normalizedIds);
+    }
+
+    private Set<String> requiredPermissionCodes(String code) {
+        Set<String> requiredCodes = new LinkedHashSet<>();
+        if ("BOX_VIEW".equals(code)) requiredCodes.add("INSPECTION.VIEW");
+        if ("BOX_MANAGE".equals(code)) {
+            requiredCodes.add("BOX_VIEW");
+            requiredCodes.add("INSPECTION.VIEW");
+            requiredCodes.add("INSPECTION.MANAGE");
+        }
+        if (Set.of("BOX_QR_MANAGE", "BOX_PUBLIC_ACCESS").contains(code)) {
+            requiredCodes.add("BOX_VIEW");
+            requiredCodes.add("INSPECTION.VIEW");
+        }
+        if ("INSPECTION_DAILY_SUBMIT".equals(code)) requiredCodes.add("INSPECTION.SUBMIT");
+        if (Set.of("EDGE_INSPECTION_MANAGE", "EDGE_INSPECTION_SUBMIT",
+                "EDGE_INSPECTION_RECTIFY", "EDGE_INSPECTION_REVIEW",
+                "EDGE_INSPECTION_EXPORT").contains(code)) {
+            requiredCodes.add("EDGE_INSPECTION_VIEW");
+        }
+        if (Set.of("INSPECTION.RECTIFY", "INSPECTION.REVIEW").contains(code)) {
+            requiredCodes.add("INSPECTION.VIEW");
+        }
+        if (Set.of("INSPECTION_RECORD_VIEW", "SUMMARY_VIEW").contains(code)) {
+            requiredCodes.add("INSPECTION.VIEW");
+        }
+        if ("SUMMARY_EXPORT".equals(code)) {
+            requiredCodes.add("SUMMARY_VIEW");
+            requiredCodes.add("INSPECTION.VIEW");
+            requiredCodes.add("INSPECTION.EXPORT");
+        }
+        if (Set.of("DOCUMENT.UPLOAD", "DOCUMENT.MANAGE").contains(code)) {
+            requiredCodes.add("DOCUMENT.VIEW");
+        }
+        if (Set.of("SEAL.MANAGE", "SEAL.EXPORT").contains(code)) {
+            requiredCodes.add("SEAL.VIEW");
+        }
+        if (Set.of("QUALITY.MANAGE", "QUALITY.RECTIFY", "QUALITY.REVIEW").contains(code)) {
+            requiredCodes.add("QUALITY.VIEW");
+        }
+        if (Set.of("SITE_ACCESS.MANAGE", "SITE_ACCESS.EXPORT").contains(code)) {
+            requiredCodes.add("SITE_ACCESS.VIEW");
+        }
+        return requiredCodes;
     }
 
     private void validateMenuHierarchy(List<Long> menuIds, boolean strictTabs) {
@@ -902,7 +970,8 @@ public class SystemAdministrationService {
         }
         if (!strictTabs) return;
         requireSelectedPageWhenCatalogExists("WEB_DOCUMENT",
-                Set.of("DOCUMENT_LIBRARY", "DOCUMENT_SEAL", "DOCUMENT_RECYCLE"), selectedCodes, catalogCodes);
+                Set.of("DOCUMENT_LIBRARY", "DOCUMENT_SEAL", "DOCUMENT_CIRCULATION", "DOCUMENT_RECYCLE"),
+                selectedCodes, catalogCodes);
         requireSelectedPageWhenCatalogExists("WEB_INSPECTION",
                 Set.of("INSPECTION_LEDGER", "INSPECTION_RECORDS", "INSPECTION_RECTIFICATIONS", "INSPECTION_EDGE"), selectedCodes, catalogCodes);
         requireSelectedPageWhenCatalogExists("WEB_QUALITY",
@@ -974,12 +1043,17 @@ public class SystemAdministrationService {
         if ("WEB_DOCUMENT".equals(module)) {
             if (!businessModuleCodes.contains("DOCUMENT")) return false;
             if (!strictTabs || !catalogHasAny(catalogMenuCodes,
-                    "DOCUMENT_LIBRARY", "DOCUMENT_SEAL", "DOCUMENT_RECYCLE")) return true;
+                    "DOCUMENT_LIBRARY", "DOCUMENT_SEAL", "DOCUMENT_CIRCULATION", "DOCUMENT_RECYCLE")) return true;
             if (Set.of("SEAL.VIEW", "SEAL.MANAGE", "SEAL.EXPORT").contains(code)) {
                 return selectedMenuCodes.contains("DOCUMENT_SEAL");
             }
+            if (DOCUMENT_CIRCULATION_PERMISSION_CODES.contains(code)) {
+                return selectedMenuCodes.contains("DOCUMENT_CIRCULATION");
+            }
             if ("DOCUMENT.UPLOAD".equals(code)) return selectedMenuCodes.contains("DOCUMENT_LIBRARY");
-            return selectedMenuCodes.contains("DOCUMENT_LIBRARY") || selectedMenuCodes.contains("DOCUMENT_RECYCLE");
+            return selectedMenuCodes.contains("DOCUMENT_LIBRARY")
+                    || selectedMenuCodes.contains("DOCUMENT_CIRCULATION")
+                    || selectedMenuCodes.contains("DOCUMENT_RECYCLE");
         }
         if ("WEB_INSPECTION".equals(module)) {
             if (!businessModuleCodes.contains("INSPECTION")) return false;
@@ -989,25 +1063,24 @@ public class SystemAdministrationService {
                 return selectedMenuCodes.contains("INSPECTION_LEDGER");
             }
             if ("INSPECTION.MANAGE".equals(code)) {
-                return selectedMenuCodes.contains("INSPECTION_LEDGER")
-                        || selectedMenuCodes.contains("INSPECTION_EDGE");
+                return selectedMenuCodes.contains("INSPECTION_LEDGER");
             }
-            if (GENERAL_INSPECTION_PERMISSION_CODES.contains(code)) {
+            if (EDGE_INSPECTION_PERMISSION_CODES.contains(code)) {
                 return selectedMenuCodes.contains("INSPECTION_EDGE");
             }
-            if (INSPECTION_RECORD_PERMISSION_CODES.contains(code)
+            if (ELECTRIC_BOX_INSPECTION_RECORD_PERMISSION_CODES.contains(code)) {
+                return selectedMenuCodes.contains("INSPECTION_RECORDS");
+            }
+            if (INSPECTION_SUMMARY_PERMISSION_CODES.contains(code)
                     || Set.of("INSPECTION.SUBMIT", "INSPECTION.EXPORT").contains(code)) {
-                return selectedMenuCodes.contains("INSPECTION_RECORDS")
-                        || selectedMenuCodes.contains("INSPECTION_EDGE");
+                return selectedMenuCodes.contains("INSPECTION_RECORDS");
             }
             if (INSPECTION_RECTIFICATION_PERMISSION_CODES.contains(code)) {
-                return selectedMenuCodes.contains("INSPECTION_RECTIFICATIONS")
-                        || selectedMenuCodes.contains("INSPECTION_EDGE");
+                return selectedMenuCodes.contains("INSPECTION_RECTIFICATIONS");
             }
             return selectedMenuCodes.contains("INSPECTION_LEDGER")
                     || selectedMenuCodes.contains("INSPECTION_RECORDS")
-                    || selectedMenuCodes.contains("INSPECTION_RECTIFICATIONS")
-                    || selectedMenuCodes.contains("INSPECTION_EDGE");
+                    || selectedMenuCodes.contains("INSPECTION_RECTIFICATIONS");
         }
         if ("WEB_QUALITY".equals(module)) {
             if (!businessModuleCodes.contains("QUALITY")) return false;
@@ -1162,6 +1235,76 @@ public class SystemAdministrationService {
             if (projectUserIds != null) result.addAll(projectUserIds);
         }
         return result;
+    }
+
+    private List<SysUserProjectRole> projectAssignmentsForRole(Long roleId) {
+        if (roleId == null || userProjectRoleMapper == null) return List.of();
+        return safeList(userProjectRoleMapper.selectList(
+                new LambdaQueryWrapper<SysUserProjectRole>()
+                        .eq(SysUserProjectRole::getRoleId, roleId)));
+    }
+
+    private void requireNoResponsibilityImpactAfterRoleAuthorizationChange(
+            List<SysUserProjectRole> assignments) {
+        if (assignments == null || assignments.isEmpty()) return;
+        Set<String> processed = new LinkedHashSet<>();
+        Set<ProjectUserScope> scopes = new LinkedHashSet<>();
+        for (SysUserProjectRole assignment : assignments) {
+            if (assignment == null || assignment.getUserId() == null || assignment.getProjectId() == null) {
+                continue;
+            }
+            String key = assignment.getProjectId() + ":" + assignment.getUserId();
+            if (processed.add(key)) {
+                scopes.add(new ProjectUserScope(assignment.getProjectId(), assignment.getUserId()));
+            }
+        }
+        requireNoResponsibilityImpact(scopes);
+    }
+
+    private void requireNoResponsibilityImpactForUsers(Set<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) return;
+        Set<ProjectUserScope> scopes = new LinkedHashSet<>();
+        userIds.stream().filter(Objects::nonNull).forEach(userId ->
+                safeList(responsibilityReleaseService.responsibilityProjectIdsForUser(userId)).stream()
+                        .filter(Objects::nonNull)
+                        .forEach(projectId -> scopes.add(new ProjectUserScope(projectId, userId))));
+        requireNoResponsibilityImpact(scopes);
+    }
+
+    private List<ResponsibilityImpactVO> responsibilityImpactsForUser(Long userId) {
+        if (userId == null) return List.of();
+        List<ResponsibilityImpactVO> impacts = new ArrayList<>();
+        for (Long projectId : new LinkedHashSet<>(
+                safeList(responsibilityReleaseService.responsibilityProjectIdsForUser(userId)))) {
+            if (projectId == null) continue;
+            ResponsibilityImpactVO impact = responsibilityReleaseService.impact(projectId, userId);
+            if (impact != null && impact.getTotalCount() > 0) impacts.add(impact);
+        }
+        return List.copyOf(impacts);
+    }
+
+    private void requireNoResponsibilityImpact(Set<ProjectUserScope> scopes) {
+        if (scopes == null || scopes.isEmpty()) return;
+        List<ResponsibilityImpactVO> impacts = new ArrayList<>();
+        for (ProjectUserScope scope : scopes) {
+            // Authorization writes have already happened in this transaction.
+            // Clear permission caches so the check observes the proposed grants.
+            projectPermissionService.clearUserProjectsCache(scope.userId());
+            ResponsibilityImpactVO impact = responsibilityReleaseService.impactForCapabilityLoss(
+                    scope.projectId(), scope.userId());
+            if (impact != null && impact.getTotalCount() > 0) impacts.add(impact);
+        }
+        if (!impacts.isEmpty()) {
+            long affectedUsers = impacts.stream().map(ResponsibilityImpactVO::getUserId)
+                    .filter(Objects::nonNull).distinct().count();
+            long affectedResponsibilities = impacts.stream()
+                    .mapToLong(ResponsibilityImpactVO::getTotalCount).sum();
+            throw BusinessException.of(409, "角色授权变更将使" + affectedUsers + "名成员的"
+                    + affectedResponsibilities + "项现有责任失去处理权限，请先改派任务或调整提醒责任人后再保存");
+        }
+    }
+
+    private record ProjectUserScope(Long projectId, Long userId) {
     }
 
     private void logoutUsersForRoles(List<Long> roleIds) {

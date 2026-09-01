@@ -20,16 +20,19 @@ import java.util.Set;
 public final class FileUploadPolicy {
     public static final long MAX_IMAGE_BYTES = 15L * 1024 * 1024;
     public static final long MAX_DOCUMENT_BYTES = 50L * 1024 * 1024;
+    public static final long MAX_CIRCULATION_DOCUMENT_BYTES = 200L * 1024 * 1024;
+    public static final long MAX_RECEIPT_SIGNATURE_BYTES = 2L * 1024 * 1024;
     public static final long MAX_IMPORT_BYTES = 10L * 1024 * 1024;
 
-    private static final int PREFIX_BYTES = 4096;
+    private static final int PREFIX_BYTES = 64 * 1024;
     private static final Set<String> IMAGE_EXTENSIONS = Set.of(
             "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif");
     private static final Set<String> PROJECT_PROFILE_IMAGE_EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp");
     private static final Set<String> DOCUMENT_EXTENSIONS = Set.of(
             "pdf", "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif",
             "doc", "docx", "xls", "xlsx", "ppt", "pptx", "wps", "et", "dps", "rtf",
-            "txt", "md", "csv", "dwg", "dxf", "ofd", "zip", "rar", "7z");
+            "txt", "md", "csv", "dwg", "dxf", "ofd", "ifc", "rvt", "dgn",
+            "zip", "rar", "7z");
     private static final Set<String> ACTIVE_MIME_TYPES = Set.of(
             "text/html", "application/xhtml+xml", "image/svg+xml",
             "application/javascript", "text/javascript",
@@ -66,6 +69,26 @@ public final class FileUploadPolicy {
 
     public static void validateProjectDocument(MultipartFile file) {
         validate(file, DOCUMENT_EXTENSIONS, MAX_DOCUMENT_BYTES, "工程资料");
+    }
+
+    public static void validateCirculationDocument(MultipartFile file) {
+        validate(file, DOCUMENT_EXTENSIONS, MAX_CIRCULATION_DOCUMENT_BYTES, "图纸或技术文件");
+    }
+
+    public static void validateCirculationMetadata(String originalFileName, long size) {
+        if (size <= 0) throw new BusinessException("图纸或技术文件不能为空");
+        if (size > MAX_CIRCULATION_DOCUMENT_BYTES) {
+            throw BusinessException.of(413, "图纸或技术文件不能超过200MB");
+        }
+        String safeName = safeOriginalFileName(originalFileName);
+        String extension = extensionOf(safeName);
+        if (!DOCUMENT_EXTENSIONS.contains(extension)) {
+            throw BusinessException.of(400, "图纸或技术文件格式不支持：" + extension);
+        }
+    }
+
+    public static void validateReceiptSignature(MultipartFile file) {
+        validate(file, Set.of("png"), MAX_RECEIPT_SIGNATURE_BYTES, "手写签名");
     }
 
     public static void validateBusinessUpload(MultipartFile file, String businessType) {
@@ -169,9 +192,23 @@ public final class FileUploadPolicy {
             case "rar" -> startsWith(bytes, 0x52, 0x61, 0x72, 0x21, 0x1a, 0x07);
             case "7z" -> startsWith(bytes, 0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c);
             case "dwg" -> startsWithAscii(bytes, "AC10");
+            case "ifc" -> isIfc(bytes);
+            case "rvt" -> isOle(bytes) && containsFormatMarker(bytes, "basicfileinfo", "revit");
+            case "dgn" -> (isOle(bytes) && containsFormatMarker(bytes, "dgn", "bentley", "microstation"))
+                    || startsWith(bytes, 0x08, 0x09, 0xfe, 0x02)
+                    || startsWith(bytes, 0xc8, 0xd3, 0xd4, 0xc1);
             case "txt", "md", "csv", "dxf" -> isSafeText(bytes);
             default -> false;
         };
+    }
+
+    private static boolean isIfc(byte[] bytes) {
+        if (!isSafeText(bytes)) return false;
+        String prefix = new String(bytes, StandardCharsets.ISO_8859_1)
+                .replace("\uFEFF", "")
+                .stripLeading()
+                .toUpperCase(Locale.ROOT);
+        return prefix.startsWith("ISO-10303-21;");
     }
 
     private static boolean isZip(byte[] bytes) {
@@ -182,6 +219,13 @@ public final class FileUploadPolicy {
 
     private static boolean isOle(byte[] bytes) {
         return startsWith(bytes, 0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1);
+    }
+
+    private static boolean containsFormatMarker(byte[] bytes, String... markers) {
+        String singleByte = new String(bytes, StandardCharsets.ISO_8859_1).toLowerCase(Locale.ROOT);
+        String utf16 = new String(bytes, StandardCharsets.UTF_16LE).toLowerCase(Locale.ROOT);
+        return Arrays.stream(markers).map(value -> value.toLowerCase(Locale.ROOT))
+                .anyMatch(value -> singleByte.contains(value) || utf16.contains(value));
     }
 
     private static boolean isIsoBaseMediaImage(byte[] bytes) {

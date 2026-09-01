@@ -25,8 +25,10 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<Result<?>> handleBusinessException(BusinessException e) {
         int status = normalizeStatus(e.getCode());
+        Result<Object> result = Result.error(e.getCode(), e.getMessage());
+        result.setData(e.getData());
         return ResponseEntity.status(HttpStatusCode.valueOf(status))
-                .body(Result.error(e.getCode(), e.getMessage()));
+                .body(result);
     }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, BindException.class})

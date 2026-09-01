@@ -16,6 +16,13 @@ public class ProjectDocumentVersionVO {
     private Long fileSize;
     private String sha256;
     private String changeNote;
+    private String externalRevision;
+    private String versionStatus;
+    private Long supersededByVersionId;
+    private Long publishedBy;
+    private String publishedByName;
+    private LocalDateTime publishedTime;
+    private String withdrawnReason;
     private Long createdBy;
     private String createdByName;
     private LocalDateTime createTime;

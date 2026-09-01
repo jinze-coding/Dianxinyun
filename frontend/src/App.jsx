@@ -53,7 +53,9 @@ import {
   validateInspectionExportRange,
 } from './utils/inspectionExport';
 import { requireProjectList } from './utils/projectList';
+import { createProjectRequestGuard } from './utils/projectRequestContext';
 import { resolveBusinessRoute } from './utils/businessRoute';
+import { TOP_NAV_ITEMS_STYLE, TOP_NAV_SCROLLER_STYLE } from './utils/topNavLayout';
 import StatusBadge from './components/StatusBadge';
 import SectionCard from './components/SectionCard';
 import PersonFormModal from './components/PersonFormModal';
@@ -415,51 +417,42 @@ function TopNav({ currentPage, onPageChange, onOpenProjectInformation, currentPr
       </button>
 
       {/* 主导航 */}
-      <nav style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 4,
-        marginLeft: 16,
-        flex: '1 1 auto',
-        minWidth: 0,
-        justifyContent: 'center',
-        overflowX: 'auto',
-        overflowY: 'hidden',
-        whiteSpace: 'nowrap',
-      }}>
-        {visibleNavItems.map(item => {
-          const active = currentPage === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => onPageChange(item.id)}
-              style={{
-                height: 42,
-                minWidth: 82,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flex: '0 0 auto',
-                padding: '0 10px',
-                border: 'none',
-                cursor: 'pointer',
-                borderRadius: 6,
-                fontSize: 14, fontWeight: active ? 600 : 400,
-                color: active ? '#fff' : T.textSecondary,
-                background: active ? T.accent : 'transparent',
-                transition: 'all 0.2s',
-                letterSpacing: 0.5,
-                lineHeight: 1,
-                whiteSpace: 'nowrap',
-                wordBreak: 'keep-all',
-              }}
-              onMouseEnter={e => { if (!active) e.currentTarget.style.background = T.hoverBg; }}
-              onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
-            >
-              {item.label}
-            </button>
-          );
-        })}
+      <nav aria-label="主导航" style={TOP_NAV_SCROLLER_STYLE}>
+        <div style={TOP_NAV_ITEMS_STYLE}>
+          {visibleNavItems.map(item => {
+            const active = currentPage === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => onPageChange(item.id)}
+                style={{
+                  height: 42,
+                  minWidth: 82,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flex: '0 0 auto',
+                  padding: '0 10px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  borderRadius: 6,
+                  fontSize: 14, fontWeight: active ? 600 : 400,
+                  color: active ? '#fff' : T.textSecondary,
+                  background: active ? T.accent : 'transparent',
+                  transition: 'all 0.2s',
+                  letterSpacing: 0.5,
+                  lineHeight: 1,
+                  whiteSpace: 'nowrap',
+                  wordBreak: 'keep-all',
+                }}
+                onMouseEnter={e => { if (!active) e.currentTarget.style.background = T.hoverBg; }}
+                onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
       </nav>
 
       {/* 右侧 */}
@@ -3466,6 +3459,21 @@ const formatDateTime = (value) => {
   return String(value).replace('T', ' ').slice(0, 16);
 };
 
+const normalizeProjectInspectionSetting = (value = {}) => ({
+  ...value,
+  dailyCutoffTime: String(value.dailyCutoffTime || '18:00').slice(0, 5),
+  preDueReminderMinutes: Number(value.preDueReminderMinutes ?? 60),
+  reviewDueHours: Number(value.reviewDueHours ?? 24),
+  rectificationDays: Number(value.rectificationDays ?? 3),
+  submissionReminderEnabled: Boolean(value.submissionReminderEnabled),
+  version: Number(value.version ?? value.expectedVersion ?? 0),
+  reminderConfigurationHealthy: value.reminderConfigurationHealthy !== false,
+  invalidReminderBoxCount: Number(value.invalidReminderBoxCount || 0),
+  reminderConfigurationIssues: Array.isArray(value.reminderConfigurationIssues)
+    ? value.reminderConfigurationIssues
+    : [],
+});
+
 const getProjectRoleCode = (user, projectId) => {
   if (!user) return '';
   if ((user.roles || []).includes('PLATFORM_ADMIN')) return 'PLATFORM_ADMIN';
@@ -4111,7 +4119,9 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   const [permissionCatalog, setPermissionCatalog] = useState([]);
   const [summary, setSummary] = useState(null);
   const [todos, setTodos] = useState([]);
-  const [inspectionSetting, setInspectionSetting] = useState({ dailyCutoffTime: '18:00', preDueReminderMinutes: 60, reviewDueHours: 24, rectificationDays: 3 });
+  const [inspectionSetting, setInspectionSetting] = useState(() => normalizeProjectInspectionSetting());
+  const [showInspectionSettingModal, setShowInspectionSettingModal] = useState(false);
+  const [inspectionSettingSaving, setInspectionSettingSaving] = useState(false);
   const [wechatApplications, setWechatApplications] = useState([]);
   const [wechatApplicationTotal, setWechatApplicationTotal] = useState(0);
   const [pendingWechatApplicationTotal, setPendingWechatApplicationTotal] = useState(0);
@@ -4197,44 +4207,62 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     publicAccessEnabled: 1,
     remark: '',
   });
+  const currentInspectionProjectIdRef = useRef(projectId);
+  const inspectionDataRequestGuardRef = useRef(createProjectRequestGuard());
+  currentInspectionProjectIdRef.current = projectId;
 
   const canManageMembers = canManageProjectMembersByUser(currentUser, projectId);
   const isPlatformAdmin = isPlatformUser(currentUser);
+  const generalInspectionManageAllowed = isPlatformUser(currentUser)
+    || hasProjectPermission(currentUser, projectId, 'inspection.manage');
+  const inspectionSettingManageAllowed = generalInspectionManageAllowed
+    && hasInspectionPermission(currentUser, projectId, INSPECTION_PERMISSION_CODES.PERMISSION_MANAGE);
 
   const loadInspectionData = useCallback(async () => {
-    if (!projectId) return;
+    const requestGuard = inspectionDataRequestGuardRef.current;
+    if (!projectId) {
+      requestGuard.invalidate();
+      return;
+    }
+    const targetProjectId = projectId;
+    const requestTicket = requestGuard.begin(targetProjectId);
     setLoading(true);
     setErrorText('');
+    if (!inspectionSettingManageAllowed) setInspectionSetting(normalizeProjectInspectionSetting());
     try {
       const periodParams = summaryPeriodMode === 'DAY'
         ? { checkDate: checkDate || currentDate() }
         : { month };
       const canLoadRectificationAssignees = isPlatformUser(currentUser)
-        || hasProjectPermission(currentUser, projectId, 'inspection.review');
+        || hasProjectPermission(currentUser, targetProjectId, 'inspection.review');
       if (activeTab === 'rectification') {
         const [rectificationRes, assigneeRes] = await Promise.all([
-          getInspectionRectifications({ projectId, status: rectificationStatus || undefined }),
+          getInspectionRectifications({ projectId: targetProjectId, status: rectificationStatus || undefined }),
           canLoadRectificationAssignees
-            ? getInspectionRectificationAssignees(projectId)
+            ? getInspectionRectificationAssignees(targetProjectId)
             : Promise.resolve({ code: 200, data: [] }),
         ]);
+        if (!requestGuard.isCurrent(requestTicket, currentInspectionProjectIdRef.current)) return;
         if (rectificationRes.code === 200) setRectifications(rectificationRes.data || []);
         if (assigneeRes.code === 200) setRectificationAssignees(assigneeRes.data || []);
         return;
       }
       const [boxRes, recordRes, summaryRes, memberRes, userRes, settingRes] = await Promise.all([
-        getElectricBoxList({ projectId, status: boxStatus || undefined }),
+        getElectricBoxList({ projectId: targetProjectId, status: boxStatus || undefined }),
         getInspectionRecords({
-          projectId,
+          projectId: targetProjectId,
           status: 'COMPLETED',
           ...periodParams,
         }),
-        getInspectionSummary({ projectId, boxId: summaryBoxId || undefined, ...periodParams }),
-        canManageMembers ? getProjectMembers(projectId) : Promise.resolve({ code: 200, data: [] }),
-        canManageMembers ? getProjectUserOptions(projectId, memberKeyword || undefined) : Promise.resolve({ code: 200, data: [] }),
-        getProjectInspectionSetting(projectId),
+        getInspectionSummary({ projectId: targetProjectId, boxId: summaryBoxId || undefined, ...periodParams }),
+        canManageMembers ? getProjectMembers(targetProjectId) : Promise.resolve({ code: 200, data: [] }),
+        canManageMembers ? getProjectUserOptions(targetProjectId, memberKeyword || undefined) : Promise.resolve({ code: 200, data: [] }),
+        inspectionSettingManageAllowed
+          ? getProjectInspectionSetting(targetProjectId)
+          : Promise.resolve({ code: 200, data: null }),
       ]);
 
+      if (!requestGuard.isCurrent(requestTicket, currentInspectionProjectIdRef.current)) return;
       if (boxRes.code === 200) setBoxes(boxRes.data || []);
       if (recordRes.code === 200) setRecords(recordRes.data || []);
       setRectifications([]);
@@ -4243,25 +4271,44 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
       if (memberRes.code === 200) setMembers(memberRes.data || []);
       if (userRes.code === 200) setUserOptions(userRes.data || []);
       setTodos([]);
-      if (settingRes.code === 200 && settingRes.data) setInspectionSetting(settingRes.data);
+      if (inspectionSettingManageAllowed && settingRes.code === 200 && settingRes.data) {
+        setInspectionSetting(normalizeProjectInspectionSetting(settingRes.data));
+      }
     } catch (err) {
+      if (!requestGuard.isCurrent(requestTicket, currentInspectionProjectIdRef.current)) return;
       console.error('加载电箱巡检后台数据失败', err);
       setErrorText(err.message || '电箱巡检数据加载失败');
     } finally {
-      setLoading(false);
+      if (requestGuard.isCurrent(requestTicket, currentInspectionProjectIdRef.current)) setLoading(false);
     }
-  }, [projectId, boxStatus, summaryPeriodMode, checkDate, month, summaryBoxId, memberKeyword, canManageMembers, activeTab, rectificationStatus, currentUser]);
+  }, [projectId, boxStatus, summaryPeriodMode, checkDate, month, summaryBoxId, memberKeyword, canManageMembers, activeTab, rectificationStatus, currentUser, inspectionSettingManageAllowed]);
+
+  useEffect(() => {
+    inspectionDataRequestGuardRef.current.invalidate();
+    setLoading(false);
+    setErrorText('');
+    setBoxes([]);
+    setRecords([]);
+    setRectifications([]);
+    setRectificationAssignees([]);
+    setMembers([]);
+    setUserOptions([]);
+    setSummary(null);
+    setTodos([]);
+    setInspectionSetting(normalizeProjectInspectionSetting());
+    setSummaryBoxId('');
+    setSelectedSummaryBox(null);
+    setRecordInspectorId('');
+    setSelectedRecord(null);
+    setSelectedRectification(null);
+    setSelectedBox(null);
+    setShowInspectionExportModal(false);
+    setShowInspectionSettingModal(false);
+  }, [projectId]);
 
   useEffect(() => {
     loadInspectionData();
   }, [loadInspectionData]);
-
-  useEffect(() => {
-    setSummaryBoxId('');
-    setSelectedSummaryBox(null);
-    setRecordInspectorId('');
-    setShowInspectionExportModal(false);
-  }, [projectId]);
 
   const loadPermissionData = useCallback(async () => {
     if (activeTab !== 'permission' || !canManageMembers) return;
@@ -4352,8 +4399,6 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   const activePermissionTemplates = permissionTemplates.filter(template => Number(template.enabled ?? 1) === 1);
   const templateByCode = (code) => permissionTemplates.find(template => template.templateCode === code);
   const defaultTemplateIdForRole = (roleCode) => templateByCode(roleCode)?.id || templateByCode('USER')?.id || '';
-  const generalInspectionManageAllowed = isPlatformUser(currentUser)
-    || hasProjectPermission(currentUser, projectId, 'inspection.manage');
   const generalInspectionExportAllowed = isPlatformUser(currentUser)
     || hasProjectPermission(currentUser, projectId, 'inspection.export');
   const generalInspectionSubmitAllowed = isPlatformUser(currentUser)
@@ -4706,12 +4751,29 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   };
 
   const saveInspectionSetting = async () => {
+    if (inspectionSettingSaving) return;
+    if (!inspectionSetting.dailyCutoffTime) {
+      alert('请设置完整的日检截止时间');
+      return;
+    }
+    setInspectionSettingSaving(true);
     try {
-      const res = await updateProjectInspectionSetting(projectId, inspectionSetting);
+      const res = await updateProjectInspectionSetting(projectId, {
+        dailyCutoffTime: inspectionSetting.dailyCutoffTime,
+        preDueReminderMinutes: Number(inspectionSetting.preDueReminderMinutes || 0),
+        reviewDueHours: Number(inspectionSetting.reviewDueHours || 0),
+        rectificationDays: Number(inspectionSetting.rectificationDays || 0),
+        submissionReminderEnabled: Boolean(inspectionSetting.submissionReminderEnabled),
+        expectedVersion: Number(inspectionSetting.version || 0),
+      });
       if (res.code !== 200) { alert(res.message || '巡检设置保存失败'); return; }
-      setInspectionSetting(res.data);
+      setInspectionSetting(normalizeProjectInspectionSetting(res.data));
       alert('项目巡检设置已保存');
-    } catch (err) { alert(err.message || '巡检设置保存失败'); }
+    } catch (err) {
+      alert(err?.response?.status === 409 ? '巡检设置已被其他管理员更新，请关闭后重新打开' : err.message || '巡检设置保存失败');
+    } finally {
+      setInspectionSettingSaving(false);
+    }
   };
 
   const reviewWechatApplication = async (application, approved) => {
@@ -5783,6 +5845,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {boxManageAllowed && actionButton('下载模板', downloadImportTemplate, 'secondary')}
           {boxManageAllowed && actionButton('导入台账', () => setShowImportModal(true), 'secondary')}
+          {inspectionSettingManageAllowed && actionButton('巡检设置', () => setShowInspectionSettingModal(true), 'secondary')}
           {qrManageAllowed && actionButton('批量打印二维码', () => printQrLabels(filteredBoxes), 'secondary')}
           {boxManageAllowed && actionButton('新增电箱', openCreateBox)}
         </div>
@@ -6443,6 +6506,35 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
     </div>
   );
 
+  const renderInspectionSettingModal = () => showInspectionSettingModal && (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1013, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18, background: 'rgba(15,23,42,.58)' }} onClick={() => { if (!inspectionSettingSaving) setShowInspectionSettingModal(false); }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="inspection-setting-title" style={{ width: 680, maxWidth: '100%', maxHeight: '88vh', overflow: 'auto', padding: 18, borderRadius: 10, border: `1px solid ${T.borderColor}`, background: T.modalBg, boxShadow: '0 20px 55px rgba(15,23,42,.22)' }} onClick={event => event.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div><div id="inspection-setting-title" style={{ color: T.textPrimary, fontSize: 16, fontWeight: 900 }}>电箱日检设置</div><div style={{ color: T.textMuted, fontSize: 11, marginTop: 4 }}>配置项目日检截止时间和到期未提交站内提醒</div></div>
+          <button type="button" disabled={inspectionSettingSaving} onClick={() => setShowInspectionSettingModal(false)} style={{ border: 0, background: 'transparent', color: T.textMuted, fontSize: 20, cursor: inspectionSettingSaving ? 'not-allowed' : 'pointer' }}>×</button>
+        </div>
+        <div style={{ marginTop: 14, padding: 12, borderRadius: 8, background: T.surface2, color: T.textSecondary, fontSize: 12, lineHeight: 1.8 }}>
+          截止时间后仍无当天有效日检记录时，系统向该电箱当前负责巡检员发送一次站内消息。首次启用或重新启用后从下一次日检周期生效，不追补历史日期。
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 14 }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, color: T.textSecondary, fontSize: 11 }}>日检截止时间<input type="time" value={inspectionSetting.dailyCutoffTime} disabled={inspectionSettingSaving} onChange={event => setInspectionSetting(current => ({ ...current, dailyCutoffTime: event.target.value }))} style={fieldStyle} /></label>
+          <div style={{ padding: 10, borderRadius: 7, border: `1px solid ${T.borderColor}`, background: T.cardBg, color: T.textMuted, fontSize: 11 }}>下一次提醒<br /><strong style={{ display: 'block', marginTop: 5, color: T.textPrimary, fontSize: 13 }}>{formatDateTime(inspectionSetting.nextReminderTime)}</strong></div>
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, color: T.textPrimary, fontSize: 12, fontWeight: 700 }}><input type="checkbox" checked={inspectionSetting.submissionReminderEnabled} disabled={inspectionSettingSaving} onChange={event => setInspectionSetting(current => ({ ...current, submissionReminderEnabled: event.target.checked }))} />到截止时间仍未提交时发送站内提醒</label>
+        <div style={{ marginTop: 10, color: T.textMuted, fontSize: 11 }}>规则生效时间：{formatDateTime(inspectionSetting.reminderEffectiveTime)}；每个箱日仅提醒一次，完成日检后历史消息仍保留至用户手工已读。</div>
+        {inspectionSetting.invalidReminderBoxCount > 0 && (
+          <div style={{ marginTop: 14, padding: 12, borderRadius: 8, border: `1px solid ${T.danger}`, background: `${T.danger}10` }}>
+            <div style={{ color: T.danger, fontSize: 12, fontWeight: 800 }}>有 {inspectionSetting.invalidReminderBoxCount} 个电箱责任配置异常，异常电箱不会发送提醒</div>
+            <div style={{ display: 'grid', gap: 7, marginTop: 9 }}>
+              {inspectionSetting.reminderConfigurationIssues.map((issue) => <div key={issue.boxId || issue.boxCode} style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 8, color: T.textSecondary, fontSize: 11 }}><strong style={{ color: T.textPrimary }}>{issue.boxCode || issue.boxName || `电箱 #${issue.boxId}`}</strong><span>{issue.reason || '负责人账号、项目范围或日检提交权限无效'}</span></div>)}
+            </div>
+          </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 9, marginTop: 18 }}>{actionButton('取消', () => setShowInspectionSettingModal(false), 'secondary')}{actionButton(inspectionSettingSaving ? '保存中...' : '保存设置', saveInspectionSetting)}</div>
+      </div>
+    </div>
+  );
+
   const renderInspectionExportModal = () => showInspectionExportModal && (
     <div
       style={{ position: 'fixed', inset: 0, zIndex: 1012, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18, background: 'rgba(15,23,42,.58)' }}
@@ -6819,6 +6911,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
       {renderBoxDrawer()}
       {renderBoxModal()}
       {renderImportModal()}
+      {renderInspectionSettingModal()}
       {renderInspectionExportModal()}
       {renderTemplateModal()}
       {renderCreateUserModal()}
@@ -6893,41 +6986,37 @@ function ElectricInspectionPage({ projectId, theme: T, currentUser, businessTarg
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      gap: 12,
-      padding: 16,
+      gap: 8,
+      padding: '12px 16px 16px',
       overflow: 'hidden',
     }}>
       <div style={{
         display: 'flex',
-        justifyContent: 'space-between',
         alignItems: 'center',
+        gap: 4,
+        alignSelf: 'flex-start',
         flexShrink: 0,
-        gap: 12,
-        background: T.cardBg,
+        padding: 4,
         border: `1px solid ${T.borderColor}`,
         borderRadius: 7,
-        padding: '10px 12px',
-      }}>
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 800, color: T.textPrimary }}>巡检管理</div>
-          <div style={{ fontSize: 11, color: menuNotice ? T.warning : T.textMuted, marginTop: 3 }}>{menuNotice || '电箱巡检与临边巡检为两个独立专区，记录和整改分别管理'}</div>
-        </div>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.max(1, visibleAreas.length)}, minmax(220px, 1fr))`, gap: 10, flexShrink: 0 }}>
+        background: T.cardBg,
+      }} aria-label="巡检专区切换">
         {visibleAreas.map(area => {
           const selected = activeArea === area.id;
           return <button key={area.id} onClick={() => { setActiveArea(area.id); setMenuNotice(''); }} style={{
-            padding: '12px 14px', borderRadius: 7, cursor: 'pointer', textAlign: 'left',
-            border: `1px solid ${selected ? T.accent : T.borderColor}`,
-            borderLeft: `4px solid ${selected ? T.accent : T.borderColor}`,
-            background: selected ? T.activeItemBg : T.cardBg,
-            color: T.textPrimary,
+            minWidth: 96,
+            padding: '7px 16px', borderRadius: 5, cursor: 'pointer', textAlign: 'center',
+            border: '1px solid transparent',
+            background: selected ? T.accent : 'transparent',
+            color: selected ? '#fff' : T.textSecondary,
+            fontSize: 12,
+            fontWeight: selected ? 700 : 500,
           }}>
-            <span style={{ display: 'block', fontSize: 14, fontWeight: 800 }}>{area.label}</span>
-            <span style={{ display: 'block', marginTop: 4, fontSize: 11, color: T.textMuted }}>{area.description}</span>
+            {area.label}
           </button>;
         })}
       </div>
+      {menuNotice && <div style={{ flexShrink: 0, color: T.warning, fontSize: 11 }}>{menuNotice}</div>}
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {activeArea
           ? activeArea === 'edge'
@@ -6969,6 +7058,7 @@ export default function App() {
   const [sealApplicationTarget, setSealApplicationTarget] = useState(null);
   const [qualityIssueTarget, setQualityIssueTarget] = useState(null);
   const [inspectionBusinessTarget, setInspectionBusinessTarget] = useState(null);
+  const [documentDistributionTarget, setDocumentDistributionTarget] = useState(null);
   const [projectInformationReturnPage, setProjectInformationReturnPage] = useState(AUTHENTICATED_LANDING_PAGE);
   const [showCameraPage, setShowCameraPage] = useState(false);
   const [cameraConfig, setCameraConfig] = useState({
@@ -7063,10 +7153,10 @@ export default function App() {
     if (currentPage === PAGE_IDS.PERSONAL_INBOX) return;
     if (currentPage === PAGE_IDS.PROJECT_INFORMATION && currentProject !== null) return;
     if (currentPage === PAGE_IDS.SYSTEM_MANAGEMENT && canAccessSystem) return;
-    if (currentPage === PAGE_IDS.DOCUMENT_MANAGEMENT && sealApplicationTarget?.id) return;
+    if (currentPage === PAGE_IDS.DOCUMENT_MANAGEMENT && (sealApplicationTarget?.id || documentDistributionTarget?.id)) return;
     if (visibleNavItems.some((item) => item.id === currentPage)) return;
     setCurrentPage(AUTHENTICATED_LANDING_PAGE);
-  }, [canAccessSystem, currentPage, currentProject, currentUser, sealApplicationTarget, visibleNavItems]);
+  }, [canAccessSystem, currentPage, currentProject, currentUser, documentDistributionTarget, sealApplicationTarget, visibleNavItems]);
 
   useEffect(() => {
     const handleAuthExpired = () => {
@@ -7080,6 +7170,7 @@ export default function App() {
       setSealApplicationTarget(null);
       setQualityIssueTarget(null);
       setInspectionBusinessTarget(null);
+      setDocumentDistributionTarget(null);
       setCurrentPage(AUTHENTICATED_LANDING_PAGE);
       setIsAuth(false);
     };
@@ -7097,6 +7188,7 @@ export default function App() {
     setSealApplicationTarget(null);
     setQualityIssueTarget(null);
     setInspectionBusinessTarget(null);
+    setDocumentDistributionTarget(null);
     setCurrentPage(AUTHENTICATED_LANDING_PAGE);
   }, []);
 
@@ -7117,6 +7209,7 @@ export default function App() {
     setSealApplicationTarget(null);
     setQualityIssueTarget(null);
     setInspectionBusinessTarget(null);
+    setDocumentDistributionTarget(null);
     setCurrentPage(AUTHENTICATED_LANDING_PAGE);
     setIsAuth(false);
   }, []);
@@ -7125,6 +7218,7 @@ export default function App() {
     setSealApplicationTarget(null);
     setQualityIssueTarget(null);
     setInspectionBusinessTarget(null);
+    setDocumentDistributionTarget(null);
     setCurrentPage(pageId);
   }, []);
 
@@ -7132,6 +7226,7 @@ export default function App() {
     setSealApplicationTarget(null);
     setQualityIssueTarget(null);
     setInspectionBusinessTarget(null);
+    setDocumentDistributionTarget(null);
     setCurrentProject(projectId);
   }, []);
 
@@ -7141,6 +7236,7 @@ export default function App() {
     setSealApplicationTarget(null);
     setQualityIssueTarget(null);
     setInspectionBusinessTarget(null);
+    setDocumentDistributionTarget(null);
     setCurrentPage(PAGE_IDS.PROJECT_INFORMATION);
   }, [currentPage, currentProject]);
 
@@ -7160,17 +7256,25 @@ export default function App() {
   const openInboxBusiness = useCallback((item) => {
     const target = resolveBusinessRoute(item);
     if (!target) return;
-    if (target.projectId && projectList.some((project) => Number(project.id) === target.projectId)) {
+    if (target.projectId && !projectList.some((project) => Number(project.id) === target.projectId)) {
+      alert('当前账号已无该消息所属项目的访问权限');
+      return;
+    }
+    if (target.projectId) {
       setCurrentProject(target.projectId);
     }
     const businessTarget = { ...target, openedAt: Date.now() };
     setSealApplicationTarget(null);
     setQualityIssueTarget(null);
     setInspectionBusinessTarget(null);
+    setDocumentDistributionTarget(null);
     if (target.routeCode === 'SEAL_APPLICATION_DETAIL') {
       setSealApplicationTarget(businessTarget);
       setCurrentPage(PAGE_IDS.DOCUMENT_MANAGEMENT);
-    } else if (target.routeCode === 'QUALITY_ISSUE_DETAIL') {
+    } else if (target.routeCode === 'DOCUMENT_DISTRIBUTION_DETAIL') {
+      setDocumentDistributionTarget(businessTarget);
+      setCurrentPage(PAGE_IDS.DOCUMENT_MANAGEMENT);
+    } else if (['QUALITY_ISSUE_DETAIL', 'QUALITY_WEEKLY_INSPECTION_WEEK'].includes(target.routeCode)) {
       setQualityIssueTarget(businessTarget);
       setCurrentPage(PAGE_IDS.QUALITY_MANAGEMENT);
     } else {
@@ -7213,8 +7317,8 @@ export default function App() {
     if (currentPage === PAGE_IDS.PROJECT_INFORMATION) {
       return <ProjectInformationPage projectId={currentProject} onBack={closeProjectInformation} onSaved={fetchProjectList} />;
     }
-    if (currentPage === PAGE_IDS.DOCUMENT_MANAGEMENT && sealApplicationTarget?.id) {
-      return <DocumentCenterPage {...pageProps} sealApplicationTarget={sealApplicationTarget} />;
+    if (currentPage === PAGE_IDS.DOCUMENT_MANAGEMENT && (sealApplicationTarget?.id || documentDistributionTarget?.id)) {
+      return <DocumentCenterPage {...pageProps} sealApplicationTarget={sealApplicationTarget} documentDistributionTarget={documentDistributionTarget} />;
     }
     if (!visibleNavItems.some((item) => item.id === currentPage)) {
       return <NoAuthorizedPage theme={theme} />;

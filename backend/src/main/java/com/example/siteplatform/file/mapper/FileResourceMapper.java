@@ -250,6 +250,18 @@ public interface FileResourceMapper extends BaseMapper<FileResource> {
             @Param("id") Long id,
             @Param("cutoff") LocalDateTime cutoff);
 
+    @Update("""
+            UPDATE file_resource
+            SET business_type = 'PROJECT_DOCUMENT', business_id = #{documentId}, update_time = CURRENT_TIMESTAMP
+            WHERE id = #{id} AND project_id = #{projectId}
+              AND business_type = 'DOCUMENT_INCOMING_PENDING' AND business_id = #{incomingBatchId}
+              AND status = 'UPLOADED' AND deleted = 0
+            """)
+    int bindDocumentIncomingFile(@Param("id") Long id,
+                                 @Param("projectId") Long projectId,
+                                 @Param("incomingBatchId") Long incomingBatchId,
+                                 @Param("documentId") Long documentId);
+
     @Select("""
             SELECT * FROM file_resource
             WHERE deleted IN (0, 1)

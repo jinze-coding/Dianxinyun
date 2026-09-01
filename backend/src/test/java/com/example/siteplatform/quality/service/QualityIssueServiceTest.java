@@ -475,8 +475,8 @@ class QualityIssueServiceTest {
                 .thenReturn(true);
         when(projectPermissionService.hasSystemPermission(1L, 9L, SystemPermissionCodes.QUALITY_REVIEW))
                 .thenReturn(true);
-        when(issueMapper.selectList(any(LambdaQueryWrapper.class)))
-                .thenReturn(List.of(pending), List.of(recheck));
+        when(issueMapper.selectRectificationTodos(9L, 1L)).thenReturn(List.of(pending));
+        when(issueMapper.selectRecheckTodos(9L)).thenReturn(List.of(recheck));
 
         List<QualityTodoVO> result = service.listTodos(9L, operator);
 
@@ -488,11 +488,8 @@ class QualityIssueServiceTest {
         assertTrue(result.get(0).getDueText().contains("已逾期"));
         assertEquals("RECTIFICATION", result.get(1).getType());
 
-        ArgumentCaptor<LambdaQueryWrapper<QualityIssue>> wrapperCaptor =
-                ArgumentCaptor.forClass(LambdaQueryWrapper.class);
-        verify(issueMapper, times(2)).selectList(wrapperCaptor.capture());
-        assertTrue(wrapperCaptor.getAllValues().get(0).getSqlSegment().contains("assignee_id"));
-        assertTrue(wrapperCaptor.getAllValues().get(1).getSqlSegment().contains("status"));
+        verify(issueMapper).selectRectificationTodos(9L, 1L);
+        verify(issueMapper).selectRecheckTodos(9L);
     }
 
     @Test
@@ -507,12 +504,13 @@ class QualityIssueServiceTest {
                 .thenReturn(true);
         when(projectPermissionService.hasSystemPermission(1L, 9L, SystemPermissionCodes.QUALITY_REVIEW))
                 .thenReturn(false);
-        when(issueMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+        when(issueMapper.selectRectificationTodos(9L, 1L)).thenReturn(List.of());
 
         List<QualityTodoVO> result = service.listTodos(9L, operator);
 
         assertTrue(result.isEmpty());
-        verify(issueMapper, times(1)).selectList(any(LambdaQueryWrapper.class));
+        verify(issueMapper).selectRectificationTodos(9L, 1L);
+        verify(issueMapper, never()).selectRecheckTodos(any());
     }
 
     @Test
@@ -674,6 +672,44 @@ class QualityIssueServiceTest {
                 ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(issueMapper).selectList(wrapperCaptor.capture());
         assertTrue(wrapperCaptor.getValue().getSqlSegment().contains("weekly_inspection_id IS NULL"));
+    }
+
+    @Test
+    void dateFilterUsesRecordDateClosedRangeTogetherWithSourceStatusAndKeyword() {
+        LocalDate end = LocalDate.now();
+        LocalDate start = end.minusDays(30);
+        when(issueMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+
+        service.listIssues(9L, "CLOSED", "Q-100", "WEEKLY", start, end, operator);
+
+        ArgumentCaptor<LambdaQueryWrapper<QualityIssue>> wrapperCaptor =
+                ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(issueMapper).selectList(wrapperCaptor.capture());
+        LambdaQueryWrapper<QualityIssue> wrapper = wrapperCaptor.getValue();
+        String sql = wrapper.getSqlSegment();
+        assertTrue(sql.contains("record_date BETWEEN"));
+        assertTrue(sql.contains("weekly_inspection_id IS NOT NULL"));
+        assertTrue(sql.contains("issue_no LIKE"));
+        assertTrue(wrapper.getParamNameValuePairs().containsValue(start));
+        assertTrue(wrapper.getParamNameValuePairs().containsValue(end));
+        assertTrue(wrapper.getParamNameValuePairs().containsValue(QualityIssueService.STATUS_CLOSED));
+    }
+
+    @Test
+    void dateRangeRequiresBothBoundariesAndRejectsFutureReversedAnd367Days() {
+        LocalDate today = LocalDate.now();
+
+        assertThrows(BusinessException.class,
+                () -> service.validateDateRange(today.minusDays(1), null, false));
+        assertThrows(BusinessException.class,
+                () -> service.validateDateRange(today, today.minusDays(1), false));
+        assertThrows(BusinessException.class,
+                () -> service.validateDateRange(today, today.plusDays(1), false));
+        assertThrows(BusinessException.class,
+                () -> service.validateDateRange(today.minusDays(366), today, true));
+
+        service.validateDateRange(today.minusDays(365), today, true);
+        service.validateDateRange(null, null, false);
     }
 
     @Test

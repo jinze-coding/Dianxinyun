@@ -35,6 +35,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.Resource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -44,7 +45,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
@@ -70,6 +73,7 @@ public class ProjectDocumentService {
     private final OperationLogMapper operationLogMapper;
     private final SysUserMapper userMapper;
     private final JdbcTemplate jdbc;
+    private DocumentCirculationService circulationService;
 
     public ProjectDocumentService(ProjectDocumentMapper documentMapper,
                                   ProjectDocumentVersionMapper versionMapper,
@@ -91,6 +95,11 @@ public class ProjectDocumentService {
         this.operationLogMapper = operationLogMapper;
         this.userMapper = userMapper;
         this.jdbc = jdbc;
+    }
+
+    @Autowired(required = false)
+    public void setCirculationService(DocumentCirculationService circulationService) {
+        this.circulationService = circulationService;
     }
 
     public PageResult<ProjectDocumentVO> list(Long projectId, Long folderId, String keyword,
@@ -183,6 +192,7 @@ public class ProjectDocumentService {
         document.setDocumentNo(normalizedNo);
         document.setTitle(normalizedTitle);
         document.setCategory(normalizeCategory(category));
+        document.setDocumentType("GENERAL");
         document.setStatus(STATUS_ACTIVE);
         document.setCreatedBy(currentUser.getId());
         document.setCreatedByName(displayName(currentUser));
@@ -209,6 +219,9 @@ public class ProjectDocumentService {
         checkRead(currentUser, document);
         permissionService.requireSystemPermission(currentUser.getId(), document.getProjectId(),
                 SystemPermissionCodes.DOCUMENT_UPLOAD);
+        if (isFormalCirculationDocument(document)) {
+            throw BusinessException.of(409, "正式图纸和技术文件必须通过图纸收发登记新版本并发放");
+        }
         if (!STATUS_ACTIVE.equals(document.getStatus())) throw new BusinessException("归档资料不能上传新版本");
         FileUploadPolicy.validateProjectDocument(file);
         String normalizedChangeNote = normalizeOptional(changeNote, CHANGE_NOTE_MAX_LENGTH, "版本说明");
@@ -224,6 +237,10 @@ public class ProjectDocumentService {
         ProjectDocumentVersion version = createVersion(
                 id, nextVersion, resource.getId(), normalizedChangeNote, currentUser);
         requireSingleWrite(versionMapper.insert(version), "资料版本新增");
+        if (document.getCurrentVersionId() != null) {
+            requireSingleWrite(versionMapper.markSuperseded(document.getCurrentVersionId(), version.getId()),
+                    "旧资料版本替代");
+        }
         document.setCurrentVersionId(version.getId());
         document.setUpdateTime(LocalDateTime.now());
         requireSingleWrite(documentMapper.updateById(document), "资料当前版本更新");
@@ -265,6 +282,7 @@ public class ProjectDocumentService {
             document.setDocumentNo(normalizedNo);
             document.setTitle(normalizedTitle);
             document.setCategory("PROJECT_DATA");
+            document.setDocumentType("GENERAL");
             document.setStatus(STATUS_ACTIVE);
             document.setCreatedBy(currentUser.getId());
             document.setCreatedByName(displayName(currentUser));
@@ -287,6 +305,9 @@ public class ProjectDocumentService {
             ProjectDocument document = requireDocument(documentId);
             if (!Objects.equals(document.getProjectId(), projectId)) throw new BusinessException("资料不属于当前项目");
             checkRead(currentUser, document);
+            if (isFormalCirculationDocument(document)) {
+                throw BusinessException.of(409, "正式图纸和技术文件不能通过用印归档追加版本，请走图纸收发流程");
+            }
             if (!STATUS_ACTIVE.equals(document.getStatus())) throw new BusinessException("归档资料不能新增版本");
             document = documentMapper.selectForUpdate(documentId);
             if (document == null) throw BusinessException.notFound("资料不存在");
@@ -297,6 +318,10 @@ public class ProjectDocumentService {
             ProjectDocumentVersion version = createVersion(documentId, nextVersion, resource.getId(),
                     normalizedChangeNote, currentUser);
             requireSingleWrite(versionMapper.insert(version), "归档资料版本新增");
+            if (document.getCurrentVersionId() != null) {
+                requireSingleWrite(versionMapper.markSuperseded(document.getCurrentVersionId(), version.getId()),
+                        "旧归档资料版本替代");
+            }
             document.setCurrentVersionId(version.getId());
             document.setUpdateTime(LocalDateTime.now());
             requireSingleWrite(documentMapper.updateById(document), "归档资料当前版本更新");
@@ -474,14 +499,69 @@ public class ProjectDocumentService {
 
     public ProjectDocumentContent content(Long id, Long versionId, SysUser currentUser,
                                            HttpServletRequest request, boolean preview) {
+        return content(id, versionId, currentUser, request, preview, false);
+    }
+
+    public ProjectDocumentContent content(Long id, Long versionId, SysUser currentUser,
+                                           HttpServletRequest request, boolean preview,
+                                           boolean acknowledgeSuperseded) {
+        return content(id, versionId, currentUser, request, preview, acknowledgeSuperseded, null);
+    }
+
+    public ProjectDocumentContent content(Long id, Long versionId, SysUser currentUser,
+                                           HttpServletRequest request, boolean preview,
+                                           boolean acknowledgeSuperseded, Long distributionBatchId) {
         ProjectDocument document = requireDocument(id);
         checkRead(currentUser, document);
         ProjectDocumentVersion version = requireVersion(document, versionId);
+        boolean superseded = "SUPERSEDED".equals(version.getVersionStatus())
+                || (!Objects.equals(document.getCurrentVersionId(), version.getId())
+                && !"WITHDRAWN".equals(version.getVersionStatus()));
+        if (superseded && !acknowledgeSuperseded) {
+            ProjectDocumentVersion current = document.getCurrentVersionId() == null ? null
+                    : versionMapper.selectById(document.getCurrentVersionId());
+            String currentSummary = current == null ? "当前版本不可用"
+                    : "当前版本为V" + current.getVersionNo()
+                    + (StringUtils.hasText(current.getExternalRevision()) ? "（" + current.getExternalRevision() + "）" : "");
+            if (circulationService != null) {
+                circulationService.recordDocumentAccess(document, version, currentUser, preview, false, request,
+                        distributionBatchId);
+            }
+            Map<String, Object> summary = new LinkedHashMap<>();
+            if (current != null) {
+                summary.put("currentVersionId", current.getId());
+                summary.put("currentVersionNo", current.getVersionNo());
+                summary.put("currentExternalRevision", current.getExternalRevision());
+            }
+            summary.put("documentId", document.getId());
+            summary.put("documentNo", document.getDocumentNo());
+            summary.put("title", document.getTitle());
+            throw BusinessException.of(409, "该版本已被替代，请确认警告后继续；" + currentSummary, summary);
+        }
         FileResource file = fileMapper.selectById(version.getFileResourceId());
-        if (file == null) throw BusinessException.notFound("版本文件不存在");
-        Resource resource = storageManager.load(file);
+        if (file == null) {
+            if (circulationService != null) {
+                circulationService.recordDocumentAccess(document, version, currentUser, preview, false, request,
+                        distributionBatchId);
+            }
+            throw BusinessException.notFound("版本文件不存在");
+        }
+        Resource resource;
+        try {
+            resource = storageManager.load(file);
+        } catch (RuntimeException exception) {
+            if (circulationService != null) {
+                circulationService.recordDocumentAccess(document, version, currentUser, preview, false, request,
+                        distributionBatchId);
+            }
+            throw exception;
+        }
         record(currentUser, document, preview ? "DOCUMENT_PREVIEW" : "DOCUMENT_DOWNLOAD",
                 (preview ? "预览" : "下载") + "《" + document.getTitle() + "》V" + version.getVersionNo(), request);
+        if (circulationService != null) {
+            circulationService.recordDocumentAccess(document, version, currentUser, preview, true, request,
+                    distributionBatchId);
+        }
         return new ProjectDocumentContent(resource,
                 StringUtils.hasText(file.getOriginalFileName()) ? file.getOriginalFileName() : file.getFileName(),
                 StringUtils.hasText(file.getMimeType()) ? file.getMimeType() : "application/octet-stream",
@@ -646,10 +726,19 @@ public class ProjectDocumentService {
         version.setVersionNo(versionNo);
         version.setFileResourceId(fileResourceId);
         version.setChangeNote(trimToNull(changeNote));
+        version.setVersionStatus("CURRENT");
+        version.setPublishedBy(user.getId());
+        version.setPublishedByName(displayName(user));
+        version.setPublishedTime(LocalDateTime.now());
         version.setCreatedBy(user.getId());
         version.setCreatedByName(displayName(user));
         version.setCreateTime(LocalDateTime.now());
         return version;
+    }
+
+    private boolean isFormalCirculationDocument(ProjectDocument document) {
+        return document != null && ("DRAWING".equals(document.getDocumentType())
+                || "TECHNICAL_DOCUMENT".equals(document.getDocumentType()));
     }
 
     private ProjectDocumentVO toVO(ProjectDocument document, SysUser currentUser) {
@@ -666,6 +755,7 @@ public class ProjectDocumentService {
         vo.setDocumentNo(document.getDocumentNo());
         vo.setTitle(document.getTitle());
         vo.setCategory(document.getCategory());
+        vo.setDocumentType(StringUtils.hasText(document.getDocumentType()) ? document.getDocumentType() : "GENERAL");
         vo.setStatus(document.getStatus());
         vo.setRemark(document.getRemark());
         vo.setCreatedBy(document.getCreatedBy());
@@ -689,6 +779,13 @@ public class ProjectDocumentService {
         vo.setVersionLabel("V" + version.getVersionNo());
         vo.setFileResourceId(version.getFileResourceId());
         vo.setChangeNote(version.getChangeNote());
+        vo.setExternalRevision(version.getExternalRevision());
+        vo.setVersionStatus(version.getVersionStatus());
+        vo.setSupersededByVersionId(version.getSupersededByVersionId());
+        vo.setPublishedBy(version.getPublishedBy());
+        vo.setPublishedByName(version.getPublishedByName());
+        vo.setPublishedTime(version.getPublishedTime());
+        vo.setWithdrawnReason(version.getWithdrawnReason());
         vo.setCreatedBy(version.getCreatedBy());
         vo.setCreatedByName(currentAccountName(version.getCreatedBy(), version.getCreatedByName()));
         vo.setCreateTime(version.getCreateTime());

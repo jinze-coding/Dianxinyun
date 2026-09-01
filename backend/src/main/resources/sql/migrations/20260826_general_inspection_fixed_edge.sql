@@ -149,7 +149,6 @@ UPDATE general_inspection_point_category
 SET enabled = 0, update_time = CURRENT_TIMESTAMP
 WHERE enabled <> 0 AND @fixed_edge_already_applied = 0;
 
-DROP TEMPORARY TABLE IF EXISTS tmp_edge_point_type;
 CREATE TEMPORARY TABLE tmp_edge_point_type (
     type_code VARCHAR(50) PRIMARY KEY,
     type_name VARCHAR(100) NOT NULL,
@@ -172,11 +171,13 @@ FROM tmp_edge_point_type seed
 WHERE @fixed_edge_already_applied = 0
   AND NOT EXISTS (
     SELECT 1 FROM general_inspection_point_category category
-    WHERE category.project_id IS NULL AND BINARY category.category_code = BINARY seed.type_code
+    WHERE category.project_id IS NULL
+      AND CAST(category.category_code AS BINARY) = CAST(seed.type_code AS BINARY)
 );
 
 UPDATE general_inspection_point_category category
-INNER JOIN tmp_edge_point_type seed ON BINARY seed.type_code = BINARY category.category_code
+INNER JOIN tmp_edge_point_type seed
+    ON CAST(seed.type_code AS BINARY) = CAST(category.category_code AS BINARY)
 SET category.category_name = seed.type_name,
     category.builtin = 1,
     category.enabled = 1,
@@ -198,11 +199,13 @@ WHERE @fixed_edge_already_applied = 0
   AND NOT EXISTS (
     SELECT 1 FROM general_inspection_template template
     WHERE template.scope_type = 'SYSTEM' AND template.project_id IS NULL
-      AND BINARY template.template_code = BINARY CONCAT('EDGE_', seed.type_code) AND template.deleted = 0
+      AND CAST(template.template_code AS BINARY) = CAST(CONCAT('EDGE_', seed.type_code) AS BINARY)
+      AND template.deleted = 0
 );
 
 UPDATE general_inspection_template template
-INNER JOIN tmp_edge_point_type seed ON BINARY template.template_code = BINARY CONCAT('EDGE_', seed.type_code)
+INNER JOIN tmp_edge_point_type seed
+    ON CAST(template.template_code AS BINARY) = CAST(CONCAT('EDGE_', seed.type_code) AS BINARY)
 SET template.template_name = CONCAT(seed.type_name, '临边巡检表'),
     template.category_name = seed.type_name,
     template.status = 'PUBLISHED',
@@ -224,7 +227,8 @@ SELECT template.id, 1, '2026-08-26 00:00:00', template.template_name, template.c
        '系统固定检查表，仅用于日常巡检；不能替代项目专项施工方案和验收结论。',
        0, 'SYSTEM'
 FROM general_inspection_template template
-INNER JOIN tmp_edge_point_type seed ON BINARY template.template_code = BINARY CONCAT('EDGE_', seed.type_code)
+INNER JOIN tmp_edge_point_type seed
+    ON CAST(template.template_code AS BINARY) = CAST(CONCAT('EDGE_', seed.type_code) AS BINARY)
 WHERE @fixed_edge_already_applied = 0
   AND template.scope_type = 'SYSTEM' AND template.project_id IS NULL AND template.deleted = 0
   AND NOT EXISTS (
@@ -235,14 +239,14 @@ WHERE @fixed_edge_already_applied = 0
 UPDATE general_inspection_template template
 INNER JOIN general_inspection_template_version version
     ON version.template_id = template.id AND version.version_no = 1
-INNER JOIN tmp_edge_point_type seed ON BINARY template.template_code = BINARY CONCAT('EDGE_', seed.type_code)
+INNER JOIN tmp_edge_point_type seed
+    ON CAST(template.template_code AS BINARY) = CAST(CONCAT('EDGE_', seed.type_code) AS BINARY)
 SET template.current_version_id = version.id,
     template.status = 'PUBLISHED',
     template.update_time = CURRENT_TIMESTAMP
 WHERE template.scope_type = 'SYSTEM' AND template.project_id IS NULL AND template.deleted = 0
   AND @fixed_edge_already_applied = 0;
 
-DROP TEMPORARY TABLE IF EXISTS tmp_edge_template_item;
 CREATE TEMPORARY TABLE tmp_edge_template_item (
     type_code VARCHAR(50) NOT NULL,
     item_key VARCHAR(50) NOT NULL,
@@ -309,14 +313,15 @@ SELECT template.id, version.id, seed.item_key, seed.item_name, seed.guidance,
        seed.standard_reference, 0, 0, 1, 9, 0, 1, seed.sort_order
 FROM tmp_edge_template_item seed
 INNER JOIN general_inspection_template template
-    ON BINARY template.template_code = BINARY CONCAT('EDGE_', seed.type_code)
+    ON CAST(template.template_code AS BINARY) = CAST(CONCAT('EDGE_', seed.type_code) AS BINARY)
    AND template.scope_type = 'SYSTEM' AND template.project_id IS NULL AND template.deleted = 0
 INNER JOIN general_inspection_template_version version
     ON version.template_id = template.id AND version.version_no = 1
 WHERE @fixed_edge_already_applied = 0
   AND NOT EXISTS (
     SELECT 1 FROM general_inspection_template_item item
-    WHERE item.template_version_id = version.id AND BINARY item.item_key = BINARY seed.item_key
+    WHERE item.template_version_id = version.id
+      AND CAST(item.item_key AS BINARY) = CAST(seed.item_key AS BINARY)
 );
 
 -- 旧开放入口和权限停用；新菜单与五项操作权限独立授权。
@@ -340,7 +345,8 @@ FROM (
 ) seed
 WHERE @fixed_edge_already_applied = 0
   AND NOT EXISTS (
-    SELECT 1 FROM sys_permission permission WHERE BINARY permission.permission_code = BINARY seed.code
+    SELECT 1 FROM sys_permission permission
+    WHERE CAST(permission.permission_code AS BINARY) = CAST(seed.code AS BINARY)
 );
 
 UPDATE sys_permission permission
@@ -350,7 +356,7 @@ INNER JOIN (
     SELECT 'EDGE_INSPECTION_SUBMIT', '执行临边巡检', '执行明确分配给自己的固定式临边巡检任务' UNION ALL
     SELECT 'EDGE_INSPECTION_RECTIFY', '临边巡检整改', '整单提交明确分配给自己的临边整改反馈' UNION ALL
     SELECT 'EDGE_INSPECTION_REVIEW', '临边巡检复查', '整单关闭或退回明确分配给自己的临边整改单'
-) seed ON BINARY seed.code = BINARY permission.permission_code
+) seed ON CAST(seed.code AS BINARY) = CAST(permission.permission_code AS BINARY)
 SET permission.permission_name = seed.name,
     permission.module_code = 'WEB_INSPECTION',
     permission.description = seed.description,
@@ -369,7 +375,8 @@ SELECT @inspection_menu_id, 'WEB', 'INSPECTION_EDGE', '临边巡检', 'TAB',
 WHERE @fixed_edge_already_applied = 0
   AND @inspection_menu_id IS NOT NULL
   AND NOT EXISTS (
-      SELECT 1 FROM sys_menu WHERE BINARY menu_code = BINARY 'INSPECTION_EDGE'
+      SELECT 1 FROM sys_menu
+      WHERE CAST(menu_code AS BINARY) = CAST('INSPECTION_EDGE' AS BINARY)
   );
 
 UPDATE sys_menu
@@ -383,7 +390,7 @@ WHERE menu_code = 'INSPECTION_EDGE' AND @fixed_edge_already_applied = 0;
 SET @platform_admin_role_id := (
     SELECT id FROM sys_role WHERE role_code = 'PLATFORM_ADMIN' AND deleted = 0 ORDER BY id LIMIT 1
 );
-INSERT IGNORE INTO sys_role_permission(role_id, permission_id)
+INSERT INTO sys_role_permission(role_id, permission_id)
 SELECT @platform_admin_role_id, permission.id
 FROM sys_permission permission
 WHERE @fixed_edge_already_applied = 0
@@ -391,17 +398,20 @@ WHERE @fixed_edge_already_applied = 0
   AND permission.permission_code IN (
       'EDGE_INSPECTION_VIEW','EDGE_INSPECTION_MANAGE','EDGE_INSPECTION_SUBMIT',
       'EDGE_INSPECTION_RECTIFY','EDGE_INSPECTION_REVIEW'
-  ) AND permission.enabled = 1 AND permission.deleted = 0;
+  ) AND permission.enabled = 1 AND permission.deleted = 0
+ON DUPLICATE KEY UPDATE role_id = sys_role_permission.role_id;
 
-INSERT IGNORE INTO sys_role_menu(role_id, menu_id)
+INSERT INTO sys_role_menu(role_id, menu_id)
 SELECT @platform_admin_role_id, menu.id
 FROM sys_menu menu
 WHERE @fixed_edge_already_applied = 0
   AND @platform_admin_role_id IS NOT NULL
-  AND menu.menu_code = 'INSPECTION_EDGE' AND menu.enabled = 1 AND menu.deleted = 0;
+  AND menu.menu_code = 'INSPECTION_EDGE' AND menu.enabled = 1 AND menu.deleted = 0
+ON DUPLICATE KEY UPDATE role_id = sys_role_menu.role_id;
 
 DROP TEMPORARY TABLE IF EXISTS tmp_edge_template_item;
 DROP TEMPORARY TABLE IF EXISTS tmp_edge_point_type;
 
-INSERT IGNORE INTO sys_data_migration(migration_key)
-VALUES ('20260826_GENERAL_INSPECTION_FIXED_EDGE_V1');
+INSERT INTO sys_data_migration(migration_key)
+VALUES ('20260826_GENERAL_INSPECTION_FIXED_EDGE_V1') AS incoming
+ON DUPLICATE KEY UPDATE migration_key = incoming.migration_key;

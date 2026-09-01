@@ -1,0 +1,38 @@
+.site-access-invite-type { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 700; background: #eef2f7; color: #53657a; }
+.site-access-invite-type.meeting { background: #ede9fe; color: #6d28d9; }
+.site-access-invite-type.single { background: #e8f3ff; color: #1768ac; }
+.site-access-status.open { background: #dcfce7; color: #15803d; }
+.site-access-invite-type-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.site-access-invite-type-options button { display: flex; flex-direction: column; gap: 4px; text-align: left; border: 1px solid var(--sa-border); background: #fff; border-radius: 10px; padding: 14px; }
+.site-access-invite-type-options button.active { border-color: var(--sa-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--sa-accent) 18%, transparent); }
+.site-access-invite-type-options span { font-size: 12px; color: var(--sa-muted); }
+.site-access-meeting-panel { margin: 18px 16px 0; border-top: 1px solid var(--sa-border); padding-top: 16px; }
+.site-access-meeting-summary { display: flex; align-items: center; gap: 16px; background: #f8fafc; border: 1px solid var(--sa-border); border-radius: 10px; padding: 12px; }
+.site-access-meeting-summary > div { display: flex; align-items: baseline; gap: 5px; }
+.site-access-meeting-summary strong { font-size: 22px; color: var(--sa-accent); }
+.site-access-meeting-summary p { flex: 1; margin: 0; color: var(--sa-secondary); font-size: 14px; line-height: 1.6; }
+.site-access-meeting-toolbar { display: flex; gap: 8px; margin: 12px 0; }
+.site-access-meeting-toolbar input { flex: 1; }
+.site-access-meeting-toolbar input, .site-access-meeting-toolbar select { min-height: 38px; border: 1px solid var(--sa-border); border-radius: 6px; padding: 0 10px; background: #fff; color: var(--sa-text); font-size: 14px; }
+.site-access-meeting-table { overflow: auto; max-height: 440px; border: 1px solid var(--sa-border); border-radius: 8px; }
+.site-access-meeting-table table { width: 100%; min-width: 980px; table-layout: fixed; border-collapse: collapse; }
+.site-access-meeting-table th, .site-access-meeting-table td { padding: 12px 10px; border-bottom: 1px solid var(--sa-border); text-align: left; vertical-align: middle; white-space: normal; overflow-wrap: anywhere; font-size: 14px; }
+.site-access-meeting-table th { position: sticky; top: 0; z-index: 1; background: #f5f8fa; color: var(--sa-secondary); }
+.site-access-meeting-table th:nth-child(1) { width: 220px; }
+.site-access-meeting-table th:nth-child(2) { width: 170px; }
+.site-access-meeting-table th:nth-child(3) { width: 62px; }
+.site-access-meeting-table th:nth-child(4) { width: 135px; }
+.site-access-meeting-table th:nth-child(5) { width: 150px; }
+.site-access-meeting-table th:nth-child(6) { width: 80px; }
+.site-access-meeting-table th:nth-child(7) { width: 160px; }
+.site-access-meeting-table td:nth-child(3), .site-access-meeting-table td:nth-child(5), .site-access-meeting-table td:nth-child(6) { white-space: nowrap; }
+.site-access-meeting-table button.link { max-width: 100%; text-align: left; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
+.site-access-meeting-table small { display: block; margin-top: 4px; color: var(--sa-muted); font-size: 13px; }
+.site-access-meeting-table .site-access-row-actions { min-width: 136px; }
+.site-access-visitor-modal .site-access-modal-head { font-size: 16px; }
+@media (max-width: 760px) {
+  .site-access-invite-type-options { grid-template-columns: 1fr; }
+  .site-access-meeting-summary { align-items: stretch; flex-direction: column; }
+  .site-access-meeting-toolbar { flex-direction: column; }
+  .site-access-meeting-panel { margin-right: 12px; margin-left: 12px; }
+}

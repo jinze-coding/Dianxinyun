@@ -79,6 +79,9 @@ public class QualityWeeklyInspectionService {
     private QualityAssigneeService qualityAssigneeService;
 
     @Autowired
+    private QualityWeeklyReminderSettingService reminderSettingService;
+
+    @Autowired
     private ProjectPermissionService projectPermissionService;
 
     @Autowired
@@ -361,6 +364,8 @@ public class QualityWeeklyInspectionService {
         if (request == null || request.getExpectedVersion() == null) {
             throw new BusinessException("expectedVersion不能为空");
         }
+        // 与未提交提醒调度统一先锁项目提醒规则，再锁周检主记录，避免截止瞬间误提醒。
+        reminderSettingService.lockByInspectionId(id);
         QualityWeeklyInspection inspection = requireInspectionForUpdate(id);
         requireManage(currentUser, inspection.getProjectId());
         if (STATUS_SUBMITTED.equals(inspection.getStatus())) {
@@ -415,6 +420,7 @@ public class QualityWeeklyInspectionService {
             issue.setProjectId(inspection.getProjectId());
             issue.setWeeklyInspectionId(inspection.getId());
             issue.setInspectionItemOrder(item.getItemOrder());
+            issue.setRecordDate(inspection.getInspectionDate());
             issue.setIssueNo(generateIssueNo());
             issue.setRequestKey("W:" + inspection.getId() + ":" + item.getId());
             issue.setTitle(item.getTitle().trim());

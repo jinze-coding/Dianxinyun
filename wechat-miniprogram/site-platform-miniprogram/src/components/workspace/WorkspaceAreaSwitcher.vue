@@ -35,7 +35,7 @@ function displayName(project?: Project) {
 <template>
   <view class="area-host" :style="{ '--area-accent': accent, '--area-tint': tint }">
     <button class="area-switcher" @tap="openSheet">
-      <view class="area-marker"><text></text></view>
+      <view class="area-marker"><text class="area-marker-fill"></text></view>
       <view class="area-main">
         <view class="area-title-line">
           <text class="area-kicker">当前施工区域</text>
@@ -74,7 +74,7 @@ function displayName(project?: Project) {
 }
 .area-switcher:active { transform: scale(0.988); }
 .area-marker { position: relative; width: 8rpx; flex-shrink: 0; overflow: hidden; border-radius: 999rpx; background: rgba(255,255,255,.72); }
-.area-marker text { position: absolute; top: 0; right: 0; left: 0; height: 62%; border-radius: inherit; background: var(--area-accent); }
+.area-marker-fill { position: absolute; top: 0; right: 0; left: 0; height: 62%; border-radius: inherit; background: var(--area-accent); }
 .area-main { min-width: 0; flex: 1; }
 .area-title-line, .area-name-line { display: flex; min-width: 0; align-items: center; }
 .area-title-line { justify-content: space-between; gap: 18rpx; }

@@ -295,6 +295,10 @@ public class ProjectMemberService {
         List<SystemRole> roles = requireEnabledProjectRoles(request.getRoleIds());
         SysUserProject existing = findUserProject(request.getProjectId(), request.getUserId());
         assertProjectManagerCanChangeRoles(currentUser, request.getProjectId(), request.getUserId(), existing, roles);
+        if (existing != null) {
+            requireRequestedRolesKeepQualityWeeklyReminderServiceable(
+                    request.getProjectId(), request.getUserId(), roles);
+        }
 
         LocalDateTime now = LocalDateTime.now();
         if (existing == null) {
@@ -589,6 +593,9 @@ public class ProjectMemberService {
         assertProjectManagerCanChangeRoles(currentUser, projectId, userId, existing, roles);
         if (!confirmResponsibilityRelease) {
             requireRequestedRolesKeepOpenQualityServiceable(projectId, userId, existing, roles);
+            if (existing != null) {
+                requireRequestedRolesKeepQualityWeeklyReminderServiceable(projectId, userId, roles);
+            }
         }
         return new PreparedChange(projectId, userId, operation, roles, existing, existingMember);
     }
@@ -599,6 +606,11 @@ public class ProjectMemberService {
         assertProjectManagerCanChangeTarget(currentUser, projectId, userId);
         if (allowResponsibilityRelease && projectPermissionService.isPlatformAdmin(currentUser.getId())) return;
         requireNoOpenQualityAssignments(projectId, userId, "移除");
+        ResponsibilityImpactVO responsibilityImpact = responsibilityReleaseService.impact(projectId, userId);
+        if (responsibilityImpact != null
+                && responsibilityImpact.getQualityWeeklyReminderSettingCount() > 0) {
+            throw new BusinessException("该成员仍是质量周检提醒责任人，请先在周检提醒设置中调整责任人");
+        }
         if (member != null && ((member.getResponsibleBoxCount() != null && member.getResponsibleBoxCount() > 0)
                 || (member.getPendingRectificationCount() != null && member.getPendingRectificationCount() > 0))) {
             throw new BusinessException("该成员仍负责电箱或待整改任务，请先调整后再移除");
@@ -635,6 +647,18 @@ public class ProjectMemberService {
                 && codes.contains(SystemPermissionCodes.QUALITY_RECTIFY);
     }
 
+    private void requireRequestedRolesKeepQualityWeeklyReminderServiceable(
+            Long projectId, Long userId, List<SystemRole> roles) {
+        ResponsibilityImpactVO impact = responsibilityReleaseService.impact(projectId, userId);
+        if (impact == null || impact.getQualityWeeklyReminderSettingCount() == 0
+                || projectPermissionService.isPlatformAdmin(userId)) {
+            return;
+        }
+        if (!permissionCodesForRoles(userId, roles).contains(SystemPermissionCodes.QUALITY_MANAGE)) {
+            throw new BusinessException("该成员仍是质量周检提醒责任人，不能取消其质量管理权限，请先调整提醒责任人");
+        }
+    }
+
     private ResponsibilityImpactVO responsibilityImpactForChange(PreparedChange change) {
         ResponsibilityImpactVO impact = responsibilityReleaseService.impact(change.projectId(), change.userId());
         if ("REMOVE".equals(change.operation())) return impact;
@@ -657,6 +681,9 @@ public class ProjectMemberService {
         }
         if (codes.contains(SystemPermissionCodes.QUALITY_RECTIFY)) {
             impact.setOpenQualityIssueCount(0);
+        }
+        if (codes.contains(SystemPermissionCodes.QUALITY_MANAGE)) {
+            impact.setQualityWeeklyReminderSettingCount(0);
         }
         return impact;
     }
@@ -685,6 +712,7 @@ public class ProjectMemberService {
         impact.setPendingInspectionReviewCount(0);
         impact.setOpenRectificationCount(0);
         impact.setOpenQualityIssueCount(0);
+        impact.setQualityWeeklyReminderSettingCount(0);
     }
 
     private void applyPreparedChanges(List<PreparedChange> changes, SysUser currentUser) {

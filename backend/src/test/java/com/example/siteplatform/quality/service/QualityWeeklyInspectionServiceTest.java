@@ -55,6 +55,7 @@ class QualityWeeklyInspectionServiceTest {
     @Mock private QualityIssueLogMapper logMapper;
     @Mock private QualityIssueService qualityIssueService;
     @Mock private QualityAssigneeService qualityAssigneeService;
+    @Mock private QualityWeeklyReminderSettingService reminderSettingService;
     @Mock private ProjectPermissionService projectPermissionService;
     @Mock private QualityWeeklyFileService weeklyFileService;
     @Mock private WechatNotificationService wechatNotificationService;
@@ -72,6 +73,7 @@ class QualityWeeklyInspectionServiceTest {
         ReflectionTestUtils.setField(service, "logMapper", logMapper);
         ReflectionTestUtils.setField(service, "qualityIssueService", qualityIssueService);
         ReflectionTestUtils.setField(service, "qualityAssigneeService", qualityAssigneeService);
+        ReflectionTestUtils.setField(service, "reminderSettingService", reminderSettingService);
         ReflectionTestUtils.setField(service, "projectPermissionService", projectPermissionService);
         ReflectionTestUtils.setField(service, "weeklyFileService", weeklyFileService);
         ReflectionTestUtils.setField(service, "wechatNotificationService", wechatNotificationService);
@@ -203,6 +205,7 @@ class QualityWeeklyInspectionServiceTest {
 
         assertEquals(QualityWeeklyInspectionService.STATUS_SUBMITTED, result.getStatus());
         assertEquals(0, result.getSubmittedIssueCount());
+        verify(reminderSettingService).lockByInspectionId(100L);
         verify(weeklyFileService).transferDraftFiles(9L,
                 QualityWeeklyFileService.WEEKLY_DRAFT, 100L,
                 QualityWeeklyFileService.WEEKLY_FINAL, 100L);
@@ -257,6 +260,8 @@ class QualityWeeklyInspectionServiceTest {
         verify(issueMapper, times(2)).insert(issueCaptor.capture());
         List<QualityIssue> created = issueCaptor.getAllValues();
         assertEquals(100L, created.get(0).getWeeklyInspectionId());
+        assertEquals(draft.getInspectionDate(), created.get(0).getRecordDate());
+        assertEquals(draft.getInspectionDate(), created.get(1).getRecordDate());
         assertEquals(1, created.get(0).getInspectionItemOrder());
         assertEquals(2L, created.get(0).getAssigneeId());
         assertEquals(first.getDeadline(), created.get(0).getDeadline());

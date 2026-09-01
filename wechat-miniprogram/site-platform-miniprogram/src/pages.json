@@ -45,6 +45,22 @@
       "style": { "navigationStyle": "custom", "disableScroll": true, "navigationBarTitleText": "质量周检详情" }
     },
     {
+      "path": "pages/quality/weekly-list",
+      "style": { "navigationStyle": "custom", "disableScroll": true, "navigationBarTitleText": "周检记录" }
+    },
+    {
+      "path": "pages/quality/issues",
+      "style": { "navigationStyle": "custom", "disableScroll": true, "navigationBarTitleText": "整改闭环" }
+    },
+    {
+      "path": "pages/quality/issue-detail",
+      "style": { "navigationStyle": "custom", "disableScroll": true, "navigationBarTitleText": "质量问题详情" }
+    },
+    {
+      "path": "pages/quality/documents",
+      "style": { "navigationStyle": "custom", "disableScroll": true, "navigationBarTitleText": "质量资料" }
+    },
+    {
       "path": "pages/todo/index",
       "style": { "navigationStyle": "custom", "disableScroll": true }
     },
@@ -67,6 +83,10 @@
     {
       "path": "pages/documents/recycle",
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "资料回收站" }
+    },
+    {
+      "path": "pages/document-distribution/detail",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "图纸签收" }
     },
     {
       "path": "pages/projects/index",
@@ -130,7 +150,7 @@
     },
     {
       "path": "pages/seal/list",
-      "style": { "navigationStyle": "custom", "navigationBarTitleText": "用印申请" }
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "用印管理" }
     },
     {
       "path": "pages/seal/detail",
@@ -143,6 +163,10 @@
     {
       "path": "pages/public/visitor-invite",
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "外访登记" }
+    },
+    {
+      "path": "pages/public/meeting-invite",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "会议访客登记" }
     },
     {
       "path": "pages/public/guard-visitor-register",

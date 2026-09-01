@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   assignQualityIssue,
+  createQualityIssueExportJob,
+  downloadQualityIssueExport,
   getQualityAssignees,
+  getQualityIssueExportJobs,
   getQualityIssue,
   getQualityIssuePage,
   getQualitySummary,
@@ -24,6 +27,7 @@ import {
 } from "../../utils/permissions";
 import { pageMenuAllowed } from "../../utils/roleAuthorization";
 import WeeklyInspectionPanel from "./WeeklyInspectionPanel";
+import "./quality-management.css";
 
 const formatTime = (value) =>
   value ? String(value).replace("T", " ").slice(0, 16) : "-";
@@ -49,8 +53,52 @@ const actionLabel = (value) =>
 const projectKey = (value) =>
   value === null || value === undefined ? "" : String(value);
 const QUALITY_PAGE_SIZE = 20;
-const issueQueryKey = (projectId, status, source, keyword, pageNo) =>
-  `${projectKey(projectId)}|${status}|${source}|${keyword.trim()}|${pageNo}`;
+const QUALITY_TABS = [
+  { key: "weekly", label: "周检记录", description: "按周组织检查" },
+  { key: "issues", label: "整改闭环", description: "跟踪问题进度" },
+  { key: "documents", label: "质量资料", description: "沉淀过程文件" },
+];
+const issueQueryKey = (
+  projectId,
+  status,
+  source,
+  keyword,
+  startDate,
+  endDate,
+  pageNo,
+) =>
+  `${projectKey(projectId)}|${status}|${source}|${keyword.trim()}|${startDate}|${endDate}|${pageNo}`;
+const localDateText = (date = new Date()) => {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+};
+const currentMonthDateRange = () => {
+  const today = new Date();
+  return {
+    startDate: localDateText(new Date(today.getFullYear(), today.getMonth(), 1)),
+    endDate: localDateText(today),
+  };
+};
+const validateDateRange = ({ startDate, endDate }, required = false) => {
+  if (!startDate && !endDate) {
+    return required ? "请选择完整的开始日期和结束日期" : "";
+  }
+  if (!startDate || !endDate) return "开始日期和结束日期必须同时选择";
+  if (endDate < startDate) return "结束日期不能早于开始日期";
+  if (endDate > localDateText()) return "结束日期不能晚于今天";
+  const days = Math.round(
+    (new Date(`${endDate}T00:00:00`).getTime()
+      - new Date(`${startDate}T00:00:00`).getTime()) / 86_400_000,
+  ) + 1;
+  return days > 366 ? "日期范围最长为 366 天" : "";
+};
+const exportJobStatusLabel = (status) => ({
+  PENDING: "等待生成",
+  RUNNING: "生成中",
+  SUCCEEDED: "已完成",
+  FAILED: "生成失败",
+  EXPIRED: "已过期",
+})[status] || status;
 const isArchivedDocument = (file) =>
   ["ARCHIVED", "已归档"].includes(String(file?.status || "").toUpperCase())
   || file?.status === "已归档";
@@ -231,6 +279,19 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
   const [pageNo, setPageNo] = useState(1);
   const [keyword, setKeyword] = useState("");
   const [appliedKeyword, setAppliedKeyword] = useState("");
+  const [dateRange, setDateRange] = useState({ startDate: "", endDate: "" });
+  const [appliedDateRange, setAppliedDateRange] = useState({ startDate: "", endDate: "" });
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportForm, setExportForm] = useState({
+    ...currentMonthDateRange(),
+    source: "ALL",
+    status: "ALL",
+    keyword: "",
+  });
+  const [exportJobs, setExportJobs] = useState([]);
+  const [exportJobsLoading, setExportJobsLoading] = useState(false);
+  const [exportSubmitting, setExportSubmitting] = useState(false);
+  const [exportErrorText, setExportErrorText] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [errorQueryKey, setErrorQueryKey] = useState("");
@@ -262,6 +323,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
   const detailRequestIdRef = useRef(0);
   const openedBusinessTargetRef = useRef("");
   const evidenceUrlsRef = useRef([]);
+  const exportRequestIdRef = useRef(0);
   const submittingRef = useRef(false);
   const documentBusyRef = useRef(false);
   const openingFileRef = useRef(false);
@@ -330,6 +392,8 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
     const targetStatus = options.status ?? status;
     const targetSource = options.source ?? issueSource;
     const targetKeyword = (options.keyword ?? appliedKeyword).trim();
+    const targetStartDate = options.startDate ?? appliedDateRange.startDate;
+    const targetEndDate = options.endDate ?? appliedDateRange.endDate;
     const targetPageNo = options.pageNo ?? pageNo;
     const targetProjectKey = projectKey(targetProjectId);
     if (
@@ -343,6 +407,8 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
       targetStatus,
       targetSource,
       targetKeyword,
+      targetStartDate,
+      targetEndDate,
       targetPageNo,
     );
     const requestId = ++issueRequestIdRef.current;
@@ -356,6 +422,8 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
           status: targetStatus,
           source: targetSource,
           keyword: targetKeyword || undefined,
+          startDate: targetStartDate || undefined,
+          endDate: targetEndDate || undefined,
           pageNo: targetPageNo,
           pageSize: QUALITY_PAGE_SIZE,
         }),
@@ -454,11 +522,49 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
     }
   };
 
+  const loadExportJobs = async (options = {}) => {
+    const targetProjectId = options.projectId ?? projectId;
+    const targetProjectKey = projectKey(targetProjectId);
+    if (
+      !targetProjectKey
+      || projectKey(currentProjectIdRef.current) !== targetProjectKey
+    ) {
+      return;
+    }
+    const requestId = ++exportRequestIdRef.current;
+    if (!options.silent) setExportJobsLoading(true);
+    setExportErrorText("");
+    try {
+      const res = await getQualityIssueExportJobs(targetProjectId);
+      if (
+        requestId !== exportRequestIdRef.current
+        || projectKey(currentProjectIdRef.current) !== targetProjectKey
+      ) {
+        return;
+      }
+      if (res.code !== 200) throw new Error(res.message || "导出任务加载失败");
+      setExportJobs(res.data || []);
+    } catch (error) {
+      if (
+        requestId !== exportRequestIdRef.current
+        || projectKey(currentProjectIdRef.current) !== targetProjectKey
+      ) {
+        return;
+      }
+      setExportErrorText(error.message || "导出任务加载失败");
+    } finally {
+      if (requestId === exportRequestIdRef.current && !options.silent) {
+        setExportJobsLoading(false);
+      }
+    }
+  };
+
   useEffect(() => {
     issueRequestIdRef.current += 1;
     documentRequestIdRef.current += 1;
     memberRequestIdRef.current += 1;
     detailRequestIdRef.current += 1;
+    exportRequestIdRef.current += 1;
     setSummary(null);
     setSummaryProjectKey("");
     setIssues([]);
@@ -487,13 +593,36 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
     setPageNo(1);
     setKeyword("");
     setAppliedKeyword("");
+    setDateRange({ startDate: "", endDate: "" });
+    setAppliedDateRange({ startDate: "", endDate: "" });
+    setExportOpen(false);
+    setExportForm({
+      ...currentMonthDateRange(),
+      source: "ALL",
+      status: "ALL",
+      keyword: "",
+    });
+    setExportJobs([]);
+    setExportJobsLoading(false);
+    setExportSubmitting(false);
+    setExportErrorText("");
     setModal(null);
     setSelectedIssue(null);
     setDocumentFile(null);
   }, [projectId]);
   useEffect(() => {
     if (activeTab === "issues" && canViewIssues) loadQualityData();
-  }, [activeTab, canViewIssues, projectId, status, issueSource, appliedKeyword, pageNo]);
+  }, [
+    activeTab,
+    canViewIssues,
+    projectId,
+    status,
+    issueSource,
+    appliedKeyword,
+    appliedDateRange.startDate,
+    appliedDateRange.endDate,
+    pageNo,
+  ]);
   useEffect(() => {
     if (activeTab === "documents" && canViewDocuments) {
       loadDocuments();
@@ -508,6 +637,18 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
       setMenuNotice("当前角色无质量资料菜单权限，已切换到质量周检");
     }
   }, [activeTab, canViewDocuments, canViewIssues]);
+  useEffect(() => {
+    if (!exportOpen) return undefined;
+    const hasActiveJob = exportJobs.some((job) =>
+      ["PENDING", "RUNNING"].includes(job.status),
+    );
+    if (!hasActiveJob) return undefined;
+    const timer = window.setInterval(
+      () => loadExportJobs({ silent: true }),
+      3000,
+    );
+    return () => window.clearInterval(timer);
+  }, [exportOpen, exportJobs, projectId]);
 
   const currentProjectKey = projectKey(projectId);
   const currentQueryKey = issueQueryKey(
@@ -515,6 +656,8 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
     status,
     issueSource,
     appliedKeyword,
+    appliedDateRange.startDate,
+    appliedDateRange.endDate,
     pageNo,
   );
   const currentSummary =
@@ -683,6 +826,12 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
     setMenuNotice("");
     openIssue({ id: issueId });
   }, [businessTarget?.id, businessTarget?.openedAt, businessTarget?.routeCode, canViewIssues, projectId]);
+
+  useEffect(() => {
+    if (businessTarget?.routeCode !== "QUALITY_WEEKLY_INSPECTION_WEEK" || !canViewIssues) return;
+    setActiveTab("weekly");
+    setMenuNotice("");
+  }, [businessTarget?.openedAt, businessTarget?.routeCode, canViewIssues]);
 
   const uploadFiles = async (files, businessType) => {
     const ids = [];
@@ -932,16 +1081,81 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
 
   const runSearch = () => {
     const nextKeyword = keyword.trim();
-    if (nextKeyword === appliedKeyword) {
+    const dateError = validateDateRange(dateRange);
+    if (dateError) {
+      alert(dateError);
+      return;
+    }
+    const datesUnchanged = dateRange.startDate === appliedDateRange.startDate
+      && dateRange.endDate === appliedDateRange.endDate;
+    if (nextKeyword === appliedKeyword && datesUnchanged) {
       if (pageNo !== 1) {
         setPageNo(1);
       } else {
-        loadQualityData({ keyword: nextKeyword, pageNo: 1 });
+        loadQualityData({
+          keyword: nextKeyword,
+          startDate: dateRange.startDate,
+          endDate: dateRange.endDate,
+          pageNo: 1,
+        });
       }
       return;
     }
     setPageNo(1);
     setAppliedKeyword(nextKeyword);
+    setAppliedDateRange(dateRange);
+  };
+
+  const openExport = () => {
+    setExportForm({
+      ...currentMonthDateRange(),
+      source: issueSource,
+      status,
+      keyword: appliedKeyword,
+    });
+    setExportOpen(true);
+    loadExportJobs();
+  };
+
+  const submitExport = async () => {
+    const dateError = validateDateRange(exportForm, true);
+    if (dateError) {
+      alert(dateError);
+      return;
+    }
+    setExportSubmitting(true);
+    try {
+      const res = await createQualityIssueExportJob({
+        projectId,
+        startDate: exportForm.startDate,
+        endDate: exportForm.endDate,
+        source: exportForm.source,
+        status: exportForm.status,
+        keyword: exportForm.keyword.trim() || undefined,
+      });
+      if (res.code !== 200) throw new Error(res.message || "导出任务创建失败");
+      await loadExportJobs();
+    } catch (error) {
+      alert(error.message || "导出任务创建失败");
+    } finally {
+      setExportSubmitting(false);
+    }
+  };
+
+  const downloadExport = async (job) => {
+    try {
+      const blob = await downloadQualityIssueExport(job.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `质量问题汇总_${job.startDate}至${job.endDate}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      alert(error.message || "报表下载失败");
+    }
   };
 
   const pill = (label, tone = "normal") => (
@@ -976,100 +1190,65 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
 
   return (
     <div
+      className="quality-workspace"
       style={{
         height: "100%",
-        padding: 16,
+        padding: "18px 20px",
         display: "flex",
         flexDirection: "column",
-        gap: 12,
+        gap: 14,
         overflow: "hidden",
         background: T.pageBg,
       }}
     >
-      {activeTab === "issues" && <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(5,minmax(0,1fr))",
-          background: T.cardBg,
-          border: `1px solid ${T.borderColor}`,
-          borderRadius: 8,
-          overflow: "hidden",
-          flexShrink: 0,
+      <QualityWorkspaceHeader
+        T={T}
+        activeTab={activeTab}
+        canViewIssues={canViewIssues}
+        canViewDocuments={canViewDocuments}
+        menuNotice={menuNotice}
+        onChange={(tab) => {
+          setActiveTab(tab);
+          setMenuNotice("");
         }}
-      >
-        {[
-          ["今日新增问题", currentSummary?.todayCheckCount || 0, T.accent],
-          ["待整改", currentSummary?.pendingCount || 0, T.warning],
-          ["已逾期", currentSummary?.overdueCount || 0, T.danger],
-          ["待复查", currentSummary?.recheckCount || 0, T.accent2],
-          ["闭环率", `${currentSummary?.closureRate || 0}%`, T.success],
-        ].map(([label, value, color], index) => (
-          <div
-            key={label}
-            style={{
-              padding: "14px 18px",
-              borderLeft: index ? `1px solid ${T.borderColor}` : "none",
-            }}
-          >
-            <div style={{ fontSize: 11, color: T.textMuted }}>{label}</div>
-            <div style={{ marginTop: 5, fontSize: 25, fontWeight: 800, color }}>
-              {value}
-            </div>
-          </div>
-        ))}
-      </div>}
+      />
       <div
+        className="quality-content-card"
+        role="tabpanel"
+        id={`quality-panel-${activeTab}`}
+        aria-labelledby={`quality-tab-${activeTab}`}
         style={{
+          flex: 1,
+          minHeight: 0,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
           background: T.cardBg,
           border: `1px solid ${T.borderColor}`,
-          borderRadius: 8,
-          padding: "9px 12px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          flexShrink: 0,
+          borderRadius: 12,
         }}
       >
-        <div style={{ display: "flex", gap: 6 }}>
-          {canViewIssues && <button
-            onClick={() => { setActiveTab("weekly"); setMenuNotice(""); }}
-            style={{
-              ...buttonStyle(activeTab === "weekly" ? "primary" : "secondary"),
-              background: activeTab === "weekly" ? T.accent : T.surface2,
-            }}
-          >
-            周检记录
-          </button>}
-          {canViewIssues && <button
-            onClick={() => { setActiveTab("issues"); setMenuNotice(""); }}
-            style={{
-              ...buttonStyle(activeTab === "issues" ? "primary" : "secondary"),
-              background: activeTab === "issues" ? T.accent : T.surface2,
-            }}
-          >
-            整改闭环
-          </button>}
-          {canViewDocuments && <button
-            onClick={() => { setActiveTab("documents"); setMenuNotice(""); }}
-            style={{
-              ...buttonStyle(
-                activeTab === "documents" ? "primary" : "secondary",
-              ),
-              background: activeTab === "documents" ? T.accent : T.surface2,
-            }}
-          >
-            质量资料
-          </button>}
-          {menuNotice && <span style={{ alignSelf: "center", color: T.warning, fontSize: 11 }}>{menuNotice}</span>}
-        </div>
         {activeTab === "weekly" ? (
-          <span style={{ color: T.textMuted, fontSize: 11 }}>
-            共享草稿跨 Web 与小程序同步，整批提交后每个问题独立整改、复查和留痕。
-          </span>
+          <WeeklyInspectionPanel
+            projectId={projectId}
+            T={T}
+            canManage={canManage}
+            buttonStyle={buttonStyle}
+            fieldStyle={fieldStyle}
+            pill={pill}
+            onOpenIssue={(issue) => openIssue(issue)}
+            businessTarget={businessTarget}
+          />
         ) : activeTab === "issues" ? (
-          <div style={{ display: "flex", gap: 7 }}>
+          <>
+          <QualityPanelHeader
+            T={T}
+            eyebrow="问题闭环台账"
+            title="整改闭环"
+            description="集中跟踪周检问题和历史独立问题，按负责人、期限与状态推进闭环。"
+          >
             <select
+              aria-label="问题来源"
               value={issueSource}
               onChange={(e) => {
                 setPageNo(1);
@@ -1083,6 +1262,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
               <option value="HISTORICAL">历史独立问题</option>
             </select>
             <select
+              aria-label="问题状态"
               value={status}
               onChange={(e) => {
                 setPageNo(1);
@@ -1095,8 +1275,38 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
               <option value="OVERDUE">已逾期</option>
               <option value="RECHECK">待复查</option>
               <option value="CLOSED">已关闭</option>
+              <option value="VOIDED">已作废</option>
             </select>
+            <label className="quality-date-filter" style={{ color: T.textMuted }}>
+              <span>开始</span>
+              <input
+                aria-label="问题开始日期"
+                type="date"
+                max={localDateText()}
+                value={dateRange.startDate}
+                onChange={(e) => setDateRange((current) => ({
+                  ...current,
+                  startDate: e.target.value,
+                }))}
+                style={{ ...fieldStyle, width: 136 }}
+              />
+            </label>
+            <label className="quality-date-filter" style={{ color: T.textMuted }}>
+              <span>结束</span>
+              <input
+                aria-label="问题结束日期"
+                type="date"
+                max={localDateText()}
+                value={dateRange.endDate}
+                onChange={(e) => setDateRange((current) => ({
+                  ...current,
+                  endDate: e.target.value,
+                }))}
+                style={{ ...fieldStyle, width: 136 }}
+              />
+            </label>
             <input
+              aria-label="搜索质量问题"
               value={keyword}
               onChange={(e) => {
                 const nextKeyword = e.target.value;
@@ -1117,83 +1327,17 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
             >
               查询
             </button>
-          </div>
-        ) : activeTab === "documents" ? (
-          <div
-            style={{
-              display: "flex",
-              gap: 7,
-              alignItems: "center",
-              justifyContent: "flex-end",
-              flexWrap: "wrap",
-            }}
-          >
             <button
-              onClick={() => setDocumentScope("ACTIVE")}
-              style={buttonStyle(
-                documentScope === "ACTIVE" ? "primary" : "secondary",
-              )}
+              disabled={issuesAreLoading || !projectId}
+              onClick={openExport}
+              style={buttonStyle()}
             >
-              有效资料 {activeDocuments.length}
+              导出汇总
             </button>
-            <button
-              onClick={() => setDocumentScope("ARCHIVED")}
-              style={buttonStyle(
-                documentScope === "ARCHIVED" ? "primary" : "secondary",
-              )}
-            >
-              历史归档 {archivedDocuments.length}
-            </button>
-            <button
-              disabled={documentsAreLoading || Boolean(documentBusyAction)}
-              onClick={() => loadDocuments()}
-              style={buttonStyle("secondary")}
-            >
-              刷新
-            </button>
-            {documentScope === "ACTIVE" && (
-              <>
-                <input
-                  type="file"
-                  onChange={(e) => setDocumentFile(e.target.files?.[0] || null)}
-                  style={{ ...fieldStyle, width: 260 }}
-                />
-                <button
-                  disabled={
-                    !canManage || submitting || Boolean(documentBusyAction)
-                  }
-                  onClick={uploadDocument}
-                  style={buttonStyle()}
-                >
-                  {submitting ? "上传中..." : "上传资料"}
-                </button>
-              </>
-            )}
-          </div>
-        ) : null}
-      </div>
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflow: "auto",
-          background: T.cardBg,
-          border: `1px solid ${T.borderColor}`,
-          borderRadius: 8,
-        }}
-      >
-        {activeTab === "weekly" ? (
-          <WeeklyInspectionPanel
-            projectId={projectId}
-            T={T}
-            canManage={canManage}
-            buttonStyle={buttonStyle}
-            fieldStyle={fieldStyle}
-            pill={pill}
-            onOpenIssue={(issue) => openIssue(issue)}
-          />
-        ) : activeTab === "issues" ? (
-          issuesAreLoading ? (
+          </QualityPanelHeader>
+          <QualityMetricGrid T={T} summary={currentSummary} />
+          <div className="quality-table-region">
+          {issuesAreLoading ? (
             <LoadingState T={T} text="质量问题加载中..." />
           ) : currentIssueError ? (
             <LoadError
@@ -1206,8 +1350,9 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
             <>
             <TableHead
               T={T}
-              columns="120px 1.5fr 1fr .8fr .8fr .8fr 90px"
+              columns="105px 120px 1.5fr 1fr .8fr .8fr .8fr 90px"
               labels={[
+                "问题日期",
                 "编号",
                 "问题",
                 "位置",
@@ -1221,8 +1366,9 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
               <TableRow
                 key={issue.id}
                 T={T}
-                columns="120px 1.5fr 1fr .8fr .8fr .8fr 90px"
+                columns="105px 120px 1.5fr 1fr .8fr .8fr .8fr 90px"
               >
+                <span>{issue.recordDate || "-"}</span>
                 <span
                   title={issue.issueNo || "-"}
                   style={{
@@ -1292,6 +1438,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
                           OVERDUE: "已逾期",
                           RECHECK: "待复查",
                           CLOSED: "已关闭",
+                          VOIDED: "已作废",
                         }[status] || status
                       }”分类暂无质量问题`
                       : "当前项目暂无质量问题"
@@ -1337,108 +1484,210 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
               </div>
             )}
             </>
-          )
-        ) : documentsAreLoading ? (
-          <LoadingState T={T} text="质量资料加载中..." />
-        ) : currentDocumentsError ? (
-          <LoadError
-            T={T}
-            text={currentDocumentsError}
-            onRetry={() => loadDocuments()}
-            buttonStyle={buttonStyle}
-          />
+          )}
+          </div>
+          </>
         ) : (
           <>
-            <div
-              style={{
-                padding: "10px 14px",
-                background: T.surface2,
-                borderBottom: `1px solid ${T.borderColor}`,
-                color: T.textMuted,
-                fontSize: 11,
-                lineHeight: 1.6,
-              }}
-            >
-              {documentScope === "ACTIVE"
-                ? "当前仅展示有效质量资料；已归档资料可在“历史归档”中查看并恢复。"
-                : "历史归档资料保持只读，可恢复为有效资料或永久删除。"}
-            </div>
-            <TableHead
-              T={T}
-              columns="1.5fr .8fr .8fr .9fr 160px"
-              labels={["文件名", "类型", "状态", "上传时间", "操作"]}
-            />
-            {visibleDocuments.map((file) => (
-              <TableRow
-                key={file.id}
-                T={T}
-                columns="1.5fr .8fr .8fr .9fr 160px"
-              >
-                <strong>{file.fileName}</strong>
-                <span>{file.fileType || "-"}</span>
-                {pill(
-                  documentStatusLabel(file),
-                  isArchivedDocument(file) ? "success" : "normal",
-                )}
-                <span>{formatTime(file.createTime)}</span>
-                <span style={{ display: "flex", gap: 6 }}>
+          <QualityPanelHeader
+            T={T}
+            eyebrow="质量过程文件"
+            title="质量资料"
+            description="集中保存质量照片、报告和过程文件，归档后仍可追溯与恢复。"
+          >
+            <div className="quality-scope-switch" role="group" aria-label="质量资料范围">
+              {[
+                ["ACTIVE", "有效资料", activeDocuments.length],
+                ["ARCHIVED", "历史归档", archivedDocuments.length],
+              ].map(([scope, label, count]) => {
+                const selected = documentScope === scope;
+                return (
                   <button
-                    disabled={openingFileId !== null}
-                    onClick={() => openFile(file.id)}
-                    style={buttonStyle("secondary")}
+                    key={scope}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setDocumentScope(scope)}
+                    style={{
+                      ...buttonStyle("secondary"),
+                      borderColor: selected ? `${T.accent}66` : T.borderColor,
+                      background: selected ? T.activeItemBg : T.surface2,
+                      color: selected ? T.accent : T.textSecondary,
+                      fontWeight: selected ? 800 : 600,
+                    }}
                   >
-                    {openingFileId === file.id ? "读取中..." : "查看"}
+                    {label} <span className="quality-scope-count">{count}</span>
                   </button>
-                  {canManage && (
-                    <>
+                );
+              })}
+            </div>
+            <button
+              disabled={documentsAreLoading || Boolean(documentBusyAction)}
+              onClick={() => loadDocuments()}
+              style={buttonStyle("secondary")}
+            >
+              刷新
+            </button>
+            {documentScope === "ACTIVE" && (
+              <>
+                <label
+                  className="quality-file-picker"
+                  style={{
+                    borderColor: documentFile ? `${T.accent}66` : T.borderColor,
+                    background: documentFile ? T.activeItemBg : T.surface2,
+                    color: documentFile ? T.accent : T.textSecondary,
+                  }}
+                  title={documentFile?.name || "选择质量资料文件"}
+                >
+                  <span className="quality-file-picker__name">
+                    {documentFile?.name || "选择资料文件"}
+                  </span>
+                  <span className="quality-file-picker__action">浏览</span>
+                  <input
+                    type="file"
+                    onChange={(e) => setDocumentFile(e.target.files?.[0] || null)}
+                  />
+                </label>
+                <button
+                  disabled={
+                    !canManage
+                    || !documentFile
+                    || submitting
+                    || Boolean(documentBusyAction)
+                  }
+                  onClick={uploadDocument}
+                  style={buttonStyle()}
+                >
+                  {submitting ? "上传中..." : "上传资料"}
+                </button>
+              </>
+            )}
+          </QualityPanelHeader>
+          <div
+            className="quality-context-note"
+            style={{
+              background: T.surface2,
+              borderColor: T.borderColor,
+              color: T.textMuted,
+            }}
+          >
+            <span className="quality-context-note__dot" style={{ background: T.accent }} />
+            {documentScope === "ACTIVE"
+              ? "当前展示有效质量资料；归档后可在“历史归档”中查看并恢复。"
+              : "历史归档资料保持只读，可恢复为有效资料；平台管理员可按影响确认后永久删除。"}
+          </div>
+          <div className="quality-table-region">
+            {documentsAreLoading ? (
+              <LoadingState T={T} text="质量资料加载中..." />
+            ) : currentDocumentsError ? (
+              <LoadError
+                T={T}
+                text={currentDocumentsError}
+                onRetry={() => loadDocuments()}
+                buttonStyle={buttonStyle}
+              />
+            ) : (
+              <>
+                <TableHead
+                  T={T}
+                  columns="1.5fr .8fr .8fr .9fr 160px"
+                  labels={["文件名", "类型", "状态", "上传时间", "操作"]}
+                />
+                {visibleDocuments.map((file) => (
+                  <TableRow
+                    key={file.id}
+                    T={T}
+                    columns="1.5fr .8fr .8fr .9fr 160px"
+                  >
+                    <strong>{file.fileName}</strong>
+                    <span>{file.fileType || "-"}</span>
+                    {pill(
+                      documentStatusLabel(file),
+                      isArchivedDocument(file) ? "success" : "normal",
+                    )}
+                    <span>{formatTime(file.createTime)}</span>
+                    <span style={{ display: "flex", gap: 6 }}>
                       <button
-                        disabled={Boolean(documentBusyAction)}
-                        onClick={() =>
-                          changeDocumentStatus(
-                            file,
-                            isArchivedDocument(file) ? "UPLOADED" : "ARCHIVED",
-                          )
-                        }
+                        disabled={openingFileId !== null}
+                        onClick={() => openFile(file.id)}
                         style={buttonStyle("secondary")}
                       >
-                        {documentBusyAction ===
-                        `${
-                          isArchivedDocument(file) ? "restore" : "archive"
-                        }:${file.id}`
-                          ? isArchivedDocument(file)
-                            ? "恢复中..."
-                            : "归档中..."
-                          : isArchivedDocument(file)
-                            ? "恢复"
-                            : "归档"}
+                        {openingFileId === file.id ? "读取中..." : "查看"}
                       </button>
-                      {canDelete && <button
-                          disabled={Boolean(documentBusyAction)}
-                          onClick={() => removeDocument(file)}
-                          style={buttonStyle("danger")}
-                        >
-                          {documentBusyAction === `delete:${file.id}`
-                            ? "删除中..."
-                            : "删除"}
-                        </button>}
-                    </>
-                  )}
-                </span>
-              </TableRow>
-            ))}
-            {!visibleDocuments.length && (
-              <Empty
-                T={T}
-                text={
-                  documentScope === "ARCHIVED"
-                    ? "暂无已归档质量资料"
-                    : "暂无有效质量资料"
-                }
-              />
+                      {canManage && (
+                        <>
+                          <button
+                            disabled={Boolean(documentBusyAction)}
+                            onClick={() =>
+                              changeDocumentStatus(
+                                file,
+                                isArchivedDocument(file) ? "UPLOADED" : "ARCHIVED",
+                              )
+                            }
+                            style={buttonStyle("secondary")}
+                          >
+                            {documentBusyAction ===
+                            `${isArchivedDocument(file) ? "restore" : "archive"}:${file.id}`
+                              ? isArchivedDocument(file)
+                                ? "恢复中..."
+                                : "归档中..."
+                              : isArchivedDocument(file)
+                                ? "恢复"
+                                : "归档"}
+                          </button>
+                          {canDelete && (
+                            <button
+                              disabled={Boolean(documentBusyAction)}
+                              onClick={() => removeDocument(file)}
+                              style={buttonStyle("danger")}
+                            >
+                              {documentBusyAction === `delete:${file.id}`
+                                ? "删除中..."
+                                : "删除"}
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </span>
+                  </TableRow>
+                ))}
+                {!visibleDocuments.length && (
+                  <Empty
+                    T={T}
+                    title={
+                      documentScope === "ARCHIVED"
+                        ? "暂无已归档质量资料"
+                        : "暂无有效质量资料"
+                    }
+                    text={
+                      documentScope === "ARCHIVED"
+                        ? "已归档的质量文件会集中显示在这里。"
+                        : "选择文件并上传后，质量资料会按时间留存在当前项目中。"
+                    }
+                  />
+                )}
+              </>
             )}
+          </div>
           </>
         )}
       </div>
+      {exportOpen && (
+        <QualityExportModal
+          T={T}
+          form={exportForm}
+          setForm={setExportForm}
+          jobs={exportJobs}
+          loading={exportJobsLoading}
+          submitting={exportSubmitting}
+          errorText={exportErrorText}
+          fieldStyle={fieldStyle}
+          buttonStyle={buttonStyle}
+          onClose={() => setExportOpen(false)}
+          onSubmit={submitExport}
+          onRefresh={() => loadExportJobs()}
+          onDownload={downloadExport}
+        />
+      )}
       {modal === "detail" && selectedIssue && (
         <Modal T={T} title="质量问题详情" onClose={closeModal}>
           <IssueDetail
@@ -1572,6 +1821,125 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
         </Modal>
       )}
     </div>
+  );
+}
+
+function QualityWorkspaceHeader({
+  T,
+  activeTab,
+  canViewIssues,
+  canViewDocuments,
+  menuNotice,
+  onChange,
+}) {
+  const visibleTabs = QUALITY_TABS.filter((tab) =>
+    tab.key === "documents" ? canViewDocuments : canViewIssues,
+  );
+  return (
+    <section
+      className="quality-workspace-header"
+      style={{
+        background: `linear-gradient(135deg, ${T.cardBg} 0%, ${T.cardBg} 58%, ${T.activeItemBg} 100%)`,
+        borderColor: T.borderColor,
+      }}
+    >
+      <div className="quality-workspace-intro">
+        <span className="quality-workspace-kicker" style={{ color: T.accent }}>
+          质量管理工作台
+        </span>
+        <div className="quality-workspace-title-row">
+          <h2 style={{ color: T.textPrimary }}>质量周检</h2>
+          <span
+            className="quality-workspace-badge"
+            style={{ color: T.accent, background: T.activeItemBg }}
+          >
+            Web / 小程序协同
+          </span>
+        </div>
+        <p style={{ color: T.textMuted }}>
+          按周组织检查，逐项推进整改复查，并将质量过程资料统一留痕。
+        </p>
+        {menuNotice && (
+          <span role="status" className="quality-workspace-notice" style={{ color: T.warning }}>
+            {menuNotice}
+          </span>
+        )}
+      </div>
+      <div className="quality-workspace-tabs" role="tablist" aria-label="质量周检页面">
+        {visibleTabs.map((tab) => {
+          const active = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              id={`quality-tab-${tab.key}`}
+              aria-selected={active}
+              aria-controls={`quality-panel-${tab.key}`}
+              tabIndex={active ? 0 : -1}
+              onClick={() => onChange(tab.key)}
+              style={{
+                borderColor: active ? `${T.accent}66` : T.borderColor,
+                background: active ? T.activeItemBg : T.cardBg,
+                color: active ? T.accent : T.textPrimary,
+                boxShadow: active ? `inset 0 -3px 0 ${T.accent}` : "none",
+              }}
+            >
+              <span>{tab.label}</span>
+              <small style={{ color: active ? T.accent : T.textMuted }}>
+                {tab.description}
+              </small>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function QualityPanelHeader({ T, eyebrow, title, description, children }) {
+  return (
+    <header
+      className="quality-panel-header"
+      style={{ borderColor: T.borderColor, background: T.cardBg }}
+    >
+      <div className="quality-panel-copy">
+        <span className="quality-panel-eyebrow" style={{ color: T.accent }}>
+          {eyebrow}
+        </span>
+        <h3 style={{ color: T.textPrimary }}>{title}</h3>
+        <p style={{ color: T.textMuted }}>{description}</p>
+      </div>
+      <div className="quality-panel-actions">{children}</div>
+    </header>
+  );
+}
+
+function QualityMetricGrid({ T, summary }) {
+  const metrics = [
+    ["今日新增", summary?.todayCheckCount || 0, T.accent],
+    ["待整改", summary?.pendingCount || 0, T.warning],
+    ["已逾期", summary?.overdueCount || 0, T.danger],
+    ["待复查", summary?.recheckCount || 0, T.accent2],
+    ["闭环率", `${summary?.closureRate || 0}%`, T.success],
+  ];
+  return (
+    <section
+      className="quality-metric-grid"
+      aria-label="整改闭环统计"
+      style={{ borderColor: T.borderColor, background: T.surface2 }}
+    >
+      {metrics.map(([label, value, color]) => (
+        <div
+          key={label}
+          className="quality-metric-card"
+          style={{ borderColor: T.borderColor, background: T.cardBg }}
+        >
+          <span style={{ color: T.textMuted }}>{label}</span>
+          <strong style={{ color }}>{value}</strong>
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -2108,9 +2476,11 @@ function EvidenceStage({ T, stage, evidenceState, onOpen }) {
 function TableHead({ T, columns, labels }) {
   return (
     <div
+      className="quality-table-head"
       style={{
         display: "grid",
         gridTemplateColumns: columns,
+        minWidth: 920,
         gap: 10,
         padding: "10px 14px",
         position: "sticky",
@@ -2131,9 +2501,11 @@ function TableHead({ T, columns, labels }) {
 function TableRow({ T, columns, children }) {
   return (
     <div
+      className="quality-table-row"
       style={{
         display: "grid",
         gridTemplateColumns: columns,
+        minWidth: 920,
         gap: 10,
         alignItems: "center",
         minHeight: 52,
@@ -2150,44 +2522,213 @@ function TableRow({ T, columns, children }) {
 function LoadingState({ T, text }) {
   return (
     <div
+      className="quality-state quality-state--loading"
       role="status"
       aria-live="polite"
       style={{
-        padding: 36,
-        textAlign: "center",
         color: T.textMuted,
-        fontSize: 12,
       }}
     >
+      <span className="quality-state-spinner" style={{ borderColor: `${T.accent}33`, borderTopColor: T.accent }} />
       {text}
     </div>
   );
 }
 function LoadError({ T, text, onRetry, buttonStyle }) {
   return (
-    <div style={{ padding: 24, color: T.danger, fontSize: 12 }}>
-      <div>{text}</div>
+    <div className="quality-state" role="alert" style={{ color: T.danger }}>
+      <span className="quality-state-symbol" style={{ color: T.danger, background: `${T.danger}12` }}>!</span>
+      <strong>内容加载失败</strong>
+      <span>{text}</span>
       <button
         onClick={onRetry}
-        style={{ ...buttonStyle("secondary"), marginTop: 12 }}
+        style={{ ...buttonStyle("secondary"), marginTop: 4 }}
       >
         重新加载
       </button>
     </div>
   );
 }
-function Empty({ T, text }) {
+function Empty({ T, title, text }) {
+  const heading = title || text;
+  const description = title ? text : "调整筛选条件或稍后再查看。";
   return (
     <div
-      style={{
-        padding: 36,
-        textAlign: "center",
-        color: T.textMuted,
-        fontSize: 12,
-      }}
+      className="quality-state quality-state--empty"
+      style={{ color: T.textMuted }}
     >
-      {text}
+      <span
+        className="quality-state-symbol"
+        aria-hidden="true"
+        style={{ color: T.accent, background: T.activeItemBg }}
+      >
+        ✓
+      </span>
+      <strong style={{ color: T.textPrimary }}>{heading}</strong>
+      <span>{description}</span>
     </div>
+  );
+}
+function QualityExportModal({
+  T,
+  form,
+  setForm,
+  jobs,
+  loading,
+  submitting,
+  errorText,
+  fieldStyle,
+  buttonStyle,
+  onClose,
+  onSubmit,
+  onRefresh,
+  onDownload,
+}) {
+  const updateForm = (field, value) => setForm((current) => ({
+    ...current,
+    [field]: value,
+  }));
+  return (
+    <Modal T={T} title="质量问题月度汇总导出" onClose={onClose}>
+      <div
+        className="quality-export-form"
+        style={{ background: T.surface2, borderColor: T.borderColor }}
+      >
+        <label style={labelStyle(T)}>
+          开始日期 *
+          <input
+            aria-label="导出开始日期"
+            type="date"
+            max={localDateText()}
+            value={form.startDate}
+            onChange={(e) => updateForm("startDate", e.target.value)}
+            style={fieldStyle}
+          />
+        </label>
+        <label style={labelStyle(T)}>
+          结束日期 *
+          <input
+            aria-label="导出结束日期"
+            type="date"
+            max={localDateText()}
+            value={form.endDate}
+            onChange={(e) => updateForm("endDate", e.target.value)}
+            style={fieldStyle}
+          />
+        </label>
+        <label style={labelStyle(T)}>
+          问题来源
+          <select
+            value={form.source}
+            onChange={(e) => updateForm("source", e.target.value)}
+            style={fieldStyle}
+          >
+            <option value="ALL">全部问题</option>
+            <option value="WEEKLY">周检问题</option>
+            <option value="HISTORICAL">历史独立问题</option>
+          </select>
+        </label>
+        <label style={labelStyle(T)}>
+          当前状态
+          <select
+            value={form.status}
+            onChange={(e) => updateForm("status", e.target.value)}
+            style={fieldStyle}
+          >
+            <option value="ALL">全部状态</option>
+            <option value="PENDING">待整改</option>
+            <option value="OVERDUE">已逾期</option>
+            <option value="RECHECK">待复查</option>
+            <option value="CLOSED">已关闭</option>
+            <option value="VOIDED">已作废</option>
+          </select>
+        </label>
+        <label className="quality-export-keyword" style={labelStyle(T)}>
+          关键词
+          <input
+            maxLength={100}
+            value={form.keyword}
+            onChange={(e) => updateForm("keyword", e.target.value)}
+            placeholder="问题编号、标题、位置或负责人"
+            style={fieldStyle}
+          />
+        </label>
+        <div className="quality-export-submit">
+          <span style={{ color: T.textMuted, fontSize: 11 }}>
+            最多 300 个问题、800 张原图；完成后的文件保留 7 天。
+          </span>
+          <button disabled={submitting} onClick={onSubmit} style={buttonStyle()}>
+            {submitting ? "正在创建..." : "生成 Excel"}
+          </button>
+        </div>
+      </div>
+
+      <div className="quality-export-history-head">
+        <div>
+          <strong style={{ color: T.textPrimary }}>近期导出任务</strong>
+          <div style={{ color: T.textMuted, fontSize: 11, marginTop: 3 }}>
+            后台生成期间可以关闭窗口，稍后重新进入查看进度。
+          </div>
+        </div>
+        <button disabled={loading} onClick={onRefresh} style={buttonStyle("secondary")}>
+          {loading ? "刷新中..." : "刷新"}
+        </button>
+      </div>
+      {errorText && (
+        <div role="alert" className="quality-export-error" style={{ color: T.danger }}>
+          {errorText}
+        </div>
+      )}
+      <div className="quality-export-jobs">
+        {jobs.map((job) => (
+          <div
+            key={job.id}
+            className="quality-export-job"
+            style={{ borderColor: T.borderColor, background: T.cardBg }}
+          >
+            <div className="quality-export-job__main">
+              <strong style={{ color: T.textPrimary }}>
+                {job.startDate} 至 {job.endDate}
+              </strong>
+              <span style={{ color: T.textMuted }}>
+                {job.issueCount || 0} 个问题 · {job.photoCount || 0} 张照片 · 创建于 {formatTime(job.createTime)}
+              </span>
+              {job.errorMessage && (
+                <span role="alert" style={{ color: T.danger }}>
+                  {job.errorMessage}
+                </span>
+              )}
+              {job.status === "SUCCEEDED" && (
+                <span style={{ color: T.textMuted }}>
+                  文件有效期至 {formatTime(job.expiresTime)}
+                </span>
+              )}
+            </div>
+            <div className="quality-export-job__actions">
+              <span
+                className="quality-export-progress"
+                style={{ color: job.status === "FAILED" ? T.danger : T.accent }}
+              >
+                {exportJobStatusLabel(job.status)}
+                {["PENDING", "RUNNING"].includes(job.status)
+                  ? ` ${job.progress || 0}%`
+                  : ""}
+              </span>
+              {job.downloadable && (
+                <button onClick={() => onDownload(job)} style={buttonStyle()}>
+                  下载 Excel
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        {!loading && !jobs.length && (
+          <div className="quality-export-empty" style={{ color: T.textMuted }}>
+            暂无导出任务
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }
 function Modal({ T, title, onClose, children }) {

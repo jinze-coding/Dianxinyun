@@ -82,6 +82,9 @@ export function normalizeEdgeSetting(value = {}, projectId, now = new Date(), ti
     reviewerId: value.reviewerId ?? '',
     rectificationDays: Number(value.rectificationDays ?? 3),
     enabled: Boolean(value.enabled),
+    submissionReminderEnabled: Boolean(value.submissionReminderEnabled),
+    reminderEffectiveTime: value.reminderEffectiveTime || '',
+    nextReminderTime: value.nextReminderTime || '',
     expectedVersion: Number(value.version ?? value.expectedVersion ?? 0),
   };
 }

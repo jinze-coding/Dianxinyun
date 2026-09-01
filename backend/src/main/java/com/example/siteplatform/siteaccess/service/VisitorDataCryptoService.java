@@ -1,6 +1,7 @@
 package com.example.siteplatform.siteaccess.service;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -27,6 +28,7 @@ public class VisitorDataCryptoService {
     private final SecretKeySpec key;
     private final SecureRandom secureRandom = new SecureRandom();
 
+    @Autowired
     public VisitorDataCryptoService(
             @Value("${site-access.encryption-key:}") String configuredKey,
             Environment environment) {
@@ -38,6 +40,18 @@ public class VisitorDataCryptoService {
             throw new IllegalStateException("生产环境必须配置至少32字节的 VISITOR_DATA_ENCRYPTION_KEY");
         }
         this.key = new SecretKeySpec(sha256(source.getBytes(StandardCharsets.UTF_8)), "AES");
+    }
+
+    private VisitorDataCryptoService(String source) {
+        this.key = new SecretKeySpec(sha256(source.getBytes(StandardCharsets.UTF_8)), "AES");
+    }
+
+    /**
+     * Migration-only cipher for the historical local-development default key.
+     * Package visibility deliberately keeps the fallback out of request-serving code.
+     */
+    static VisitorDataCryptoService legacyDevelopmentMigrationCipher() {
+        return new VisitorDataCryptoService(DEVELOPMENT_KEY);
     }
 
     public String encrypt(String plaintext) {

@@ -20,6 +20,7 @@ public class ProjectDocument {
     private String documentNo;
     private String title;
     private String category;
+    private String documentType;
     private String status;
     private Long currentVersionId;
     private Long createdBy;

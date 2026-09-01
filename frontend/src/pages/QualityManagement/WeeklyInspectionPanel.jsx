@@ -7,9 +7,12 @@ import {
   getQualityAssignees,
   getWeeklyInspection,
   getWeeklyInspectionPage,
+  getWeeklyInspectionReminderAssignees,
+  getWeeklyInspectionReminderSetting,
   getWeeklyInspectionSummary,
   saveWeeklyInspectionDraft,
   submitWeeklyInspection,
+  updateWeeklyInspectionReminderSetting,
 } from "../../services/quality";
 import {
   addLocalDays,
@@ -44,6 +47,7 @@ export default function WeeklyInspectionPanel({
   fieldStyle,
   pill,
   onOpenIssue,
+  businessTarget,
 }) {
   const [inspections, setInspections] = useState([]);
   const [total, setTotal] = useState(0);
@@ -61,7 +65,15 @@ export default function WeeklyInspectionPanel({
   const [members, setMembers] = useState([]);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState("");
+  const [reminderOpen, setReminderOpen] = useState(false);
+  const [reminderLoading, setReminderLoading] = useState(false);
+  const [reminderSaving, setReminderSaving] = useState(false);
+  const [reminderError, setReminderError] = useState("");
+  const [reminderSetting, setReminderSetting] = useState(null);
+  const [reminderAssignees, setReminderAssignees] = useState([]);
   const requestRef = useRef(0);
+  const openRequestRef = useRef(0);
+  const openedBusinessTargetRef = useRef("");
   const busyRef = useRef(false);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -115,6 +127,7 @@ export default function WeeklyInspectionPanel({
 
   useEffect(() => {
     requestRef.current += 1;
+    openRequestRef.current += 1;
     setPageNo(1);
     setStatus("ALL");
     setKeyword("");
@@ -125,6 +138,11 @@ export default function WeeklyInspectionPanel({
     setEditor(null);
     setDirty(false);
     setMembers([]);
+    setReminderOpen(false);
+    setReminderSetting(null);
+    setReminderAssignees([]);
+    setReminderError("");
+    openedBusinessTargetRef.current = "";
     busyRef.current = false;
     setBusy("");
   }, [projectId]);
@@ -175,6 +193,34 @@ export default function WeeklyInspectionPanel({
     return res.data;
   };
 
+  const openWeekInspection = async (weekStart, closePicker = false) => {
+    if (!projectId) throw new Error("请先选择项目");
+    if (!weekStart) throw new Error("请选择周检周次");
+    if (isFutureWeek(weekStart)) throw new Error("不能创建未来周次的质量周检");
+    if (!beginBusy("draft")) return;
+    const requestId = ++openRequestRef.current;
+    try {
+      await loadMembers();
+      const res = await createOrResumeWeeklyInspectionDraft({ projectId, weekStart });
+      if (res.code !== 200) throw new Error(res.message || "草稿创建失败");
+      const data = res.data?.draftItems
+        ? res.data
+        : await fetchInspection(res.data?.id || res.data);
+      if (requestId !== openRequestRef.current) return;
+      if (closePicker) setWeekPickerOpen(false);
+      if (data.status === "SUBMITTED") {
+        setDetail(data);
+        setEditor(null);
+        setDirty(false);
+        return;
+      }
+      setEditor(inspectionToEditor(data));
+      setDirty(false);
+    } finally {
+      if (requestId === openRequestRef.current) endBusy();
+    }
+  };
+
   const openInspection = async (inspection) => {
     if (!beginBusy("detail")) return;
     try {
@@ -194,31 +240,93 @@ export default function WeeklyInspectionPanel({
   };
 
   const startDraft = async () => {
-    if (!projectId) return alert("请先选择项目");
     const weekStart = mondayOfWeek(selectedWeek);
-    if (!weekStart) return alert("请选择周检周次");
-    if (isFutureWeek(weekStart)) return alert("不能创建未来周次的质量周检");
-    if (!beginBusy("draft")) return;
     try {
-      await loadMembers();
-      const res = await createOrResumeWeeklyInspectionDraft({ projectId, weekStart });
-      if (res.code !== 200) throw new Error(res.message || "草稿创建失败");
-      const data = res.data?.draftItems
-        ? res.data
-        : await fetchInspection(res.data?.id || res.data);
-      setWeekPickerOpen(false);
-      if (data.status === "SUBMITTED") {
-        setDetail(data);
-        setEditor(null);
-        setDirty(false);
-        return;
-      }
-      setEditor(inspectionToEditor(data));
-      setDirty(false);
+      await openWeekInspection(weekStart, true);
     } catch (error) {
       alert(error.message || "草稿创建失败");
+    }
+  };
+
+  useEffect(() => {
+    const routeCode = String(businessTarget?.routeCode || "").toUpperCase();
+    const weekStart = String(businessTarget?.weekStart || "");
+    const targetProjectMatches = Number(businessTarget?.projectId || 0) === Number(projectId || 0);
+    const targetKey = routeCode === "QUALITY_WEEKLY_INSPECTION_WEEK" && weekStart && targetProjectMatches
+      ? `${projectId || ""}:${weekStart}:${businessTarget?.openedAt || ""}`
+      : "";
+    if (!targetKey || !canManage || openedBusinessTargetRef.current === targetKey) return;
+    openedBusinessTargetRef.current = targetKey;
+    setSelectedWeek(weekStart);
+    openWeekInspection(weekStart).catch((error) => alert(error.message || "周检记录打开失败"));
+  }, [businessTarget?.openedAt, businessTarget?.projectId, businessTarget?.routeCode, businessTarget?.weekStart, canManage, projectId]);
+
+  const openReminderSetting = async () => {
+    if (!projectId || reminderLoading) return;
+    setReminderOpen(true);
+    setReminderLoading(true);
+    setReminderError("");
+    try {
+      const [settingRes, assigneeRes] = await Promise.all([
+        getWeeklyInspectionReminderSetting(projectId),
+        getWeeklyInspectionReminderAssignees(projectId),
+      ]);
+      if (settingRes.code !== 200) throw new Error(settingRes.message || "提醒设置加载失败");
+      if (assigneeRes.code !== 200) throw new Error(assigneeRes.message || "责任人加载失败");
+      const value = settingRes.data || {};
+      setReminderSetting({
+        ...value,
+        enabled: Boolean(value.enabled),
+        dayOfWeek: Number(value.dayOfWeek || 7),
+        triggerTime: String(value.triggerTime || "18:00").slice(0, 5),
+        responsibleUserId: value.responsibleUserId ? String(value.responsibleUserId) : "",
+        version: Number(value.version || 0),
+      });
+      setReminderAssignees(assigneeRes.data || []);
+    } catch (error) {
+      setReminderError(error.message || "提醒设置加载失败");
     } finally {
-      endBusy();
+      setReminderLoading(false);
+    }
+  };
+
+  const saveReminderSetting = async () => {
+    if (!reminderSetting || reminderSaving) return;
+    if (reminderSetting.enabled && !reminderSetting.responsibleUserId) {
+      setReminderError("启用提醒前请选择一名质量周检主责任人");
+      return;
+    }
+    setReminderSaving(true);
+    setReminderError("");
+    try {
+      const res = await updateWeeklyInspectionReminderSetting(projectId, {
+        enabled: Boolean(reminderSetting.enabled),
+        dayOfWeek: Number(reminderSetting.dayOfWeek),
+        triggerTime: reminderSetting.triggerTime,
+        responsibleUserId: reminderSetting.responsibleUserId
+          ? Number(reminderSetting.responsibleUserId)
+          : null,
+        expectedVersion: Number(reminderSetting.version || 0),
+      });
+      if (res.code !== 200) throw new Error(res.message || "提醒设置保存失败");
+      const saved = res.data || {};
+      setReminderSetting((current) => ({
+        ...current,
+        ...saved,
+        enabled: Boolean(saved.enabled),
+        triggerTime: String(saved.triggerTime || current.triggerTime).slice(0, 5),
+        responsibleUserId: saved.responsibleUserId ? String(saved.responsibleUserId) : "",
+        version: Number(saved.version || 0),
+      }));
+      alert("质量周检提醒设置已保存");
+    } catch (error) {
+      if (error?.response?.status === 409) {
+        setReminderError("提醒设置已被其他管理员更新，请关闭后重新打开再保存");
+      } else {
+        setReminderError(error.message || "提醒设置保存失败");
+      }
+    } finally {
+      setReminderSaving(false);
     }
   };
 
@@ -424,38 +532,44 @@ export default function WeeklyInspectionPanel({
   };
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ padding: 12, borderBottom: `1px solid ${T.borderColor}`, background: T.surface2 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", color: T.textSecondary, fontSize: 12 }}>
-            <strong style={{ color: T.textPrimary }}>质量周检</strong>
-            <span>本周：{summary?.hasInspection ? statusText(summary.status) : "尚未创建"}</span>
+    <div className="quality-weekly-panel" style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <header className="quality-panel-header" style={{ borderColor: T.borderColor, background: T.cardBg }}>
+        <div className="quality-panel-copy">
+          <span className="quality-panel-eyebrow" style={{ color: T.accent }}>项目周检台账</span>
+          <div className="quality-panel-title-line">
+            <h3 style={{ color: T.textPrimary }}>周检记录</h3>
+            {pill(
+              summary?.hasInspection ? `本周 · ${statusText(summary.status)}` : "本周 · 尚未创建",
+              summary?.status === "DRAFT" ? "warning" : summary?.status === "SUBMITTED" ? "success" : "normal",
+            )}
             {summary?.status === "DRAFT" && pill(`${summary.draftItemCount || 0} 个草稿问题`, "warning")}
             {summary?.lateSubmission && pill("往期补录", "warning")}
           </div>
-          <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-            <select value={status} onChange={(event) => { setPageNo(1); setStatus(event.target.value); }} style={{ ...fieldStyle, width: 110 }}>
+          <p style={{ color: T.textMuted }}>每个项目每周一份记录，共享草稿可跨 Web 与小程序继续编辑。</p>
+        </div>
+        <div className="quality-panel-actions">
+            {canManage && <button type="button" disabled={!projectId || reminderLoading} onClick={openReminderSetting} style={buttonStyle("secondary")}>提醒设置</button>}
+            <select aria-label="周检状态" value={status} onChange={(event) => { setPageNo(1); setStatus(event.target.value); }} style={{ ...fieldStyle, width: 110 }}>
               <option value="ALL">全部状态</option>
               {canManage && <option value="DRAFT">共享草稿</option>}
               <option value="SUBMITTED">已提交</option>
             </select>
-            <input value={keyword} onChange={(event) => setKeyword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { setPageNo(1); setAppliedKeyword(keyword.trim()); } }} placeholder="搜索周检编号或结论" style={{ ...fieldStyle, width: 210 }} />
+            <input aria-label="搜索周检记录" value={keyword} onChange={(event) => setKeyword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { setPageNo(1); setAppliedKeyword(keyword.trim()); } }} placeholder="搜索周检编号或结论" style={{ ...fieldStyle, width: 210 }} />
             <button type="button" disabled={loading} onClick={() => { setPageNo(1); setAppliedKeyword(keyword.trim()); }} style={buttonStyle("secondary")}>查询</button>
             <button type="button" disabled={!projectId || !canManage || Boolean(busy)} onClick={() => setWeekPickerOpen(true)} style={buttonStyle()}>创建/继续周检</button>
-          </div>
         </div>
-      </div>
+      </header>
 
-      <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+      <div className="quality-table-region" style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         {loading ? (
-          <StateText T={T}>周检记录加载中...</StateText>
+          <StateText T={T} loading>周检记录加载中...</StateText>
         ) : errorText ? (
           <StateText T={T} danger>{errorText}<br /><button type="button" onClick={() => loadPage()} style={{ ...buttonStyle("secondary"), marginTop: 10 }}>重新加载</button></StateText>
         ) : (
           <>
             <HeaderRow T={T} />
             {inspections.map((inspection) => (
-              <div key={inspection.id} style={{ display: "grid", gridTemplateColumns: "150px 170px 105px 100px 1fr 100px", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: `1px solid ${T.borderColor}`, color: T.textSecondary, fontSize: 12 }}>
+              <div className="quality-table-row" key={inspection.id} style={{ display: "grid", gridTemplateColumns: "150px 170px 105px 100px 1fr 100px", minWidth: 920, alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: `1px solid ${T.borderColor}`, color: T.textSecondary, fontSize: 12 }}>
                 <span title={inspection.inspectionNo}>{inspection.inspectionNo || `草稿 #${inspection.id}`}</span>
                 <span>{inspection.weekStart} 至 {inspection.weekEnd || addLocalDays(inspection.weekStart, 6)}</span>
                 <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -473,7 +587,7 @@ export default function WeeklyInspectionPanel({
       </div>
 
       {total > 0 && (
-        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, padding: "9px 12px", borderTop: `1px solid ${T.borderColor}`, color: T.textMuted, fontSize: 11 }}>
+        <div className="quality-pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, padding: "9px 12px", borderTop: `1px solid ${T.borderColor}`, color: T.textMuted, fontSize: 11 }}>
           <span>共 {total} 条，第 {pageNo}/{totalPages} 页</span>
           <button type="button" disabled={pageNo <= 1 || loading} onClick={() => setPageNo((value) => Math.max(1, value - 1))} style={buttonStyle("secondary")}>上一页</button>
           <button type="button" disabled={pageNo >= totalPages || loading} onClick={() => setPageNo((value) => Math.min(totalPages, value + 1))} style={buttonStyle("secondary")}>下一页</button>
@@ -489,6 +603,48 @@ export default function WeeklyInspectionPanel({
             周次：{mondayOfWeek(selectedWeek)} 至 {addLocalDays(mondayOfWeek(selectedWeek), 6)}。同一项目同一周只保留一份共享草稿或正式周检。
           </div>
           <Actions buttonStyle={buttonStyle} busy={Boolean(busy)} onCancel={() => setWeekPickerOpen(false)} onConfirm={startDraft} confirmText="创建/恢复草稿" />
+        </Overlay>
+      )}
+
+      {reminderOpen && (
+        <Overlay T={T} title="质量周检未提交提醒" onClose={() => { if (!reminderSaving) setReminderOpen(false); }} width={620}>
+          {reminderLoading ? (
+            <StateText T={T} loading>提醒设置加载中...</StateText>
+          ) : !reminderSetting ? (
+            <StateText T={T} danger>{reminderError || "提醒设置加载失败"}<br /><button type="button" onClick={openReminderSetting} style={{ ...buttonStyle("secondary"), marginTop: 10 }}>重新加载</button></StateText>
+          ) : (
+            <>
+              {reminderError && <div style={{ marginBottom: 12, padding: 10, borderRadius: 7, border: `1px solid ${T.danger}`, color: T.danger, background: `${T.danger}12`, fontSize: 12 }}>{reminderError}</div>}
+              <div style={{ padding: 12, borderRadius: 8, background: T.surface2, color: T.textSecondary, fontSize: 12, lineHeight: 1.8 }}>
+                仅保存共享草稿仍视为未提交；每个自然周只提醒一次。首次启用或重新启用后，从下一个符合规则的周次开始生效，不追补历史周次。
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "150px 150px 1fr", gap: 12, marginTop: 14 }}>
+                <label style={labelStyle(T)}>提醒星期
+                  <select value={reminderSetting.dayOfWeek} onChange={(event) => setReminderSetting({ ...reminderSetting, dayOfWeek: Number(event.target.value) })} style={fieldStyle}>
+                    {[1, 2, 3, 4, 5, 6, 7].map((day) => <option key={day} value={day}>星期{["一", "二", "三", "四", "五", "六", "日"][day - 1]}</option>)}
+                  </select>
+                </label>
+                <label style={labelStyle(T)}>提醒时间
+                  <input type="time" value={reminderSetting.triggerTime} onChange={(event) => setReminderSetting({ ...reminderSetting, triggerTime: event.target.value })} style={fieldStyle} />
+                </label>
+                <label style={labelStyle(T)}>主责任人
+                  <select value={reminderSetting.responsibleUserId} onChange={(event) => setReminderSetting({ ...reminderSetting, responsibleUserId: event.target.value })} style={fieldStyle}>
+                    <option value="">请选择具备 quality.manage 的成员</option>
+                    {reminderAssignees.map((member) => <option key={member.userId || member.id} value={member.userId || member.id}>{member.displayName || member.realName || member.username || member.userName}</option>)}
+                  </select>
+                </label>
+              </div>
+              <label style={{ ...labelStyle(T), display: "flex", flexDirection: "row", alignItems: "center", gap: 8, marginTop: 14 }}>
+                <input type="checkbox" checked={reminderSetting.enabled} onChange={(event) => setReminderSetting({ ...reminderSetting, enabled: event.target.checked })} />
+                启用质量周检未提交站内提醒
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 12 }}>
+                <div style={{ padding: 10, borderRadius: 7, background: T.surface2, color: T.textMuted, fontSize: 11 }}>规则生效时间<br /><strong style={{ color: T.textPrimary }}>{formatTime(reminderSetting.reminderEffectiveTime)}</strong></div>
+                <div style={{ padding: 10, borderRadius: 7, background: T.surface2, color: T.textMuted, fontSize: 11 }}>下一次提醒<br /><strong style={{ color: T.textPrimary }}>{formatTime(reminderSetting.nextReminderTime)}</strong></div>
+              </div>
+              <Actions buttonStyle={buttonStyle} busy={reminderSaving} onCancel={() => setReminderOpen(false)} onConfirm={saveReminderSetting} confirmText={reminderSaving ? "保存中..." : "保存提醒设置"} />
+            </>
+          )}
         </Overlay>
       )}
 
@@ -551,7 +707,7 @@ export default function WeeklyInspectionPanel({
 }
 
 function HeaderRow({ T }) {
-  return <div style={{ display: "grid", gridTemplateColumns: "150px 170px 105px 100px 1fr 100px", gap: 10, padding: "10px 14px", position: "sticky", top: 0, zIndex: 1, background: T.surface2, borderBottom: `1px solid ${T.borderColor}`, color: T.textMuted, fontSize: 11 }}><span>周检编号</span><span>周次</span><span>状态</span><span>问题数</span><span>最近操作</span><span>操作</span></div>;
+  return <div className="quality-table-head" style={{ display: "grid", gridTemplateColumns: "150px 170px 105px 100px 1fr 100px", minWidth: 920, gap: 10, padding: "10px 14px", position: "sticky", top: 0, zIndex: 1, background: T.surface2, borderBottom: `1px solid ${T.borderColor}`, color: T.textMuted, fontSize: 11 }}><span>周检编号</span><span>周次</span><span>状态</span><span>问题数</span><span>最近操作</span><span>操作</span></div>;
 }
 
 function IssueEditor({ T, index, item, members, fieldStyle, buttonStyle, onChange, onCopy, onRemove, onSelectFiles }) {
@@ -669,8 +825,24 @@ function Actions({ buttonStyle, busy, onCancel, onConfirm, confirmText }) {
   return <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}><button type="button" disabled={busy} onClick={onCancel} style={buttonStyle("secondary")}>取消</button><button type="button" disabled={busy} onClick={onConfirm} style={buttonStyle()}>{busy ? "处理中..." : confirmText}</button></div>;
 }
 
-function StateText({ T, danger = false, children }) {
-  return <div style={{ padding: 36, textAlign: "center", color: danger ? T.danger : T.textMuted, fontSize: 12 }}>{children}</div>;
+function StateText({ T, danger = false, loading = false, children }) {
+  if (loading) {
+    return (
+      <div className="quality-state quality-state--loading" role="status" style={{ color: T.textMuted }}>
+        <span className="quality-state-spinner" style={{ borderColor: `${T.accent}33`, borderTopColor: T.accent }} />
+        {children}
+      </div>
+    );
+  }
+  return (
+    <div className="quality-state quality-state--empty" role={danger ? "alert" : "status"} style={{ color: danger ? T.danger : T.textMuted }}>
+      <span className="quality-state-symbol" aria-hidden="true" style={{ color: danger ? T.danger : T.accent, background: danger ? `${T.danger}12` : T.activeItemBg }}>
+        {danger ? "!" : "✓"}
+      </span>
+      <strong style={{ color: danger ? T.danger : T.textPrimary }}>{danger ? "内容加载失败" : children}</strong>
+      {danger ? <span>{children}</span> : <span>创建周检或调整筛选条件后，记录会显示在这里。</span>}
+    </div>
+  );
 }
 
 function labelStyle(T) {

@@ -10,4 +10,13 @@ import org.apache.ibatis.annotations.Select;
 public interface GeneralInspectionExportJobMapper extends BaseMapper<GeneralInspectionExportJob> {
     @Select("SELECT * FROM general_inspection_export_job WHERE id=#{id} FOR UPDATE")
     GeneralInspectionExportJob selectByIdForUpdate(@Param("id") Long id);
+
+    @Select("""
+            SELECT * FROM general_inspection_export_job
+            WHERE export_type = 'EDGE' AND status = 'PENDING'
+            ORDER BY create_time ASC, id ASC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+            """)
+    GeneralInspectionExportJob selectNextPendingEdgeForUpdate();
 }

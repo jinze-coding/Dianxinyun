@@ -37,18 +37,32 @@ export const restoreProjectDocument = (id) => post(`/project-documents/${id}/res
 export const purgeProjectDocument = (id) => del(`/project-documents/${id}/purge`);
 export const batchProjectDocuments = (data) => post('/project-documents/batch', data);
 
-export const previewProjectDocument = async (id, versionId) => ensureFileBlob(
-  await apiClient.get(`/project-documents/${id}/preview`, {
-    params: versionId ? { versionId } : undefined,
-    responseType: 'blob',
-  }),
-  '资料预览失败',
-);
+async function documentFileRequest(id, action, versionId, acknowledgeSuperseded, distributionBatchId, fallback) {
+  try {
+    return ensureFileBlob(await apiClient.get(`/project-documents/${id}/${action}`, {
+      params: {
+        ...(versionId ? { versionId } : {}),
+        ...(acknowledgeSuperseded ? { acknowledgeSuperseded: true } : {}),
+        ...(distributionBatchId ? { distributionBatchId } : {}),
+      },
+      responseType: 'blob',
+    }), fallback);
+  } catch (error) {
+    const payload = error?.response?.data;
+    if (payload instanceof Blob && String(payload.type || '').toLowerCase().includes('json')) {
+      try {
+        const result = JSON.parse(await payload.text());
+        throw new Error(result?.message || fallback);
+      } catch (parseError) {
+        if (!(parseError instanceof SyntaxError)) throw parseError;
+      }
+    }
+    throw error;
+  }
+}
 
-export const downloadProjectDocument = async (id, versionId) => ensureFileBlob(
-  await apiClient.get(`/project-documents/${id}/download`, {
-    params: versionId ? { versionId } : undefined,
-    responseType: 'blob',
-  }),
-  '资料下载失败',
-);
+export const previewProjectDocument = (id, versionId, acknowledgeSuperseded = false, distributionBatchId) =>
+  documentFileRequest(id, 'preview', versionId, acknowledgeSuperseded, distributionBatchId, '资料预览失败');
+
+export const downloadProjectDocument = (id, versionId, acknowledgeSuperseded = false, distributionBatchId) =>
+  documentFileRequest(id, 'download', versionId, acknowledgeSuperseded, distributionBatchId, '资料下载失败');

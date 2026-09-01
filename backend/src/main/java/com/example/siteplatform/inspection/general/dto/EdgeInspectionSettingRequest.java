@@ -24,5 +24,6 @@ public class EdgeInspectionSettingRequest {
     @NotNull private Long reviewerId;
     @NotNull @Min(0) @Max(365) private Integer rectificationDays;
     @NotNull private Boolean enabled;
+    private Boolean submissionReminderEnabled;
     @NotNull private Integer expectedVersion;
 }

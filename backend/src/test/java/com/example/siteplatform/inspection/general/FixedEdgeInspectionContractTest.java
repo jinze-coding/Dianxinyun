@@ -82,20 +82,22 @@ class FixedEdgeInspectionContractTest {
         assertThat(controller).contains("@RequestMapping(\"/api/v1/edge-inspections\")");
         assertThat(controller).doesNotContain(
                 "/api/v1/general-inspections",
+                "/feature",
                 "/templates",
                 "/point-categories",
-                "/scan",
-                "/exports");
+                "/scan");
+        assertThat(controller).contains("/export-jobs");
+        assertThat(controller).contains("/projects/{projectId}/workspace-summary");
         assertThat(PUBLIC_CONTROLLER).doesNotExist();
     }
 
     @Test
-    void retiredExportAndReminderWorkersAreNotScheduled() throws IOException {
+    void edgeExportIsScheduledButExternalReminderWorkerRemainsRetired() throws IOException {
         String export = Files.readString(Path.of(
                 "src/main/java/com/example/siteplatform/inspection/general/service/GeneralInspectionExportService.java"));
         String reminder = Files.readString(Path.of(
                 "src/main/java/com/example/siteplatform/inspection/general/service/GeneralInspectionReminderEventScheduler.java"));
-        assertThat(export).doesNotContain("@Scheduled");
+        assertThat(export).contains("@Scheduled", "EDGE_INSPECTION_EXPORT", "selectNextPendingEdgeForUpdate");
         assertThat(reminder).doesNotContain("@Scheduled");
     }
 }

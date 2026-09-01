@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "VITE_API_BASE_URL=/api/v1 vite build",
+    "build:transition": "VITE_API_BASE_URL=/api/v1 VITE_RELEASE_VARIANT=transition VITE_WEB_RELEASE_MARKER=dianxinyun-web-transition-meeting-disabled VITE_SITE_ACCESS_MEETING_CREATION_ENABLED=false vite build",
+    "build:final": "VITE_API_BASE_URL=/api/v1 VITE_RELEASE_VARIANT=final VITE_WEB_RELEASE_MARKER=dianxinyun-web-final-meeting-enabled VITE_SITE_ACCESS_MEETING_CREATION_ENABLED=true vite build",
     "preview": "vite preview",
     "lint": "eslint src",
     "typecheck": "tsc -p jsconfig.json",

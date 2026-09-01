@@ -10,6 +10,7 @@ import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
 
@@ -27,6 +28,10 @@ public class GeneralInspectionPlanConfig {
     @Min(0) @Max(365) private Integer rectificationDays;
     private Long reviewerId;
     private List<Long> backupReviewerIds;
+    /** Internal station reminder switch; absent in historical snapshots means disabled. */
+    private Boolean submissionReminderEnabled;
+    /** The switch activation time. Tasks due at or before this boundary are never backfilled. */
+    private LocalDateTime reminderEffectiveTime;
     @Valid @NotEmpty @Size(max = 12) private List<Slot> slots;
     @Valid @NotEmpty @Size(max = 500) private List<PointAssignment> points;
 

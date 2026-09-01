@@ -17,8 +17,13 @@ public class GeneralInspectionExportJob {
     private String requestedByName;
     private LocalDate startDate;
     private LocalDate endDate;
+    private String exportType;
     private String status;
     private Integer progress;
+    private Integer pointCount;
+    private Integer taskCount;
+    private Integer photoCount;
+    private Long photoBytes;
     private Long fileResourceId;
     private String errorMessage;
     private LocalDateTime expiresTime;

@@ -19,6 +19,7 @@ public class QualityIssue {
     private Long projectId;
     private Long weeklyInspectionId;
     private Integer inspectionItemOrder;
+    private LocalDate recordDate;
     private String issueNo;
     private String requestKey;
     private String title;

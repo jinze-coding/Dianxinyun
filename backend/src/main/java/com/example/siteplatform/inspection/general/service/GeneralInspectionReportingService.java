@@ -35,7 +35,6 @@ public class GeneralInspectionReportingService {
     private final GeneralInspectionTaskItemMapper taskItemMapper;
     private final GeneralInspectionRectificationMapper rectificationMapper;
     private final GeneralInspectionPointMapper pointMapper;
-    private final GeneralInspectionProjectSettingMapper settingMapper;
     private final GeneralInspectionTemplateVersionMapper templateVersionMapper;
     private final ProjectInfoMapper projectMapper;
     private final ElectricBoxMapper electricBoxMapper;
@@ -270,6 +269,9 @@ public class GeneralInspectionReportingService {
         String personName = StringUtils.hasText(task.getAssigneeName()) ? task.getAssigneeName() : "待改派";
         return List.of(
                 new DimensionRef("TYPE", "EDGE_INSPECTION", "临边巡检"),
+                new DimensionRef("POINT_TYPE", StringUtils.hasText(task.getPointTypeCode())
+                        ? task.getPointTypeCode() : "UNKNOWN",
+                        StringUtils.hasText(task.getPointTypeName()) ? task.getPointTypeName() : "未识别类型"),
                 new DimensionRef("POINT", "G:" + task.getPointId(), task.getPointCode() + " · " + task.getPointName()),
                 new DimensionRef("PERSON", personKey, personName),
                 new DimensionRef("DATE", task.getOccurrenceDate().toString(), task.getOccurrenceDate().toString()));
@@ -359,9 +361,7 @@ public class GeneralInspectionReportingService {
                 .eq(GeneralInspectionPoint::getPublicCode, code)
                 .eq(GeneralInspectionPoint::getDeleted, 0).last("LIMIT 1"));
         if (point == null) throw BusinessException.notFound("巡检点位码不存在或已换码");
-        GeneralInspectionProjectSetting setting = settingMapper.selectById(point.getProjectId());
-        if (setting == null || !Integer.valueOf(1).equals(setting.getEnabled())
-                || !"ACTIVE".equals(point.getStatus())
+        if (!"ACTIVE".equals(point.getStatus())
                 || !Integer.valueOf(1).equals(point.getPublicAccessEnabled())) {
             throw BusinessException.forbidden("该点位未开放匿名巡检月表");
         }

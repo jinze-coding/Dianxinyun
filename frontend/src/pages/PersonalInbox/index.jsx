@@ -29,12 +29,17 @@ const TODO_TYPES = [
   ['REVIEW', '巡检审核'],
   ['RECTIFICATION', '整改任务'],
   ['RECHECK', '整改复查'],
+  ['DOCUMENT_RECEIPT', '图纸签收'],
 ];
 
 const BUSINESS_LABELS = {
   SEAL_APPLICATION: '用印申请',
   INSPECTION_RECORD: '巡检记录',
+  ELECTRIC_BOX_INSPECTION: '电箱日检提醒',
+  EDGE_INSPECTION_TASK: '临边巡检提醒',
   QUALITY_ISSUE: '质量整改',
+  QUALITY_WEEKLY_INSPECTION: '质量周检提醒',
+  DOCUMENT_DISTRIBUTION: '图纸签收',
 };
 
 function Badge({ children, tone = 'normal' }) {
@@ -144,10 +149,12 @@ export default function PersonalInboxPage({ projectId, projectList = [], theme: 
         setCcItems(list);
         setCcTotal(Number(data?.total ?? list.length));
       } else {
+        const groupFilter = businessType.startsWith('GROUP:') ? businessType.slice(6) : '';
         const response = await getPersonalNotifications({
           projectId,
           readStatus: notificationReadStatus || undefined,
-          businessType: businessType || undefined,
+          businessGroup: groupFilter || undefined,
+          businessType: groupFilter ? undefined : businessType || undefined,
           pageNo: notificationPage,
           pageSize,
         });
@@ -237,7 +244,7 @@ export default function PersonalInboxPage({ projectId, projectList = [], theme: 
           <div className="primary"><span className="inbox-summary-icon">总</span><div><span>待办总数</span><small>全部待处理事项</small></div><strong>{summary.total}</strong></div>
           <div className="seal"><span className="inbox-summary-icon">印</span><div><span>用印审批</span><small>等待你的审批</small></div><strong>{Number(summary.byTaskType?.SEAL_APPROVAL ?? summary.byBusinessType?.SEAL_APPLICATION ?? 0)}</strong></div>
           <div className="inspection"><span className="inbox-summary-icon">巡</span><div><span>巡检任务</span><small>执行与审核</small></div><strong>{Number(summary.byTaskType?.INSPECTION || 0) + Number(summary.byTaskType?.REVIEW || 0)}</strong></div>
-          <div className="rectification"><span className="inbox-summary-icon">整</span><div><span>整改任务</span><small>整改与复查</small></div><strong>{Number(summary.byTaskType?.RECTIFICATION || 0) + Number(summary.byTaskType?.RECHECK || 0)}</strong></div>
+          <div className="rectification"><span className="inbox-summary-icon">图</span><div><span>图纸签收</span><small>电子与纸质领取</small></div><strong>{Number(summary.byTaskType?.DOCUMENT_RECEIPT ?? summary.byBusinessType?.DOCUMENT_DISTRIBUTION ?? 0)}</strong></div>
         </section>
 
         <section className="inbox-workbench">
@@ -279,7 +286,7 @@ export default function PersonalInboxPage({ projectId, projectList = [], theme: 
           </div> : <div className="inbox-tab-panel">
             <section className="inbox-toolbar">
               <div className="inbox-filter-group"><label htmlFor="notification-status-filter">阅读状态</label><select id="notification-status-filter" value={notificationReadStatus} onChange={(event) => { setNotificationReadStatus(event.target.value); setNotificationPage(1); }}><option value="">全部状态</option><option value="UNREAD">未读</option><option value="READ">已读</option></select></div>
-              <div className="inbox-filter-group"><label htmlFor="notification-business-filter">业务类型</label><select id="notification-business-filter" value={businessType} onChange={(event) => { setBusinessType(event.target.value); setNotificationPage(1); }}><option value="">全部业务</option><option value="SEAL_APPLICATION">用印申请</option><option value="INSPECTION_RECORD">巡检记录</option><option value="QUALITY_ISSUE">质量整改</option></select></div>
+              <div className="inbox-filter-group"><label htmlFor="notification-business-filter">业务分类</label><select id="notification-business-filter" value={businessType} onChange={(event) => { setBusinessType(event.target.value); setNotificationPage(1); }}><option value="">全部业务</option><option value="SEAL_APPLICATION">用印申请</option><option value="GROUP:INSPECTION">巡检管理</option><option value="GROUP:QUALITY">质量管理</option><option value="DOCUMENT_DISTRIBUTION">图纸签收</option></select></div>
               <span className="inbox-result-count">共 {notificationTotal} 条消息</span><button type="button" className="inbox-read-all" onClick={markAllRead} disabled={busy || !notifications.length}>全部标为已读</button>
             </section>
             <section className={`inbox-list${!loading && !notifications.length ? ' is-empty' : ''}${loading ? ' is-loading' : ''}`}>

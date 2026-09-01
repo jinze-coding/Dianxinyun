@@ -14,6 +14,28 @@ import java.util.List;
 @Mapper
 public interface QualityIssueMapper extends BaseMapper<QualityIssue> {
 
+    @Select("""
+            SELECT id, project_id, issue_no, title, location, severity, status,
+                   assignee_id, deadline, create_time
+            FROM quality_issue
+            WHERE project_id = #{projectId}
+              AND status = 'PENDING'
+              AND assignee_id = #{assigneeId}
+              AND deleted = 0
+            """)
+    List<QualityIssue> selectRectificationTodos(@Param("projectId") Long projectId,
+                                                @Param("assigneeId") Long assigneeId);
+
+    @Select("""
+            SELECT id, project_id, issue_no, title, location, severity, status,
+                   assignee_id, deadline, create_time
+            FROM quality_issue
+            WHERE project_id = #{projectId}
+              AND status = 'RECHECK'
+              AND deleted = 0
+            """)
+    List<QualityIssue> selectRecheckTodos(@Param("projectId") Long projectId);
+
     @Update("""
             UPDATE quality_issue
             SET rectification_description = #{description},

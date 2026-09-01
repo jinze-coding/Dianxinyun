@@ -26,6 +26,7 @@ public final class InspectionPermissionCodes {
     public static final String EDGE_INSPECTION_SUBMIT = "EDGE_INSPECTION_SUBMIT";
     public static final String EDGE_INSPECTION_RECTIFY = "EDGE_INSPECTION_RECTIFY";
     public static final String EDGE_INSPECTION_REVIEW = "EDGE_INSPECTION_REVIEW";
+    public static final String EDGE_INSPECTION_EXPORT = "EDGE_INSPECTION_EXPORT";
     public static final String INSPECTION_REVIEW = "INSPECTION_REVIEW";
     public static final String INSPECTION_RECORD_VIEW = "INSPECTION_RECORD_VIEW";
     public static final String RECTIFICATION_VIEW = "RECTIFICATION_VIEW";
@@ -45,6 +46,7 @@ public final class InspectionPermissionCodes {
             EDGE_INSPECTION_SUBMIT,
             EDGE_INSPECTION_RECTIFY,
             EDGE_INSPECTION_REVIEW,
+            EDGE_INSPECTION_EXPORT,
             INSPECTION_REVIEW,
             INSPECTION_RECORD_VIEW,
             RECTIFICATION_VIEW,
@@ -65,6 +67,7 @@ public final class InspectionPermissionCodes {
             EDGE_INSPECTION_SUBMIT,
             EDGE_INSPECTION_RECTIFY,
             EDGE_INSPECTION_REVIEW,
+            EDGE_INSPECTION_EXPORT,
             INSPECTION_RECORD_VIEW,
             SUMMARY_VIEW,
             SUMMARY_EXPORT,
@@ -79,6 +82,7 @@ public final class InspectionPermissionCodes {
             EDGE_INSPECTION_VIEW,
             EDGE_INSPECTION_MANAGE,
             EDGE_INSPECTION_REVIEW,
+            EDGE_INSPECTION_EXPORT,
             INSPECTION_RECORD_VIEW,
             SUMMARY_VIEW,
             SUMMARY_EXPORT

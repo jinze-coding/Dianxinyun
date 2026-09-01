@@ -55,7 +55,6 @@ class GeneralInspectionRectificationSheetServiceTest {
                 mock(GeneralInspectionTemplateVersionMapper.class),
                 rectificationMapper,
                 actionLogMapper,
-                mock(GeneralInspectionProjectSettingMapper.class),
                 userMapper,
                 fileResourceService,
                 notificationService,

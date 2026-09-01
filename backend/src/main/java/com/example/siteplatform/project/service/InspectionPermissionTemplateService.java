@@ -59,29 +59,26 @@ public class InspectionPermissionTemplateService {
 
     public List<InspectionPermissionCatalogGroupVO> permissionCatalog() {
         return List.of(
-                new InspectionPermissionCatalogGroupVO("BOX", "电箱", List.of(
-                        item(InspectionPermissionCodes.BOX_VIEW, "查看台账", "查看电箱台账、详情和二维码信息"),
-                        item(InspectionPermissionCodes.BOX_MANAGE, "管理台账", "新增、编辑、停用、拆除和导入电箱"),
-                        item(InspectionPermissionCodes.BOX_QR_MANAGE, "二维码/贴纸管理", "生成、补打、换绑二维码和查看二维码日志"),
-                        item(InspectionPermissionCodes.BOX_PUBLIC_ACCESS, "外部访问启停", "启用或停用单个电箱外部公开只读访问")
-                )),
-                new InspectionPermissionCatalogGroupVO("INSPECTION", "巡检", List.of(
-                        item(InspectionPermissionCodes.INSPECTION_DAILY_SUBMIT, "日检提交", "提交当前项目任意纳入巡检范围电箱的日检记录"),
-                        item(InspectionPermissionCodes.INSPECTION_RECORD_VIEW, "检查记录查看", "查看项目检查记录明细")
+                new InspectionPermissionCatalogGroupVO("ELECTRIC_BOX_INSPECTION", "电箱巡检", List.of(
+                        item(InspectionPermissionCodes.BOX_VIEW, "查看电箱台账", "查看电箱台账、详情和二维码信息"),
+                        item(InspectionPermissionCodes.BOX_MANAGE, "管理电箱台账", "新增、编辑、停用、拆除和导入电箱"),
+                        item(InspectionPermissionCodes.BOX_QR_MANAGE, "管理电箱二维码/贴纸", "生成、补打、换绑电箱二维码和查看二维码日志"),
+                        item(InspectionPermissionCodes.BOX_PUBLIC_ACCESS, "启停电箱外部访问", "启用或停用单个电箱外部公开只读访问"),
+                        item(InspectionPermissionCodes.INSPECTION_DAILY_SUBMIT, "提交电箱日检", "提交当前项目任意纳入巡检范围电箱的日检记录"),
+                        item(InspectionPermissionCodes.INSPECTION_RECORD_VIEW, "查看电箱巡检记录", "查看项目电箱巡检记录明细"),
+                        item(InspectionPermissionCodes.SUMMARY_VIEW, "查看电箱巡检统计", "查看项目或单箱月度巡检统计"),
+                        item(InspectionPermissionCodes.SUMMARY_EXPORT, "导出电箱巡检统计", "导出电箱月度巡检记录 Excel")
                 )),
                 new InspectionPermissionCatalogGroupVO("EDGE_INSPECTION", "临边巡检", List.of(
                         item(InspectionPermissionCodes.EDGE_INSPECTION_VIEW, "查看临边巡检", "查看项目临边点位、任务、记录和整改"),
                         item(InspectionPermissionCodes.EDGE_INSPECTION_MANAGE, "管理临边巡检", "维护临边点位和周期设置，取消及改派任务"),
                         item(InspectionPermissionCodes.EDGE_INSPECTION_SUBMIT, "执行临边巡检", "执行分配给自己的临边巡检任务"),
                         item(InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY, "临边整改", "处理分配给自己的临边巡检整改单"),
-                        item(InspectionPermissionCodes.EDGE_INSPECTION_REVIEW, "临边复查", "复查明确分配给自己的临边巡检整改单")
+                        item(InspectionPermissionCodes.EDGE_INSPECTION_REVIEW, "临边复查", "复查明确分配给自己的临边巡检整改单"),
+                        item(InspectionPermissionCodes.EDGE_INSPECTION_EXPORT, "导出临边巡检含图报表", "导出临边巡检含图 Excel")
                 )),
-                new InspectionPermissionCatalogGroupVO("SUMMARY", "汇总", List.of(
-                        item(InspectionPermissionCodes.SUMMARY_VIEW, "巡检汇总查看", "查看项目或单箱月度巡检汇总"),
-                        item(InspectionPermissionCodes.SUMMARY_EXPORT, "Excel 导出", "导出月度巡检记录 Excel")
-                )),
-                new InspectionPermissionCatalogGroupVO("PERMISSION", "权限", List.of(
-                        item(InspectionPermissionCodes.PERMISSION_MANAGE, "项目用户授权", "加入、移除项目用户并分配权限模板")
+                new InspectionPermissionCatalogGroupVO("PERMISSION", "巡检权限管理", List.of(
+                        item(InspectionPermissionCodes.PERMISSION_MANAGE, "管理巡检项目用户授权", "加入、移除项目用户并分配巡检权限模板")
                 ))
         );
     }

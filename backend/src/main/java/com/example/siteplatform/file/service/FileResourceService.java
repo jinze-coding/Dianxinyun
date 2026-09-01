@@ -5,10 +5,8 @@ import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.file.entity.FileResource;
 import com.example.siteplatform.file.mapper.FileResourceMapper;
-import com.example.siteplatform.inspection.general.entity.GeneralInspectionProjectSetting;
 import com.example.siteplatform.inspection.general.entity.GeneralInspectionRectification;
 import com.example.siteplatform.inspection.general.entity.GeneralInspectionTask;
-import com.example.siteplatform.inspection.general.mapper.GeneralInspectionProjectSettingMapper;
 import com.example.siteplatform.inspection.general.mapper.GeneralInspectionRectificationMapper;
 import com.example.siteplatform.inspection.general.mapper.GeneralInspectionTaskMapper;
 import com.example.siteplatform.project.entity.ProjectInfo;
@@ -40,10 +38,14 @@ public class FileResourceService {
     private static final String BUSINESS_QUALITY_ISSUE = "QUALITY_ISSUE";
     private static final String BUSINESS_QUALITY_RECTIFICATION = "QUALITY_RECTIFICATION";
     private static final String BUSINESS_QUALITY_REVIEW = "QUALITY_REVIEW";
+    private static final String BUSINESS_QUALITY_ISSUE_EXPORT = "QUALITY_ISSUE_EXPORT";
+    private static final String BUSINESS_EDGE_INSPECTION_EXPORT = "EDGE_INSPECTION_EXPORT";
     private static final String BUSINESS_PROJECT_PROFILE_PENDING = "PROJECT_PROFILE_IMAGE_PENDING";
     private static final String BUSINESS_PROJECT_PROFILE = "PROJECT_PROFILE_IMAGE";
     private static final String BUSINESS_PROJECT_ROUTE_PENDING = "PROJECT_ROUTE_IMAGE_PENDING";
     private static final String BUSINESS_PROJECT_ROUTE = "PROJECT_ROUTE_IMAGE";
+    private static final String BUSINESS_DOCUMENT_INCOMING_PENDING = "DOCUMENT_INCOMING_PENDING";
+    private static final String BUSINESS_DOCUMENT_RECEIPT_SIGNATURE = "DOCUMENT_RECEIPT_SIGNATURE";
     private static final Set<String> GENERAL_INSPECTION_STAGING_TYPES = Set.of(
             "EDGE_INSPECTION_TASK_PENDING",
             "EDGE_INSPECTION_RECTIFICATION_PENDING"
@@ -54,7 +56,8 @@ public class FileResourceService {
             "INSPECTION_CUSTOM_RECTIFICATION",
             "INSPECTION_CUSTOM_EXPORT",
             "EDGE_INSPECTION_TASK",
-            "EDGE_INSPECTION_RECTIFICATION"
+            "EDGE_INSPECTION_RECTIFICATION",
+            BUSINESS_EDGE_INSPECTION_EXPORT
     );
     private static final Set<String> QUALITY_STAGING_TYPES = Set.of(
             BUSINESS_QUALITY_PENDING,
@@ -75,23 +78,18 @@ public class FileResourceService {
             BUSINESS_QUALITY_ISSUE,
             BUSINESS_QUALITY_RECTIFICATION,
             BUSINESS_QUALITY_REVIEW,
-            BUSINESS_QUALITY_WEEKLY_INSPECTION
+            BUSINESS_QUALITY_WEEKLY_INSPECTION,
+            BUSINESS_QUALITY_ISSUE_EXPORT
     );
 
     private final FileResourceMapper fileMapper;
     private final ProjectPermissionService permissionService;
-    private GeneralInspectionProjectSettingMapper generalInspectionSettingMapper;
     private GeneralInspectionTaskMapper generalInspectionTaskMapper;
     private GeneralInspectionRectificationMapper generalInspectionRectificationMapper;
 
     public FileResourceService(FileResourceMapper fileMapper, ProjectPermissionService permissionService) {
         this.fileMapper = fileMapper;
         this.permissionService = permissionService;
-    }
-
-    @Autowired(required = false)
-    public void setGeneralInspectionSettingMapper(GeneralInspectionProjectSettingMapper mapper) {
-        this.generalInspectionSettingMapper = mapper;
     }
 
     @Autowired(required = false)
@@ -121,10 +119,6 @@ public class FileResourceService {
             return;
         }
         String businessType = normalizeBusinessType(file.getBusinessType());
-        if (GENERAL_INSPECTION_STAGING_TYPES.contains(businessType)
-                || GENERAL_INSPECTION_FINAL_TYPES.contains(businessType)) {
-            requireGeneralInspectionEnabled(file.getProjectId());
-        }
         if (BUSINESS_PROJECT_PROFILE_PENDING.equals(businessType)
                 && !permissionService.isPlatformAdmin(currentUser.getId())
                 && !Objects.equals(file.getUploaderId(), currentUser.getId())) {
@@ -141,7 +135,9 @@ public class FileResourceService {
             throw BusinessException.forbidden("无其他人员未保存周检照片访问权限");
         }
         permissionService.checkProjectPermission(currentUser.getId(), file.getProjectId());
-        if (businessType.startsWith("EDGE_INSPECTION_")) {
+        if (BUSINESS_EDGE_INSPECTION_EXPORT.equals(businessType)) {
+            throw BusinessException.forbidden("临边巡检报表请通过导出任务接口下载");
+        } else if (businessType.startsWith("EDGE_INSPECTION_")) {
             requireEdgeFileRead(currentUser, file, businessType);
         } else {
             requireBusinessRead(currentUser, file.getProjectId(), file.getBusinessType());
@@ -235,6 +231,11 @@ public class FileResourceService {
             }
         } else if (normalized.startsWith("INSPECTION_")) {
             permissionService.requireSystemPermission(currentUser.getId(), projectId, SystemPermissionCodes.INSPECTION_VIEW);
+        } else if (BUSINESS_DOCUMENT_INCOMING_PENDING.equals(normalized)) {
+            permissionService.requireSystemPermission(currentUser.getId(), projectId, SystemPermissionCodes.DOCUMENT_RECEIVE);
+        } else if (BUSINESS_DOCUMENT_RECEIPT_SIGNATURE.equals(normalized)) {
+            permissionService.requireSystemPermission(currentUser.getId(), projectId,
+                    SystemPermissionCodes.DOCUMENT_CIRCULATION_VIEW);
         }
     }
 
@@ -298,7 +299,6 @@ public class FileResourceService {
                 throw new BusinessException("不支持的临边巡检附件类型");
             }
             if (businessId != null) throw new BusinessException("临边巡检附件上传时不能直接指定业务记录");
-            requireGeneralInspectionEnabled(projectId);
             requireEdgeInspectionPermission(currentUser.getId(), projectId,
                     normalized.contains("RECTIFICATION")
                             ? InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY
@@ -318,7 +318,6 @@ public class FileResourceService {
                 throw new BusinessException("巡检附件上传时不能直接指定业务记录");
             }
             boolean customStaging = GENERAL_INSPECTION_STAGING_TYPES.contains(normalized);
-            if (customStaging) requireGeneralInspectionEnabled(projectId);
             if (!customStaging) {
                 permissionService.requireSystemPermission(currentUser.getId(), projectId,
                         SystemPermissionCodes.INSPECTION_VIEW);
@@ -410,7 +409,8 @@ public class FileResourceService {
                 || GENERAL_INSPECTION_FINAL_TYPES.contains(businessType)
                 || businessType.equals("QUALITY_ISSUE")
                 || businessType.equals("QUALITY_RECTIFICATION")
-                || businessType.equals("QUALITY_REVIEW");
+                || businessType.equals("QUALITY_REVIEW")
+                || businessType.equals(BUSINESS_DOCUMENT_RECEIPT_SIGNATURE);
     }
 
     private void requireEdgeInspectionPermission(Long userId, Long projectId, String permissionCode,
@@ -421,7 +421,7 @@ public class FileResourceService {
     }
 
     /**
-     * 临边巡检照片除项目和功能开关外还按业务记录授权。整改人、复查人即使没有
+     * 临边巡检照片除项目范围外还按业务记录授权。整改人、复查人即使没有
      * EDGE_INSPECTION_VIEW，也必须能看到自己整改单中的现场证据和整改照片。
      */
     private void requireEdgeFileRead(SysUser currentUser, FileResource file, String businessType) {
@@ -562,11 +562,4 @@ public class FileResourceService {
         return businessType == null ? "" : businessType.trim().toUpperCase(Locale.ROOT);
     }
 
-    private void requireGeneralInspectionEnabled(Long projectId) {
-        if (generalInspectionSettingMapper == null) return;
-        GeneralInspectionProjectSetting setting = generalInspectionSettingMapper.selectById(projectId);
-        if (setting == null || !Integer.valueOf(1).equals(setting.getEnabled())) {
-            throw BusinessException.forbidden("当前项目尚未启用临边巡检");
-        }
-    }
 }

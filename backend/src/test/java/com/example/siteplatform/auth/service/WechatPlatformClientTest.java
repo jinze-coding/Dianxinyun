@@ -201,6 +201,30 @@ class WechatPlatformClientTest {
     }
 
     @Test
+    void officialLoginRejectsBlankOpenidWithoutEchoingSensitiveResponseOrCode() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles("local");
+        RedisTemplate<String, Object> redis = redisTemplate();
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        WechatPlatformClient client = officialClient(environment, redis, builder.build());
+        String sensitiveCode = "one-time-sensitive-code";
+        server.expect(once(), requestTo("https://api.weixin.qq.com/sns/jscode2session"
+                        + "?appid=wx-test&secret=secret-test&js_code=" + sensitiveCode
+                        + "&grant_type=authorization_code"))
+                .andRespond(withSuccess("{\"openid\":\"   \"}", MediaType.APPLICATION_JSON));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> client.login(sensitiveCode));
+
+        assertEquals("微信登录未返回有效身份", exception.getMessage());
+        assertFalse(exception.getMessage().contains(sensitiveCode));
+        assertFalse(exception.getMessage().contains("secret-test"));
+        assertNull(exception.getCause());
+        server.verify();
+    }
+
+    @Test
     void officialWechatErrorDoesNotEchoUntrustedErrorMessage() {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles("local");

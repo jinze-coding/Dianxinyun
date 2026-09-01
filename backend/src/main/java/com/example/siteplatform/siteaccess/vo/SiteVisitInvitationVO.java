@@ -12,7 +12,10 @@ public class SiteVisitInvitationVO {
     private Long projectId;
     private String projectName;
     private String inviteNo;
+    private String inviteType;
     private String status;
+    private Long registrationGroupCount;
+    private Long registeredPersonCount;
     private LocalDateTime visitStartTime;
     private LocalDateTime visitEndTime;
     private String purpose;

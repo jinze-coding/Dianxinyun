@@ -11,14 +11,19 @@ import com.example.siteplatform.siteaccess.dto.PublicGuardVisitSubmitRequest;
 import com.example.siteplatform.siteaccess.dto.PublicGuardProjectProfileImageRequest;
 import com.example.siteplatform.siteaccess.dto.PublicGuardProjectProfileRequest;
 import com.example.siteplatform.siteaccess.dto.PublicGuardVisitorSessionRequest;
+import com.example.siteplatform.siteaccess.dto.PublicMeetingVisitorSessionRequest;
+import com.example.siteplatform.siteaccess.dto.PublicMeetingVisitSubmitRequest;
 import com.example.siteplatform.siteaccess.dto.PublicSiteVisitResolveRequest;
 import com.example.siteplatform.siteaccess.dto.PublicSiteVisitSubmitRequest;
 import com.example.siteplatform.siteaccess.dto.PublicVisitorProfileRequest;
 import com.example.siteplatform.siteaccess.dto.PublicVisitorSessionCreateRequest;
 import com.example.siteplatform.siteaccess.service.SiteAccessService;
 import com.example.siteplatform.siteaccess.service.GuardVisitService;
+import com.example.siteplatform.siteaccess.service.MeetingVisitService;
 import com.example.siteplatform.siteaccess.vo.PublicGuardVisitPassVO;
 import com.example.siteplatform.siteaccess.vo.PublicGuardVisitorSessionVO;
+import com.example.siteplatform.siteaccess.vo.PublicMeetingVisitorSessionVO;
+import com.example.siteplatform.siteaccess.vo.PublicMeetingVisitPassVO;
 import com.example.siteplatform.siteaccess.vo.PublicSiteVisitInvitationVO;
 import com.example.siteplatform.siteaccess.vo.PublicVisitorSessionVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitorProfileVO;
@@ -41,10 +46,13 @@ import java.nio.charset.StandardCharsets;
 public class PublicSiteAccessController {
     private final SiteAccessService service;
     private final GuardVisitService guardVisitService;
+    private final MeetingVisitService meetingVisitService;
 
-    public PublicSiteAccessController(SiteAccessService service, GuardVisitService guardVisitService) {
+    public PublicSiteAccessController(SiteAccessService service, GuardVisitService guardVisitService,
+                                      MeetingVisitService meetingVisitService) {
         this.service = service;
         this.guardVisitService = guardVisitService;
+        this.meetingVisitService = meetingVisitService;
     }
 
     @PostMapping("/project-profile")
@@ -145,6 +153,40 @@ public class PublicSiteAccessController {
             @Valid @RequestBody PublicVisitorProfileRequest request,
             @RequestHeader("X-Visitor-Session") String visitorSessionToken) {
         service.disablePublicVisitorProfile(visitorSessionToken, request.getProfileCode());
+        return Result.success();
+    }
+
+    @PostMapping("/meeting/session")
+    public Result<PublicMeetingVisitorSessionVO> createMeetingSession(
+            @Valid @RequestBody PublicMeetingVisitorSessionRequest request) {
+        return Result.success(meetingVisitService.createPublicSession(request));
+    }
+
+    @PostMapping("/meeting/submit")
+    public Result<PublicMeetingVisitPassVO> submitMeetingRegistration(
+            @Valid @RequestBody PublicMeetingVisitSubmitRequest request,
+            @RequestHeader("X-Visitor-Session") String visitorSessionToken) {
+        return Result.success(meetingVisitService.submitPublic(request, visitorSessionToken));
+    }
+
+    @PostMapping("/meeting/profiles/list")
+    public Result<List<SiteVisitorProfileVO>> meetingVisitorProfiles(
+            @RequestHeader("X-Visitor-Session") String visitorSessionToken) {
+        return Result.success(meetingVisitService.publicProfiles(visitorSessionToken));
+    }
+
+    @PostMapping("/meeting/profiles/detail")
+    public Result<SiteVisitorProfileVO> meetingVisitorProfileDetail(
+            @Valid @RequestBody PublicVisitorProfileRequest request,
+            @RequestHeader("X-Visitor-Session") String visitorSessionToken) {
+        return Result.success(meetingVisitService.publicProfile(visitorSessionToken, request.getProfileCode()));
+    }
+
+    @PostMapping("/meeting/profiles/disable")
+    public Result<Void> disableMeetingVisitorProfile(
+            @Valid @RequestBody PublicVisitorProfileRequest request,
+            @RequestHeader("X-Visitor-Session") String visitorSessionToken) {
+        meetingVisitService.disablePublicProfile(visitorSessionToken, request.getProfileCode());
         return Result.success();
     }
 

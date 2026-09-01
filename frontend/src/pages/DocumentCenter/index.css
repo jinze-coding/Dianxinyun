@@ -46,3 +46,42 @@
 .document-center-tabs strong { font-size: 13px; }
 .document-center-tabs span { margin-top: 3px; color: var(--document-center-muted); font-size: 10px; }
 .document-center-content { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+
+.document-center-seal {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.document-center-subtabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 28px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--document-center-border);
+  background: var(--document-center-card);
+}
+
+.document-center-subtabs button {
+  min-width: 132px;
+  padding: 10px 2px 9px;
+  text-align: left;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  color: var(--document-center-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.document-center-subtabs button:hover { color: var(--document-center-accent); }
+.document-center-subtabs button.active {
+  color: var(--document-center-accent);
+  border-bottom-color: var(--document-center-accent);
+}
+.document-center-subtabs strong,
+.document-center-subtabs span { display: block; }
+.document-center-subtabs strong { font-size: 12px; }
+.document-center-subtabs span { margin-top: 2px; color: var(--document-center-muted); font-size: 10px; }
+.document-center-seal > .seal-page { flex: 1 1 auto; height: auto; min-height: 0; }

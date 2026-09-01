@@ -1,11 +1,12 @@
 import { getMockTodos } from '@/mock/runtime';
 import type { PageResult, TodoItem, TodoSummary, UserNotification } from '@/types';
+import { cleanEdgeDisplayText } from '@/utils/edgeInspectionView';
 import { USE_MOCK, request } from './request';
 
 const TODO_TYPES: TodoItem['type'][] = [
   'INSPECTION', 'EDGE_INSPECTION_TASK', 'EDGE_INSPECTION_RECTIFICATION', 'EDGE_INSPECTION_REVIEW',
   'REVIEW', 'RECTIFICATION', 'RECTIFICATION_ASSIGN', 'RECHECK', 'RECHECK_ASSIGN',
-  'SEAL_APPROVAL'
+  'SEAL_APPROVAL', 'DOCUMENT_RECEIPT'
 ];
 const TODO_PRIORITIES: NonNullable<TodoItem['priority']>[] = ['normal', 'warning', 'danger'];
 
@@ -40,6 +41,8 @@ function normalizeType(value: unknown, businessType?: unknown, routeKey?: unknow
   if (TODO_TYPES.includes(type as TodoItem['type'])) return type as TodoItem['type'];
   if (toText(businessType).toUpperCase() === 'SEAL_APPLICATION'
     || toText(routeKey).toUpperCase() === 'SEAL_APPLICATION_DETAIL') return 'SEAL_APPROVAL';
+  if (toText(businessType).toUpperCase() === 'DOCUMENT_DISTRIBUTION'
+    || toText(routeKey).toUpperCase() === 'DOCUMENT_DISTRIBUTION_DETAIL') return 'DOCUMENT_RECEIPT';
   if (toText(businessType).toUpperCase() === 'EDGE_INSPECTION_TASK'
     || toText(routeKey).toUpperCase() === 'EDGE_INSPECTION_TASK_DETAIL') return 'EDGE_INSPECTION_TASK';
   if (toText(businessType).toUpperCase() === 'EDGE_INSPECTION_REVIEW') return 'EDGE_INSPECTION_REVIEW';
@@ -59,6 +62,7 @@ function normalizePriority(value: unknown): TodoItem['priority'] {
 
 function fallbackTitle(type: TodoItem['type'], marker: string) {
   if (type === 'SEAL_APPROVAL') return `${marker || '用印申请'} 待审批`;
+  if (type === 'DOCUMENT_RECEIPT') return `${marker || '图纸资料'} 待签收`;
   if (type === 'EDGE_INSPECTION_TASK') return `${marker || '临边点位'} 待巡检`;
   if (type === 'EDGE_INSPECTION_RECTIFICATION') return `${marker || '临边点位'} 待整改`;
   if (type === 'EDGE_INSPECTION_REVIEW') return `${marker || '临边点位'} 待复查`;
@@ -75,21 +79,25 @@ function normalizeTodoItem(value: unknown, index: number, scope: 'PENDING' | 'CC
   const taskType = toText(record.taskType || record.type);
   const type = normalizeType(taskType, record.businessType, record.routeCode || record.routeKey);
   const targetId = toNumber(record.targetId, 0);
-  const marker = toText(record.boxCode || record.pointName || record.applicationNo,
+  const edgeTodo = String(type).startsWith('EDGE_INSPECTION_');
+  const rawMarker = toText(record.boxCode || record.pointName || record.applicationNo,
     type === 'SEAL_APPROVAL' ? '用印申请'
-      : String(type).startsWith('EDGE_INSPECTION_') ? '临边点位' : '-');
+      : type === 'DOCUMENT_RECEIPT' ? '图纸资料'
+        : String(type).startsWith('EDGE_INSPECTION_') ? '临边点位' : '-');
+  const marker = edgeTodo ? cleanEdgeDisplayText(rawMarker, '临边点位') : rawMarker;
+  const rawTitle = toText(record.title, fallbackTitle(type, marker));
   return {
     id: toNumber(record.id, targetId || index + 1),
     todoKey: toText(record.todoKey, `${scope}-${type}-${targetId || index + 1}`),
     type,
     taskType,
     taskId: record.taskId === null || record.taskId === undefined ? undefined : toNumber(record.taskId, 0),
-    title: toText(record.title, fallbackTitle(type, marker)),
+    title: edgeTodo ? cleanEdgeDisplayText(rawTitle, fallbackTitle(type, marker)) : rawTitle,
     projectId: record.projectId === null || record.projectId === undefined ? undefined : toNumber(record.projectId, 0),
     projectName: toText(record.projectName),
     boxCode: marker,
-    installLocation: toText(record.installLocation),
-    summary: toText(record.summary),
+    installLocation: edgeTodo ? cleanEdgeDisplayText(toText(record.installLocation)) : toText(record.installLocation),
+    summary: edgeTodo ? cleanEdgeDisplayText(toText(record.summary)) : toText(record.summary),
     applicantName: toText(record.applicantName),
     dueAt: toText(record.dueAt),
     dueText: toText(record.dueText, '请及时处理'),
@@ -256,12 +264,17 @@ function normalizeNotification(value: unknown, index: number): UserNotification 
 export async function getUserNotifications(params: {
   readStatus?: 'ALL' | 'UNREAD' | 'READ';
   businessType?: string;
+  businessGroup?: 'QUALITY' | 'INSPECTION';
   projectId?: number;
   pageNo?: number;
   pageSize?: number;
 } = {}): Promise<PageResult<UserNotification>> {
   if (USE_MOCK) return { pageNo: 1, pageSize: 20, total: 0, records: [] };
+  if (params.businessType && params.businessGroup) {
+    throw new Error('businessType 与 businessGroup 不能同时提交');
+  }
   const query = Object.entries({ readStatus: params.readStatus || 'ALL', businessType: params.businessType,
+    businessGroup: params.businessGroup,
     projectId: params.projectId, pageNo: params.pageNo || 1, pageSize: params.pageSize || 50 })
     .filter(([, value]) => value !== undefined && value !== '')
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)

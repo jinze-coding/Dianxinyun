@@ -15,6 +15,7 @@ public class ResponsibilityImpactVO {
     private long openGeneralRectificationCount;
     private long pendingGeneralReviewCount;
     private long openQualityIssueCount;
+    private long qualityWeeklyReminderSettingCount;
     private long pendingSealApprovalCount;
     private long sealApprovalConfigCount;
 
@@ -22,7 +23,7 @@ public class ResponsibilityImpactVO {
         return responsibleElectricBoxCount + safetyManagedElectricBoxCount
                 + pendingInspectionReviewCount + openRectificationCount
                 + pendingGeneralInspectionTaskCount + openGeneralRectificationCount + pendingGeneralReviewCount
-                + openQualityIssueCount
+                + openQualityIssueCount + qualityWeeklyReminderSettingCount
                 + pendingSealApprovalCount + sealApprovalConfigCount;
     }
 }

@@ -19,6 +19,9 @@ public class ProjectInspectionSetting {
     private Integer reviewDueHours;
     private Integer rectificationDays;
     private Integer enabled;
+    private Integer submissionReminderEnabled;
+    private LocalDateTime reminderEffectiveTime;
+    private Integer version;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 }

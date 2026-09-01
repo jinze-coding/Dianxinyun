@@ -57,13 +57,20 @@ class EdgeInspectionMigrationContractTest {
                     "edge_generation_lower_bound_time",
                     "SET edge_generation_lower_bound_time = COALESCE(create_time, CURRENT_TIMESTAMP)",
                     "SET @fixed_edge_already_applied :=",
-                    "BINARY category.category_code = BINARY seed.type_code",
-                    "BINARY template.template_code = BINARY CONCAT('EDGE_', seed.type_code)",
-                    "BINARY item.item_key = BINARY seed.item_key",
-                    "SELECT 1 FROM sys_menu WHERE BINARY menu_code = BINARY 'INSPECTION_EDGE'",
                     "WHERE menu_code = 'INSPECTION_EDGE' AND @fixed_edge_already_applied = 0",
                     "WHERE @fixed_edge_already_applied = 0\n  AND @platform_admin_role_id IS NOT NULL");
         }
+        assertThat(migration).contains(
+                "CAST(category.category_code AS BINARY) = CAST(seed.type_code AS BINARY)",
+                "CAST(template.template_code AS BINARY) = CAST(CONCAT('EDGE_', seed.type_code) AS BINARY)",
+                "CAST(item.item_key AS BINARY) = CAST(seed.item_key AS BINARY)",
+                "CAST(menu_code AS BINARY) = CAST('INSPECTION_EDGE' AS BINARY)");
+        assertThat(migration).doesNotContain("BINARY category.", "BINARY template.", "BINARY item.");
+        assertThat(baseline).contains(
+                "BINARY category.category_code = BINARY seed.type_code",
+                "BINARY template.template_code = BINARY CONCAT('EDGE_', seed.type_code)",
+                "BINARY item.item_key = BINARY seed.item_key",
+                "SELECT 1 FROM sys_menu WHERE BINARY menu_code = BINARY 'INSPECTION_EDGE'");
     }
 
     private int count(String source, String needle) {

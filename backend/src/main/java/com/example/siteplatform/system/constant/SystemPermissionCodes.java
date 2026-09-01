@@ -6,6 +6,10 @@ public final class SystemPermissionCodes {
     public static final String DOCUMENT_VIEW = "document.view";
     public static final String DOCUMENT_UPLOAD = "document.upload";
     public static final String DOCUMENT_MANAGE = "document.manage";
+    public static final String DOCUMENT_RECEIVE = "document.receive";
+    public static final String DOCUMENT_ISSUE = "document.issue";
+    public static final String DOCUMENT_CIRCULATION_VIEW = "document.circulation.view";
+    public static final String DOCUMENT_CIRCULATION_EXPORT = "document.circulation.export";
     public static final String INSPECTION_VIEW = "inspection.view";
     public static final String INSPECTION_SUBMIT = "inspection.submit";
     public static final String INSPECTION_MANAGE = "inspection.manage";

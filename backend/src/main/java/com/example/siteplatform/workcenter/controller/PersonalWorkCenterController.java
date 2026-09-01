@@ -60,13 +60,14 @@ public class PersonalWorkCenterController {
     public Result<PageResult<InboxNotificationVO>> inbox(
             @RequestParam(defaultValue = "ALL") String readStatus,
             @RequestParam(required = false) String businessType,
+            @RequestParam(required = false) String businessGroup,
             @RequestParam(required = false) Long projectId,
             @RequestParam(defaultValue = "1") Integer pageNo,
             @RequestParam(defaultValue = "20") Integer pageSize,
             @RequestHeader(value = "Authorization", required = false) String authorization) {
         SysUser currentUser = authService.getCurrentUser(authorization);
         return Result.success(workCenterService.inbox(
-                readStatus, businessType, projectId, pageNo, pageSize, currentUser));
+                readStatus, businessType, businessGroup, projectId, pageNo, pageSize, currentUser));
     }
 
     @Operation(summary = "获取当前用户未读通知数")

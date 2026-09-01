@@ -1,6 +1,6 @@
 import { API_BASE_URL, request } from './request';
 
-export type SiteVisitStatus = 'PENDING' | 'SUBMITTED' | 'EXPIRED' | 'VOIDED';
+export type SiteVisitStatus = 'PENDING' | 'SUBMITTED' | 'OPEN' | 'EXPIRED' | 'VOIDED';
 
 export interface PublicProjectLocation {
   address?: string;
@@ -13,6 +13,7 @@ export interface PublicProjectLocation {
 
 export interface PublicSiteVisitInvitation {
   inviteNo: string;
+  inviteType: 'SINGLE' | 'MEETING';
   status: SiteVisitStatus;
   projectName: string;
   projectShortName?: string;
@@ -83,6 +84,36 @@ export interface PublicGuardVisitorSession extends PublicVisitorSession {
 }
 
 export type PublicGuardVisitSubmitPayload = Omit<PublicSiteVisitSubmitPayload, 'inviteToken'>;
+
+export interface PublicMeetingVisitPass {
+  registrationNo: string;
+  status: 'REGISTERED';
+  inviteNo: string;
+  projectName: string;
+  projectShortName?: string;
+  purpose: string;
+  visitLocation: string;
+  hostName: string;
+  visitorCompany: string;
+  contactName: string;
+  visitorCount: number;
+  travelMode: 'DRIVING' | 'OTHER';
+  vehiclePlate?: string;
+  visitStartTime: string;
+  validUntil: string;
+  registeredTime: string;
+  serverTime: string;
+  visitors: SiteVisitorProfilePerson[];
+  projectLocation?: PublicProjectLocation;
+}
+
+export interface PublicMeetingVisitorSession extends PublicVisitorSession {
+  pageState: 'FORM' | 'REGISTERED';
+  invitation: PublicSiteVisitInvitation;
+  registration?: PublicMeetingVisitPass;
+}
+
+export type PublicMeetingVisitSubmitPayload = Omit<PublicSiteVisitSubmitPayload, 'inviteToken'>;
 
 export interface SiteVisitorProfilePerson {
   personType: 'CONTACT' | 'COMPANION';
@@ -372,6 +403,37 @@ export function createPublicGuardVisitorSession(sceneToken: string, wechatCode: 
     method: 'POST',
     data: { sceneToken, wechatCode },
     skipAuthRedirect: true
+  });
+}
+
+export function createPublicMeetingVisitorSession(inviteToken: string, wechatCode: string) {
+  return request<PublicMeetingVisitorSession>('/public/site-access/meeting/session', {
+    method: 'POST', data: { inviteToken, wechatCode }, skipAuthRedirect: true
+  });
+}
+
+export function submitPublicMeetingVisit(payload: PublicMeetingVisitSubmitPayload, visitorSessionToken: string) {
+  return request<PublicMeetingVisitPass>('/public/site-access/meeting/submit', {
+    method: 'POST', data: payload, header: visitorSessionHeader(visitorSessionToken),
+    skipAuthRedirect: true, timeout: 30000
+  });
+}
+
+export function getPublicMeetingVisitorProfiles(visitorSessionToken: string) {
+  return request<SiteVisitorProfile[]>('/public/site-access/meeting/profiles/list', {
+    method: 'POST', data: {}, header: visitorSessionHeader(visitorSessionToken), skipAuthRedirect: true
+  });
+}
+
+export function getPublicMeetingVisitorProfile(visitorSessionToken: string, profileCode: string) {
+  return request<SiteVisitorProfile>('/public/site-access/meeting/profiles/detail', {
+    method: 'POST', data: { profileCode }, header: visitorSessionHeader(visitorSessionToken), skipAuthRedirect: true
+  });
+}
+
+export function disablePublicMeetingVisitorProfile(visitorSessionToken: string, profileCode: string) {
+  return request<void>('/public/site-access/meeting/profiles/disable', {
+    method: 'POST', data: { profileCode }, header: visitorSessionHeader(visitorSessionToken), skipAuthRedirect: true
   });
 }
 

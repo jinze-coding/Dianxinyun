@@ -70,7 +70,17 @@ public class PublicSiteAccessRequestGuardFilter extends OncePerRequestFilter {
             Map.entry(BASE_PATH + "/guard/profiles/detail",
                     new RateLimitRule("public-site-guard-profile-detail", 60, Duration.ofMinutes(10))),
             Map.entry(BASE_PATH + "/guard/profiles/disable",
-                    new RateLimitRule("public-site-guard-profile-disable", 10, Duration.ofMinutes(30))));
+                    new RateLimitRule("public-site-guard-profile-disable", 10, Duration.ofMinutes(30))),
+            Map.entry(BASE_PATH + "/meeting/session",
+                    new RateLimitRule("public-site-meeting-session", 20, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/meeting/submit",
+                    new RateLimitRule("public-site-meeting-submit", 10, Duration.ofMinutes(30))),
+            Map.entry(BASE_PATH + "/meeting/profiles/list",
+                    new RateLimitRule("public-site-meeting-profile-list", 60, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/meeting/profiles/detail",
+                    new RateLimitRule("public-site-meeting-profile-detail", 60, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/meeting/profiles/disable",
+                    new RateLimitRule("public-site-meeting-profile-disable", 10, Duration.ofMinutes(30))));
 
     private final RedisRateLimitService rateLimitService;
     private final ObjectMapper objectMapper;

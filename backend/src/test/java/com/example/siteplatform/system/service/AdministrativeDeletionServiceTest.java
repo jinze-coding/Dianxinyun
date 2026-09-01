@@ -18,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 
 import java.time.Duration;
 import java.util.HashMap;
@@ -227,7 +228,7 @@ class AdministrativeDeletionServiceTest {
     }
 
     @Test
-    void executeDeletesSiteAccessInvitationPeopleAndBusinessAuditInDependencyOrder() {
+    void executeDeletesSiteAccessInvitationMeetingGroupsPeopleAndBusinessAuditInDependencyOrder() {
         when(jdbc.queryForList(org.mockito.ArgumentMatchers.argThat(
                 sql -> sql != null && sql.contains("FROM site_visit_invitation")
                         && sql.contains("effective_status")),
@@ -237,6 +238,13 @@ class AdministrativeDeletionServiceTest {
                         "effective_status", "VOIDED")));
         when(jdbc.queryForObject(anyString(), org.mockito.ArgumentMatchers.eq(Long.class), any(Object[].class)))
                 .thenReturn(0L);
+        when(jdbc.query(org.mockito.ArgumentMatchers.argThat(
+                        sql -> sql != null && sql.contains("SELECT id FROM site_meeting_visit_registration")),
+                any(RowMapper.class), any(Object[].class))).thenReturn(List.of(501L));
+        when(jdbc.update("DELETE FROM `site_meeting_visit_person` WHERE `registration_id` IN (?)", 501L))
+                .thenReturn(2);
+        when(jdbc.update("DELETE FROM site_meeting_visit_audit_log WHERE invitation_id = ?", 92L)).thenReturn(0);
+        when(jdbc.update("DELETE FROM site_meeting_visit_registration WHERE invitation_id = ?", 92L)).thenReturn(0);
         when(jdbc.update("DELETE FROM site_visit_person WHERE invitation_id = ?", 92L)).thenReturn(2);
         when(jdbc.update("DELETE FROM site_visit_audit_log WHERE invitation_id = ?", 92L)).thenReturn(3);
         when(jdbc.update("DELETE FROM site_visit_invitation WHERE id = ? AND deleted = 0", 92L)).thenReturn(1);
@@ -253,6 +261,9 @@ class AdministrativeDeletionServiceTest {
         service.execute(execute, operator);
 
         InOrder order = inOrder(jdbc);
+        order.verify(jdbc).update("DELETE FROM `site_meeting_visit_person` WHERE `registration_id` IN (?)", 501L);
+        order.verify(jdbc).update("DELETE FROM site_meeting_visit_audit_log WHERE invitation_id = ?", 92L);
+        order.verify(jdbc).update("DELETE FROM site_meeting_visit_registration WHERE invitation_id = ?", 92L);
         order.verify(jdbc).update("DELETE FROM site_visit_person WHERE invitation_id = ?", 92L);
         order.verify(jdbc).update("DELETE FROM site_visit_audit_log WHERE invitation_id = ?", 92L);
         order.verify(jdbc).update("DELETE FROM site_visit_invitation WHERE id = ? AND deleted = 0", 92L);

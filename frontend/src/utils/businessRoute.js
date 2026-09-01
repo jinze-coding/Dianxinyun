@@ -5,8 +5,20 @@ const ROUTE_PARAM_KEYS = Object.freeze({
   INSPECTION_RECORD_DETAIL: ['recordId', 'inspectionRecordId', 'id'],
   INSPECTION_RECTIFICATION_DETAIL: ['rectificationId', 'id'],
   EDGE_INSPECTION_TASK_DETAIL: ['taskId', 'id'],
-  EDGE_INSPECTION_RECTIFICATION_DETAIL: ['taskId', 'rectificationId', 'id']
+  EDGE_INSPECTION_RECTIFICATION_DETAIL: ['taskId', 'rectificationId', 'id'],
+  DOCUMENT_DISTRIBUTION_DETAIL: ['distributionId', 'id'],
 });
+
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function validIsoDate(value) {
+  if (!ISO_DATE_PATTERN.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day;
+}
 
 function positiveInteger(value) {
   const number = Number(value);
@@ -31,10 +43,19 @@ function parseRouteParams(value) {
  */
 export function resolveBusinessRoute(item) {
   const routeCode = String(item?.routeCode || item?.routeKey || '').trim().toUpperCase();
+  const routeParams = parseRouteParams(item?.routeParams);
+  if (routeCode === 'QUALITY_WEEKLY_INSPECTION_WEEK') {
+    const itemProjectId = positiveInteger(item?.projectId);
+    const paramProjectId = positiveInteger(routeParams.projectId);
+    if (itemProjectId && paramProjectId && itemProjectId !== paramProjectId) return null;
+    const projectId = itemProjectId || paramProjectId;
+    const weekStart = String(routeParams.weekStart || '').trim();
+    if (!projectId || !validIsoDate(weekStart)) return null;
+    return { routeCode, projectId, weekStart };
+  }
   const parameterKeys = ROUTE_PARAM_KEYS[routeCode];
   if (!parameterKeys) return null;
 
-  const routeParams = parseRouteParams(item?.routeParams);
   const id = parameterKeys
     .map((key) => positiveInteger(routeParams[key]))
     .find(Boolean)

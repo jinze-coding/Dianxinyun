@@ -5,15 +5,24 @@ import lombok.Getter;
 @Getter
 public class BusinessException extends RuntimeException {
     private final Integer code;
+    private final Object data;
 
     public BusinessException(String message) {
         super(message);
         this.code = 400;
+        this.data = null;
     }
 
     public BusinessException(Integer code, String message) {
         super(message);
         this.code = code;
+        this.data = null;
+    }
+
+    public BusinessException(Integer code, String message, Object data) {
+        super(message);
+        this.code = code;
+        this.data = data;
     }
 
     public static BusinessException unauthorized(String message) {
@@ -30,5 +39,9 @@ public class BusinessException extends RuntimeException {
 
     public static BusinessException of(Integer code, String message) {
         return new BusinessException(code, message);
+    }
+
+    public static BusinessException of(Integer code, String message, Object data) {
+        return new BusinessException(code, message, data);
     }
 }

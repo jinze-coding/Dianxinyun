@@ -97,6 +97,8 @@ class BusinessModulePermissionInterceptorTest {
                 Arguments.of("POST", "/api/v1/quality/issues/3/review", SystemPermissionCodes.QUALITY_REVIEW),
                 Arguments.of("GET", "/api/v1/quality/weekly-inspections/page", SystemPermissionCodes.QUALITY_VIEW),
                 Arguments.of("GET", "/api/v1/quality/weekly-inspections/3", SystemPermissionCodes.QUALITY_VIEW),
+                Arguments.of("GET", "/api/v1/quality/weekly-inspections/reminder-setting/3", SystemPermissionCodes.QUALITY_MANAGE),
+                Arguments.of("GET", "/api/v1/quality/weekly-inspections/reminder-assignees", SystemPermissionCodes.QUALITY_MANAGE),
                 Arguments.of("POST", "/api/v1/quality/weekly-inspections/drafts", SystemPermissionCodes.QUALITY_MANAGE),
                 Arguments.of("PUT", "/api/v1/quality/weekly-inspections/3/draft", SystemPermissionCodes.QUALITY_MANAGE),
                 Arguments.of("POST", "/api/v1/quality/weekly-inspections/3/submit", SystemPermissionCodes.QUALITY_MANAGE),
@@ -104,7 +106,11 @@ class BusinessModulePermissionInterceptorTest {
                 Arguments.of("HEAD", "/api/v1/site-access/invitations/8", SystemPermissionCodes.SITE_ACCESS_VIEW),
                 Arguments.of("POST", "/api/v1/site-access/invitations", SystemPermissionCodes.SITE_ACCESS_MANAGE),
                 Arguments.of("PUT", "/api/v1/site-access/invitations/8", SystemPermissionCodes.SITE_ACCESS_MANAGE),
-                Arguments.of("GET", "/api/v1/site-access/visitors/export", SystemPermissionCodes.SITE_ACCESS_EXPORT)
+                Arguments.of("GET", "/api/v1/site-access/invitations/8/mini-code", SystemPermissionCodes.SITE_ACCESS_MANAGE),
+                Arguments.of("GET", "/api/v1/site-access/guard/qr/8/mini-code", SystemPermissionCodes.SITE_ACCESS_MANAGE),
+                Arguments.of("GET", "/api/v1/site-access/visitors/export", SystemPermissionCodes.SITE_ACCESS_EXPORT),
+                Arguments.of("GET", "/api/v1/site-access/meeting-registrations/export", SystemPermissionCodes.SITE_ACCESS_EXPORT),
+                Arguments.of("GET", "/api/v1/site-access/guard/registrations/export", SystemPermissionCodes.SITE_ACCESS_EXPORT)
         );
     }
 

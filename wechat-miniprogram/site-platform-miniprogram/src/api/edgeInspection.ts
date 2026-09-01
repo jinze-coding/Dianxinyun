@@ -1,4 +1,5 @@
 import { request } from './request';
+import { cleanEdgeDisplayText } from '@/utils/edgeInspectionView';
 
 export type EdgeInspectionResult = 'NORMAL' | 'ABNORMAL';
 
@@ -112,6 +113,17 @@ export interface EdgeInspectionRectificationSheet {
   items: EdgeInspectionRectificationItem[];
 }
 
+export interface EdgeInspectionWorkspaceSummary {
+  enabledPointCount: number;
+  myTodayDueCount: number;
+  myTodayPendingCount: number;
+  myTodaySubmittedCount: number;
+  myTodayCancelledCount: number;
+  myOverdueCount: number;
+  myRectificationPendingCount: number;
+  myReviewPendingCount: number;
+}
+
 const ROOT = '/edge-inspections';
 
 function query(params: Record<string, unknown>) {
@@ -122,18 +134,33 @@ function query(params: Record<string, unknown>) {
   return value ? `?${value}` : '';
 }
 
-export function getEdgeInspectionTasks(params: {
+function cleanTask(task: EdgeInspectionTask) {
+  return { ...task, pointName: cleanEdgeDisplayText(task.pointName, '未命名点位') };
+}
+
+function cleanRectification(sheet: EdgeInspectionRectificationSheet) {
+  return { ...sheet, pointName: cleanEdgeDisplayText(sheet.pointName, '未命名点位') };
+}
+
+export async function getEdgeInspectionTasks(params: {
   projectId?: number;
   status?: string;
   startDate?: string;
   endDate?: string;
   mine?: boolean;
 } = {}) {
-  return request<EdgeInspectionTask[]>(`${ROOT}/tasks${query(params)}`);
+  const tasks = await request<EdgeInspectionTask[]>(`${ROOT}/tasks${query(params)}`);
+  return tasks.map(cleanTask);
 }
 
-export function getEdgeInspectionTask(id: number) {
-  return request<EdgeInspectionTask>(`${ROOT}/tasks/${id}`);
+export async function getEdgeInspectionTask(id: number) {
+  return cleanTask(await request<EdgeInspectionTask>(`${ROOT}/tasks/${id}`));
+}
+
+export function getEdgeInspectionWorkspaceSummary(projectId: number) {
+  return request<EdgeInspectionWorkspaceSummary>(
+    `${ROOT}/projects/${encodeURIComponent(String(projectId))}/workspace-summary`
+  );
 }
 
 export interface EdgeInspectionSubmitPayload {
@@ -148,8 +175,8 @@ export interface EdgeInspectionSubmitPayload {
   }>;
 }
 
-export function submitEdgeInspectionTask(id: number, data: EdgeInspectionSubmitPayload) {
-  return request<EdgeInspectionTask>(`${ROOT}/tasks/${id}/submit`, { method: 'POST', data });
+export async function submitEdgeInspectionTask(id: number, data: EdgeInspectionSubmitPayload) {
+  return cleanTask(await request<EdgeInspectionTask>(`${ROOT}/tasks/${id}/submit`, { method: 'POST', data }));
 }
 
 export interface EdgeInspectionTaskReassignPayload {
@@ -158,36 +185,37 @@ export interface EdgeInspectionTaskReassignPayload {
   reason: string;
 }
 
-export function reassignEdgeInspectionTask(id: number, data: EdgeInspectionTaskReassignPayload) {
-  return request<EdgeInspectionTask>(`${ROOT}/tasks/${id}/reassign`, { method: 'POST', data });
+export async function reassignEdgeInspectionTask(id: number, data: EdgeInspectionTaskReassignPayload) {
+  return cleanTask(await request<EdgeInspectionTask>(`${ROOT}/tasks/${id}/reassign`, { method: 'POST', data }));
 }
 
-export function getEdgeInspectionRectifications(params: {
+export async function getEdgeInspectionRectifications(params: {
   projectId?: number;
   status?: string;
   scope?: string;
 } = {}) {
-  return request<EdgeInspectionRectificationSheet[]>(`${ROOT}/rectifications${query(params)}`);
+  const sheets = await request<EdgeInspectionRectificationSheet[]>(`${ROOT}/rectifications${query(params)}`);
+  return sheets.map(cleanRectification);
 }
 
-export function getEdgeInspectionRectification(taskId: number) {
-  return request<EdgeInspectionRectificationSheet>(`${ROOT}/rectifications/${taskId}`);
+export async function getEdgeInspectionRectification(taskId: number) {
+  return cleanRectification(await request<EdgeInspectionRectificationSheet>(`${ROOT}/rectifications/${taskId}`));
 }
 
 export function getEdgeInspectionUserOptions(projectId: number) {
   return request<EdgeInspectionUserOption[]>(`${ROOT}/user-options?projectId=${encodeURIComponent(String(projectId))}`);
 }
 
-export function reassignEdgeInspectionRectification(taskId: number, data: {
+export async function reassignEdgeInspectionRectification(taskId: number, data: {
   expectedVersion: number;
   assigneeId?: number;
   reviewerId?: number;
   reason: string;
 }) {
-  return request<EdgeInspectionRectificationSheet>(`${ROOT}/rectifications/${taskId}/reassign`, { method: 'POST', data });
+  return cleanRectification(await request<EdgeInspectionRectificationSheet>(`${ROOT}/rectifications/${taskId}/reassign`, { method: 'POST', data }));
 }
 
-export function completeEdgeInspectionRectification(taskId: number, data: {
+export async function completeEdgeInspectionRectification(taskId: number, data: {
   expectedVersion: number;
   items: Array<{
     rectificationId: number;
@@ -196,15 +224,15 @@ export function completeEdgeInspectionRectification(taskId: number, data: {
     photoFileIds: number[];
   }>;
 }) {
-  return request<EdgeInspectionRectificationSheet>(`${ROOT}/rectifications/${taskId}/complete`, { method: 'POST', data });
+  return cleanRectification(await request<EdgeInspectionRectificationSheet>(`${ROOT}/rectifications/${taskId}/complete`, { method: 'POST', data }));
 }
 
-export function reviewEdgeInspectionRectification(taskId: number, approve: boolean, data: {
+export async function reviewEdgeInspectionRectification(taskId: number, approve: boolean, data: {
   expectedVersion: number;
   comment?: string;
 }) {
-  return request<EdgeInspectionRectificationSheet>(`${ROOT}/rectifications/${taskId}/${approve ? 'close' : 'reject'}`, {
+  return cleanRectification(await request<EdgeInspectionRectificationSheet>(`${ROOT}/rectifications/${taskId}/${approve ? 'close' : 'reject'}`, {
     method: 'POST',
     data
-  });
+  }));
 }

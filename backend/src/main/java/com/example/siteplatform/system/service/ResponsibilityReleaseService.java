@@ -81,6 +81,10 @@ public class ResponsibilityReleaseService {
                 WHERE project_id = ? AND assignee_id = ? AND deleted = 0
                   AND status NOT IN ('CLOSED', 'VOIDED')
                 """, projectId, userId));
+        impact.setQualityWeeklyReminderSettingCount(count("""
+                SELECT COUNT(*) FROM quality_weekly_reminder_setting
+                WHERE project_id = ? AND responsible_user_id = ?
+                """, projectId, userId));
         impact.setPendingSealApprovalCount(count("""
                 SELECT COUNT(*) FROM workflow_approval_task
                 WHERE project_id = ? AND assignee_user_id = ?
@@ -91,6 +95,85 @@ public class ResponsibilityReleaseService {
                 WHERE project_id = ? AND user_id = ?
                 """, projectId, userId));
         return impact;
+    }
+
+    /**
+     * Returns only responsibilities that the user can no longer perform with the
+     * authorization currently visible in the transaction.  Role-definition
+     * updates use this after replacing the role grants so they can reject a
+     * destructive save before committing it, without silently unassigning work.
+     */
+    public ResponsibilityImpactVO impactForCapabilityLoss(Long projectId, Long userId) {
+        ResponsibilityImpactVO impact = impact(projectId, userId);
+        if (hasAny(userId, projectId,
+                InspectionPermissionCodes.INSPECTION_DAILY_SUBMIT,
+                SystemPermissionCodes.INSPECTION_SUBMIT)) {
+            impact.setResponsibleElectricBoxCount(0);
+        }
+        if (permissionService.hasProjectPermission(userId, projectId,
+                InspectionPermissionCodes.EDGE_INSPECTION_SUBMIT)) {
+            impact.setPendingGeneralInspectionTaskCount(0);
+        }
+        if (hasAny(userId, projectId,
+                InspectionPermissionCodes.INSPECTION_REVIEW,
+                SystemPermissionCodes.INSPECTION_MANAGE)) {
+            impact.setSafetyManagedElectricBoxCount(0);
+            impact.setPendingInspectionReviewCount(0);
+        }
+        if (permissionService.hasProjectPermission(userId, projectId,
+                SystemPermissionCodes.INSPECTION_RECTIFY)) {
+            impact.setOpenRectificationCount(0);
+        }
+        if (permissionService.hasProjectPermission(userId, projectId,
+                InspectionPermissionCodes.EDGE_INSPECTION_REVIEW)) {
+            impact.setPendingGeneralReviewCount(0);
+        }
+        if (permissionService.hasProjectPermission(userId, projectId,
+                InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY)) {
+            impact.setOpenGeneralRectificationCount(0);
+        }
+        if (permissionService.hasProjectPermission(userId, projectId,
+                SystemPermissionCodes.QUALITY_RECTIFY)) {
+            impact.setOpenQualityIssueCount(0);
+        }
+        if (permissionService.hasProjectPermission(userId, projectId,
+                SystemPermissionCodes.QUALITY_MANAGE)) {
+            impact.setQualityWeeklyReminderSettingCount(0);
+        }
+        // Project-role capability changes do not automatically alter the
+        // direct-user seal workflow, so those counts are outside this check.
+        impact.setPendingSealApprovalCount(0);
+        impact.setSealApprovalConfigCount(0);
+        return impact;
+    }
+
+    public List<Long> responsibilityProjectIdsForUser(Long userId) {
+        if (userId == null) return List.of();
+        return jdbc.query("""
+                SELECT DISTINCT project_id FROM (
+                    SELECT project_id FROM sys_user_project WHERE user_id = ?
+                    UNION SELECT project_id FROM electric_box
+                        WHERE responsible_electrician_id = ? OR safety_manager_id = ?
+                    UNION SELECT project_id FROM inspection_record WHERE assigned_reviewer_id = ?
+                    UNION SELECT project_id FROM inspection_rectification WHERE assignee_id = ?
+                    UNION SELECT project_id FROM general_inspection_task
+                        WHERE assignee_id = ? AND status = 'PENDING'
+                    UNION SELECT project_id FROM general_inspection_rectification
+                        WHERE assignee_id = ? AND status IN ('UNASSIGNED', 'PENDING', 'REJECTED')
+                    UNION SELECT project_id FROM general_inspection_rectification
+                        WHERE reviewer_id = ? AND status NOT IN ('CLOSED', 'VOIDED')
+                    UNION SELECT project_id FROM quality_issue WHERE assignee_id = ?
+                    UNION SELECT project_id FROM quality_weekly_reminder_setting
+                        WHERE responsible_user_id = ?
+                    UNION SELECT project_id FROM workflow_approval_config_user WHERE user_id = ?
+                    UNION SELECT project_id FROM workflow_approval_task
+                        WHERE assignee_user_id = ? AND business_code = 'SEAL_APPLICATION' AND status = 'PENDING'
+                ) responsibility_projects
+                WHERE project_id IS NOT NULL
+                ORDER BY project_id
+                """, (rs, rowNum) -> rs.getLong(1),
+                userId, userId, userId, userId, userId, userId,
+                userId, userId, userId, userId, userId, userId);
     }
 
     @Transactional
@@ -104,6 +187,7 @@ public class ResponsibilityReleaseService {
         clearGeneralRectificationAssignee(projectId, userId);
         clearGeneralRectificationReviewer(projectId, userId);
         clearQuality(projectId, userId);
+        clearQualityWeeklyReminderOwner(projectId, userId);
         removeSealApprovalConfiguration(projectId, userId);
         cancelSealApprovalTasksAndNotify(projectId, userId);
         return impact;
@@ -141,6 +225,10 @@ public class ResponsibilityReleaseService {
         if (!permissionService.hasProjectPermission(userId, projectId,
                 SystemPermissionCodes.QUALITY_RECTIFY)) {
             clearQuality(projectId, userId);
+        }
+        if (!permissionService.hasProjectPermission(userId, projectId,
+                SystemPermissionCodes.QUALITY_MANAGE)) {
+            clearQualityWeeklyReminderOwner(projectId, userId);
         }
         return impact;
     }
@@ -242,6 +330,16 @@ public class ResponsibilityReleaseService {
                     assignee_name = NULL, version = version + 1, update_time = NOW()
                 WHERE project_id = ? AND assignee_id = ? AND deleted = 0
                   AND status NOT IN ('CLOSED', 'VOIDED')
+                """, projectId, userId);
+    }
+
+    private void clearQualityWeeklyReminderOwner(Long projectId, Long userId) {
+        jdbc.update("""
+                UPDATE quality_weekly_reminder_setting
+                SET responsible_user_id = NULL, responsible_user_name = NULL,
+                    enabled = 0, effective_time = NULL,
+                    version = version + 1, update_time = NOW()
+                WHERE project_id = ? AND responsible_user_id = ?
                 """, projectId, userId);
     }
 

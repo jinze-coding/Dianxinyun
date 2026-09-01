@@ -23,6 +23,14 @@ public class WebCorsConfig implements WebMvcConfigurer {
                         "/api/v1/project-documents/**",
                         "/api/v1/document-folders",
                         "/api/v1/document-folders/**",
+                        "/api/v1/document-incoming-batches",
+                        "/api/v1/document-incoming-batches/**",
+                        "/api/v1/document-distributions",
+                        "/api/v1/document-distributions/**",
+                        "/api/v1/document-uploads",
+                        "/api/v1/document-uploads/**",
+                        "/api/v1/document-circulation-ledger",
+                        "/api/v1/document-circulation-ledger/**",
                         "/api/v1/inspection",
                         "/api/v1/inspection/**",
                         "/api/v1/edge-inspections",
@@ -51,7 +59,7 @@ public class WebCorsConfig implements WebMvcConfigurer {
                 )
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("Authorization", "Content-Type", "Accept", "X-Visitor-Session")
-                .exposedHeaders("Content-Disposition")
+                .exposedHeaders("Content-Disposition", "X-Current-Version-Id")
                 .allowCredentials(true)
                 .maxAge(3600);
     }

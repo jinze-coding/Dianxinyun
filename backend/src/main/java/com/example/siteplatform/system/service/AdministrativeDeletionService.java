@@ -209,6 +209,8 @@ public class AdministrativeDeletionService {
                 SELECT COUNT(*) FROM quality_issue
                 WHERE deleted = 0 AND assignee_id = ? AND status NOT IN ('CLOSED', 'VOIDED')
                 """, id));
+        add(impact, "qualityWeeklyReminderSettings", "将清空并关闭的质量周检提醒责任",
+                count("quality_weekly_reminder_setting", "responsible_user_id", id));
         add(impact, "pendingWechatMessages", "将停止发送的微信消息", countSql("""
                 SELECT COUNT(*) FROM wechat_message_log WHERE user_id = ? AND status = 'PENDING'
                 """, id));
@@ -241,11 +243,14 @@ public class AdministrativeDeletionService {
                 + count("inspection_rectification", "project_id", id));
         add(impact, "generalInspections", "临边巡检设置、任务、整改与审计",
                 generalInspectionProjectDataCount(id));
-        add(impact, "quality", "质量周检、问题与日志",
+        add(impact, "quality", "质量周检、问题、日志与导出任务",
                 count("quality_weekly_inspection", "project_id", id)
                         + count("quality_weekly_inspection_draft_item", "project_id", id)
+                        + count("quality_weekly_reminder_setting", "project_id", id)
                         + count("quality_issue", "project_id", id)
-                        + count("quality_issue_log", "project_id", id));
+                        + count("quality_issue_log", "project_id", id)
+                        + count("quality_issue_export_job", "project_id", id)
+                        + count("quality_issue_export_job_item", "project_id", id));
         add(impact, "sealWorkflow", "用印申请、印章、审批、抄送与通知", sealProjectDataCount(id));
         long submittedSealApplications = submittedSealApplicationCount(id);
         add(impact, "preservedSealHistory", "必须保留的已提交用印申请与审批台账", submittedSealApplications);
@@ -261,7 +266,10 @@ public class AdministrativeDeletionService {
                 + count("site_guard_visit_qr", "project_id", id)
                 + count("site_guard_visit_registration", "project_id", id)
                 + count("site_guard_visit_person", "project_id", id)
-                + count("site_guard_visit_audit_log", "project_id", id);
+                + count("site_guard_visit_audit_log", "project_id", id)
+                + count("site_meeting_visit_registration", "project_id", id)
+                + count("site_meeting_visit_person", "project_id", id)
+                + count("site_meeting_visit_audit_log", "project_id", id);
         add(impact, "siteAccess", "外访邀请、常用资料、人员与审计", siteAccessCount);
         if (siteAccessCount > 0) {
             throw BusinessException.of(409, "项目存在需长期保留的外访数据，禁止物理删除；请停用项目并保留审计");
@@ -434,6 +442,8 @@ public class AdministrativeDeletionService {
                 id, "质量问题不存在");
         impact.setTargetName(text(issue.get("issue_no")));
         add(impact, "logs", "质量操作留痕", count("quality_issue_log", "issue_id", id));
+        add(impact, "exportSnapshots", "涉及该问题的质量报表任务快照",
+                count("quality_issue_export_job_item", "issue_id", id));
         if (issue.get("weekly_inspection_id") != null) {
             add(impact, "weeklyInspection", "保留所属周检留档", 1);
         }
@@ -450,7 +460,7 @@ public class AdministrativeDeletionService {
         Map<String, Object> invitation = requireRow("""
                 SELECT id, invite_no,
                        CASE
-                           WHEN status = 'PENDING' AND visit_end_time < NOW() THEN 'EXPIRED'
+                           WHEN status IN ('PENDING', 'OPEN') AND visit_end_time < NOW() THEN 'EXPIRED'
                            ELSE status
                        END AS effective_status
                 FROM site_visit_invitation
@@ -463,6 +473,15 @@ public class AdministrativeDeletionService {
                 count("site_visit_person", "invitation_id", id));
         add(impact, "businessAuditLogs", "场内业务审计记录",
                 count("site_visit_audit_log", "invitation_id", id));
+        add(impact, "meetingRegistrations", "会议登记组与人员",
+                count("site_meeting_visit_registration", "invitation_id", id)
+                        + countSql("""
+                        SELECT COUNT(*) FROM site_meeting_visit_person p
+                        JOIN site_meeting_visit_registration r ON r.id = p.registration_id
+                        WHERE r.invitation_id = ?
+                        """, id));
+        add(impact, "meetingAuditLogs", "会议登记业务审计记录",
+                count("site_meeting_visit_audit_log", "invitation_id", id));
         add(impact, "preservedOperationLogs", "保留的平台操作日志", countSql("""
                 SELECT COUNT(*) FROM sys_operation_log
                 WHERE business_type = 'SITE_ACCESS' AND business_id = ?
@@ -501,11 +520,13 @@ public class AdministrativeDeletionService {
                 UNION SELECT project_id FROM general_inspection_rectification
                     WHERE reviewer_id = ? AND status = 'COMPLETED'
                 UNION SELECT project_id FROM quality_issue WHERE assignee_id = ?
+                UNION SELECT project_id FROM quality_weekly_reminder_setting
+                    WHERE responsible_user_id = ?
                 UNION SELECT project_id FROM workflow_approval_config_user WHERE user_id = ?
                 UNION SELECT project_id FROM workflow_approval_task
                     WHERE assignee_user_id = ? AND business_code = 'SEAL_APPLICATION' AND status = 'PENDING'
                 """, List.of(userId, userId, userId, userId, userId, userId, userId,
-                        userId, userId, userId, userId)));
+                        userId, userId, userId, userId, userId)));
         projectIds.stream().filter(Objects::nonNull).forEach(projectId ->
                 responsibilityReleaseService.releaseAll(projectId, userId));
 
@@ -540,7 +561,10 @@ public class AdministrativeDeletionService {
                 + count("site_guard_visit_qr", "project_id", projectId)
                 + count("site_guard_visit_registration", "project_id", projectId)
                 + count("site_guard_visit_person", "project_id", projectId)
-                + count("site_guard_visit_audit_log", "project_id", projectId);
+                + count("site_guard_visit_audit_log", "project_id", projectId)
+                + count("site_meeting_visit_registration", "project_id", projectId)
+                + count("site_meeting_visit_person", "project_id", projectId)
+                + count("site_meeting_visit_audit_log", "project_id", projectId);
         if (siteAccessCount > 0) {
             throw BusinessException.of(409, "项目存在需长期保留的外访数据，禁止物理删除；请停用项目并保留审计");
         }
@@ -577,6 +601,7 @@ public class AdministrativeDeletionService {
 
         update("DELETE FROM general_inspection_task_item WHERE task_id IN "
                 + "(SELECT id FROM general_inspection_task WHERE project_id = ?)", projectId);
+        update("DELETE FROM general_inspection_export_job_task WHERE project_id = ?", projectId);
         update("DELETE FROM general_inspection_rectification WHERE project_id = ?", projectId);
         update("DELETE FROM general_inspection_task WHERE project_id = ?", projectId);
         update("DELETE FROM general_inspection_plan_version WHERE plan_id IN "
@@ -588,8 +613,10 @@ public class AdministrativeDeletionService {
                 + "(SELECT id FROM general_inspection_template WHERE project_id = ?)", projectId);
 
         for (String table : List.of(
+                "quality_issue_export_job_item", "quality_issue_export_job",
                 "quality_issue_log", "quality_issue", "quality_weekly_inspection_draft_item",
-                "quality_weekly_inspection", "inspection_rectification", "inspection_record",
+                "quality_weekly_inspection", "quality_weekly_reminder_setting",
+                "inspection_rectification", "inspection_record",
                 "general_inspection_action_log", "general_inspection_export_job",
                 "general_inspection_event_outbox", "general_inspection_point",
                 "general_inspection_point_category", "general_inspection_template",
@@ -741,12 +768,26 @@ public class AdministrativeDeletionService {
                   AND business_type IN ('QUALITY_ISSUE', 'QUALITY_RECTIFICATION', 'QUALITY_REVIEW')
                 """, number(issue.get("project_id")), issueId);
         stageFiles(files);
+        update("""
+                UPDATE quality_issue_export_job job
+                INNER JOIN quality_issue_export_job_item item ON item.job_id = job.id
+                SET job.status = 'FAILED', job.progress = 100,
+                    job.error_message = '关联质量问题已由管理员删除，请重新创建报表',
+                    job.update_time = CURRENT_TIMESTAMP
+                WHERE item.issue_id = ? AND job.status IN ('PENDING', 'RUNNING')
+                """, issueId);
         update("DELETE FROM quality_issue_log WHERE issue_id = ?", issueId);
         requireSingle(update("DELETE FROM quality_issue WHERE id = ?", issueId), "质量问题状态已变化，请重新预览");
         registerCommittedFilePurge(files);
     }
 
     private void deleteSiteAccessInvitation(Long invitationId) {
+        List<Long> meetingRegistrationIds = ids(
+                "SELECT id FROM site_meeting_visit_registration WHERE invitation_id = ? FOR UPDATE",
+                List.of(invitationId));
+        deleteByIds("site_meeting_visit_person", "registration_id", meetingRegistrationIds);
+        update("DELETE FROM site_meeting_visit_audit_log WHERE invitation_id = ?", invitationId);
+        update("DELETE FROM site_meeting_visit_registration WHERE invitation_id = ?", invitationId);
         update("DELETE FROM site_visit_person WHERE invitation_id = ?", invitationId);
         update("DELETE FROM site_visit_audit_log WHERE invitation_id = ?", invitationId);
         requireSingle(update("DELETE FROM site_visit_invitation WHERE id = ? AND deleted = 0", invitationId),
@@ -862,6 +903,7 @@ public class AdministrativeDeletionService {
                     """, projectId)
                 + count("general_inspection_rectification", "project_id", projectId)
                 + count("general_inspection_action_log", "project_id", projectId)
+                + count("general_inspection_export_job_task", "project_id", projectId)
                 + count("general_inspection_export_job", "project_id", projectId)
                 + count("general_inspection_event_outbox", "project_id", projectId);
     }
@@ -1226,6 +1268,7 @@ public class AdministrativeDeletionService {
         return switch (status.toUpperCase(Locale.ROOT)) {
             case "PENDING" -> "待填写";
             case "SUBMITTED" -> "已提交";
+            case "OPEN" -> "开放登记";
             case "EXPIRED" -> "已过期";
             case "VOIDED" -> "已作废";
             default -> StringUtils.hasText(status) ? status : "未知状态";

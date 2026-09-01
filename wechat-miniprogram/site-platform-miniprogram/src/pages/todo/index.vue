@@ -12,7 +12,7 @@ import { showToast } from '@/utils/navigation';
 import { openBusinessRoute } from '@/utils/businessNavigation';
 
 type ViewKey = 'PENDING' | 'CC' | 'NOTIFICATION';
-type BusinessKey = 'ALL' | 'INSPECTION' | 'QUALITY' | 'SEAL';
+type BusinessKey = 'ALL' | 'INSPECTION' | 'QUALITY' | 'SEAL' | 'DOCUMENT';
 type PageMeta = { pageNo: number; pageSize: number; total: number };
 type PagePayload =
   | { view: 'PENDING' | 'CC'; result: PageResult<TodoItem> }
@@ -20,6 +20,7 @@ type PagePayload =
 
 const TODO_PAGE_SIZE = 20;
 const NOTIFICATION_PAGE_SIZE = 50;
+const TODO_BUSINESS_FILTER_KEY = 'site_platform_todo_business_filter';
 
 const auth = useAuthStore();
 const todoStore = useTodoStore();
@@ -50,13 +51,15 @@ const businessOptions: Array<{ key: BusinessKey; label: string }> = [
   { key: 'ALL', label: '全部' },
   { key: 'INSPECTION', label: '巡检' },
   { key: 'QUALITY', label: '质量' },
-  { key: 'SEAL', label: '用印' }
+  { key: 'SEAL', label: '用印' },
+  { key: 'DOCUMENT', label: '图纸' }
 ];
 
 function businessKind(value: { businessType?: string; routeKey?: string; routeCode?: string; type?: string }) : Exclude<BusinessKey, 'ALL'> {
   const businessType = String(value.businessType || '').toUpperCase();
   const routeKey = String(value.routeCode || value.routeKey || '').toUpperCase();
   if (businessType.includes('SEAL') || routeKey.includes('SEAL') || value.type === 'SEAL_APPROVAL') return 'SEAL';
+  if (businessType.includes('DOCUMENT') || routeKey.includes('DOCUMENT') || value.type === 'DOCUMENT_RECEIPT') return 'DOCUMENT';
   if (businessType.includes('QUALITY') || routeKey.includes('QUALITY')) return 'QUALITY';
   return 'INSPECTION';
 }
@@ -90,9 +93,19 @@ const hasMore = computed(() => {
 
 function hideNativeTabBar() { uni.hideTabBar({ animation: false, fail: () => undefined }); }
 
+function consumeRequestedBusinessFilter() {
+  const requested = String(uni.getStorageSync(TODO_BUSINESS_FILTER_KEY) || '').toUpperCase();
+  uni.removeStorageSync(TODO_BUSINESS_FILTER_KEY);
+  if (['INSPECTION', 'QUALITY', 'SEAL', 'DOCUMENT'].includes(requested)) {
+    businessFilter.value = requested as BusinessKey;
+    activeView.value = 'PENDING';
+  }
+}
+
 onShow(async () => {
   hideNativeTabBar();
   if (!await auth.ensureRootAccess('/pages/todo/index')) return;
+  consumeRequestedBusinessFilter();
   await refreshCurrent(true);
 });
 
@@ -100,14 +113,16 @@ function todoFilterType(value: BusinessKey) {
   if (value === 'INSPECTION') return 'INSPECTION_ALL';
   if (value === 'QUALITY') return 'QUALITY';
   if (value === 'SEAL') return 'SEAL';
+  if (value === 'DOCUMENT') return 'DOCUMENT_DISTRIBUTION';
   return 'ALL';
 }
 
-function notificationBusinessType(value: BusinessKey) {
-  if (value === 'INSPECTION') return 'INSPECTION_RECORD';
-  if (value === 'QUALITY') return 'QUALITY_ISSUE';
-  if (value === 'SEAL') return 'SEAL_APPLICATION';
-  return undefined;
+function notificationBusinessFilter(value: BusinessKey) {
+  if (value === 'INSPECTION') return { businessGroup: 'INSPECTION' as const };
+  if (value === 'QUALITY') return { businessGroup: 'QUALITY' as const };
+  if (value === 'SEAL') return { businessType: 'SEAL_APPLICATION' };
+  if (value === 'DOCUMENT') return { businessType: 'DOCUMENT_DISTRIBUTION' };
+  return {};
 }
 
 function resetView(view: ViewKey) {
@@ -149,7 +164,7 @@ function applyPage(payload: PagePayload, append: boolean) {
 async function fetchPage(view: ViewKey, filter: BusinessKey, pageNo: number): Promise<PagePayload> {
   if (view === 'NOTIFICATION') {
     const result = await getUserNotifications({
-      businessType: notificationBusinessType(filter),
+      ...notificationBusinessFilter(filter),
       pageNo,
       pageSize: NOTIFICATION_PAGE_SIZE
     });
@@ -228,6 +243,7 @@ async function changeBusinessFilter(value: BusinessKey) {
 
 function typeLabel(todo: TodoItem) {
   if (businessKind(todo) === 'SEAL') return todo.scope === 'CC' ? '用印抄送' : '用印审批';
+  if (businessKind(todo) === 'DOCUMENT') return '图纸签收';
   if (businessKind(todo) === 'QUALITY') return todo.type === 'RECHECK' ? '质量复查' : '质量整改';
   if (todo.type === 'RECTIFICATION') return '巡检整改';
   if (todo.type === 'RECHECK') return '巡检复查';
@@ -249,7 +265,7 @@ function isEdgeTodo(todo: TodoItem) {
 function businessLabel(todo: TodoItem) {
   if (isEdgeTodo(todo)) return '边';
   const kind = businessKind(todo);
-  return kind === 'SEAL' ? '印' : kind === 'QUALITY' ? '质' : '巡';
+  return kind === 'SEAL' ? '印' : kind === 'QUALITY' ? '质' : kind === 'DOCUMENT' ? '图' : '巡';
 }
 
 function formatTime(value?: string) {
@@ -257,8 +273,12 @@ function formatTime(value?: string) {
 }
 
 function notificationLabel(item: UserNotification) {
+  const businessType = String(item.businessType || '').toUpperCase();
+  if (businessType === 'QUALITY_WEEKLY_INSPECTION') return '周检提醒';
+  if (businessType === 'ELECTRIC_BOX_INSPECTION') return '电箱提醒';
+  if (businessType === 'EDGE_INSPECTION_TASK') return '临边提醒';
   const kind = businessKind(item);
-  return kind === 'SEAL' ? '用印' : kind === 'QUALITY' ? '质量' : '巡检';
+  return kind === 'SEAL' ? '用印' : kind === 'QUALITY' ? '质量' : kind === 'DOCUMENT' ? '图纸' : '巡检';
 }
 
 function openTodo(todo: TodoItem) { openBusinessRoute(todo); }

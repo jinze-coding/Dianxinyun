@@ -162,6 +162,23 @@ class ResponsibilityReleaseServiceTest {
                         && sql.contains("edge_task.point_type_code IS NOT NULL")), any(Object[].class));
     }
 
+    @Test
+    void losingQualityManageDisablesWeeklyReminderWithoutClearingRectificationResponsibility() {
+        doReturn(impact(0, 0)).when(service).impact(9L, 7L);
+        when(permissionService.hasProjectPermission(any(), any(), anyString())).thenReturn(true);
+        when(permissionService.hasProjectPermission(
+                7L, 9L, SystemPermissionCodes.QUALITY_MANAGE)).thenReturn(false);
+
+        service.releaseForCapabilityLoss(9L, 7L);
+
+        verify(jdbc).update(argThat(sql -> sql != null
+                        && sql.contains("UPDATE quality_weekly_reminder_setting")
+                        && sql.contains("enabled = 0")
+                        && sql.contains("responsible_user_id = NULL")), any(Object[].class));
+        verify(jdbc, never()).update(argThat(sql -> sql != null
+                        && sql.contains("UPDATE quality_issue SET assignee_id = NULL")), any(Object[].class));
+    }
+
     private ResponsibilityImpactVO impact(long configCount, long pendingCount) {
         ResponsibilityImpactVO impact = new ResponsibilityImpactVO();
         impact.setProjectId(9L);

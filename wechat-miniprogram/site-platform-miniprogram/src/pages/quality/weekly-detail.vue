@@ -91,8 +91,7 @@ function preview(paths: string[], current: string) {
 }
 
 function openIssue(issue: QualityIssue) {
-  uni.setStorageSync('site_platform_quality_issue_id', issue.id);
-  switchTab('/pages/quality/index');
+  uni.navigateTo({ url: `/pages/quality/issue-detail?id=${issue.id}` });
 }
 
 function issueStatusLabel(issue: QualityIssue) {

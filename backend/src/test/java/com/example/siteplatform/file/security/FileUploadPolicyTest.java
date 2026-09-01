@@ -91,6 +91,58 @@ class FileUploadPolicyTest {
     }
 
     @Test
+    void circulationAcceptsIfcRvtAndDgnSignatures() {
+        MockMultipartFile ifc = new MockMultipartFile(
+                "file", "模型.ifc", "application/octet-stream",
+                "ISO-10303-21;\nHEADER;\nENDSEC;".getBytes());
+        MockMultipartFile rvt = new MockMultipartFile(
+                "file", "模型.rvt", "application/octet-stream",
+                new byte[]{(byte) 0xd0, (byte) 0xcf, 0x11, (byte) 0xe0,
+                        (byte) 0xa1, (byte) 0xb1, 0x1a, (byte) 0xe1,
+                        'B', 'a', 's', 'i', 'c', 'F', 'i', 'l', 'e', 'I', 'n', 'f', 'o'});
+        MockMultipartFile dgn = new MockMultipartFile(
+                "file", "总图.dgn", "application/octet-stream",
+                new byte[]{0x08, 0x09, (byte) 0xfe, 0x02, 0x00, 0x00});
+
+        assertDoesNotThrow(() -> FileUploadPolicy.validateCirculationDocument(ifc));
+        assertDoesNotThrow(() -> FileUploadPolicy.validateCirculationDocument(rvt));
+        assertDoesNotThrow(() -> FileUploadPolicy.validateCirculationDocument(dgn));
+    }
+
+    @Test
+    void circulationRejectsSpoofedBimFilesAndAllowsTwoHundredMegabytes() {
+        MockMultipartFile fakeIfc = new MockMultipartFile(
+                "file", "模型.ifc", "application/octet-stream", "<script>x</script>".getBytes());
+        MockMultipartFile renamedDocAsRvt = new MockMultipartFile(
+                "file", "普通文档.rvt", "application/octet-stream",
+                new byte[]{(byte) 0xd0, (byte) 0xcf, 0x11, (byte) 0xe0,
+                        (byte) 0xa1, (byte) 0xb1, 0x1a, (byte) 0xe1});
+        MultipartFile oversized = mock(MultipartFile.class);
+        when(oversized.isEmpty()).thenReturn(false);
+        when(oversized.getSize()).thenReturn(FileUploadPolicy.MAX_CIRCULATION_DOCUMENT_BYTES + 1);
+
+        assertThrows(BusinessException.class, () -> FileUploadPolicy.validateCirculationDocument(fakeIfc));
+        assertThrows(BusinessException.class, () -> FileUploadPolicy.validateCirculationDocument(renamedDocAsRvt));
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> FileUploadPolicy.validateCirculationDocument(oversized));
+        assertEquals(413, exception.getCode());
+        assertEquals(200L * 1024 * 1024, FileUploadPolicy.MAX_CIRCULATION_DOCUMENT_BYTES);
+    }
+
+    @Test
+    void receiptSignatureOnlyAcceptsSmallPng() {
+        MockMultipartFile png = new MockMultipartFile(
+                "signature", "签名.png", "image/png",
+                new byte[]{(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a});
+        MockMultipartFile jpeg = new MockMultipartFile(
+                "signature", "签名.jpg", "image/jpeg",
+                new byte[]{(byte) 0xff, (byte) 0xd8, (byte) 0xff});
+
+        assertDoesNotThrow(() -> FileUploadPolicy.validateReceiptSignature(png));
+        assertThrows(BusinessException.class, () -> FileUploadPolicy.validateReceiptSignature(jpeg));
+    }
+
+    @Test
     void rejectsLegacyXlsForXlsxOnlyImport() {
         MockMultipartFile xls = new MockMultipartFile(
                 "file", "电箱模板.xls", "application/vnd.ms-excel",

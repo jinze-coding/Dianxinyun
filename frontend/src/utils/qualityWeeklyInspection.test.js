@@ -34,7 +34,11 @@ test("maps server draft and emits the optimistic-lock save payload", () => {
 });
 
 test("requires evidence for zero-problem and per-problem submissions", () => {
-  const empty = inspectionToEditor({ weekStart: "2026-08-24", draftItems: [] });
+  const empty = inspectionToEditor({
+    weekStart: "2026-08-24",
+    inspectionDate: "2026-08-26",
+    draftItems: [],
+  });
   assert.deepEqual(
     validateWeeklySubmission(empty, new Date(2026, 7, 26)),
     ["无问题周检必须填写检查结论", "无问题周检必须上传 1–20 张现场照片"],

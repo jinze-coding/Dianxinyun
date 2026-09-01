@@ -76,6 +76,7 @@ public class ProjectService {
             "quality_issue_log",
             "quality_weekly_inspection",
             "quality_weekly_inspection_draft_item",
+            "quality_weekly_reminder_setting",
             "safety_education_batch",
             "seal_application",
             "seal_application_file",

@@ -21,6 +21,7 @@ import com.example.siteplatform.siteaccess.entity.SiteVisitPerson;
 import com.example.siteplatform.siteaccess.mapper.SiteVisitAuditLogMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteVisitInvitationMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteVisitPersonMapper;
+import com.example.siteplatform.siteaccess.mapper.SiteMeetingVisitRegistrationMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.BeforeEach;
@@ -60,6 +61,7 @@ class SiteAccessServiceTest {
     @Mock private SiteVisitInvitationMapper invitationMapper;
     @Mock private SiteVisitPersonMapper personMapper;
     @Mock private SiteVisitAuditLogMapper auditLogMapper;
+    @Mock private SiteMeetingVisitRegistrationMapper meetingRegistrationMapper;
     @Mock private ProjectInfoMapper projectInfoMapper;
     @Mock private SysUserMapper userMapper;
     @Mock private SysUserProjectMapper userProjectMapper;
@@ -79,11 +81,12 @@ class SiteAccessServiceTest {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles("test");
         crypto = new VisitorDataCryptoService("", environment);
-        service = new SiteAccessService(invitationMapper, personMapper, auditLogMapper,
+        service = new SiteAccessService(invitationMapper, personMapper, auditLogMapper, meetingRegistrationMapper,
                 projectInfoMapper, userMapper, userProjectMapper, projectPermissionService,
                 projectProfileService, projectRouteImageService,
                 crypto, wechatPlatformClient, visitorSessionService, visitorProfileService, operationLogMapper,
-                new ObjectMapper().findAndRegisterModules(), "pages/public/visitor-invite", "release");
+                new ObjectMapper().findAndRegisterModules(), "pages/public/visitor-invite",
+                "pages/public/meeting-invite", "release");
     }
 
     @Test

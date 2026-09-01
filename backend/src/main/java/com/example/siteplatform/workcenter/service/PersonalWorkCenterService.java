@@ -5,6 +5,10 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.common.PageResult;
+import com.example.siteplatform.document.entity.DocumentDistributionBatch;
+import com.example.siteplatform.document.entity.DocumentDistributionRecipient;
+import com.example.siteplatform.document.mapper.DocumentDistributionBatchMapper;
+import com.example.siteplatform.document.mapper.DocumentDistributionRecipientMapper;
 import com.example.siteplatform.inspection.service.InspectionService;
 import com.example.siteplatform.inspection.general.service.GeneralInspectionTaskService;
 import com.example.siteplatform.inspection.general.vo.GeneralInspectionTaskVO;
@@ -63,19 +67,37 @@ public class PersonalWorkCenterService {
     public static final String BUSINESS_EDGE_INSPECTION_RECTIFICATION = "EDGE_INSPECTION_RECTIFICATION";
     public static final String BUSINESS_EDGE_INSPECTION_REVIEW = "EDGE_INSPECTION_REVIEW";
     public static final String BUSINESS_QUALITY = "QUALITY_ISSUE";
+    public static final String BUSINESS_DOCUMENT_DISTRIBUTION = "DOCUMENT_DISTRIBUTION";
+
+    private static final Map<String, Set<String>> NOTIFICATION_BUSINESS_GROUPS = Map.of(
+            "QUALITY", Set.of(
+                    "QUALITY_ISSUE",
+                    "QUALITY_WEEKLY_INSPECTION",
+                    "QUALITY_ISSUE_EXPORT"),
+            "INSPECTION", Set.of(
+                    "INSPECTION_RECORD",
+                    "ELECTRIC_BOX_INSPECTION",
+                    "EDGE_INSPECTION_TASK",
+                    "EDGE_INSPECTION_RECTIFICATION",
+                    "EDGE_INSPECTION_REVIEW",
+                    "EDGE_INSPECTION_EXPORT")
+    );
 
     private static final String SEAL_PENDING = "PENDING_APPROVAL";
     private static final String TASK_PENDING = "PENDING";
     private static final String TASK_SEAL_APPROVAL = "SEAL_APPROVAL";
+    private static final String TASK_DOCUMENT_RECEIPT = "DOCUMENT_RECEIPT";
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final Set<String> ROUTE_CODES = Set.of(
             "SEAL_APPLICATION_DETAIL",
             "QUALITY_ISSUE_DETAIL",
+            "QUALITY_WEEKLY_INSPECTION_WEEK",
             "INSPECTION_FORM",
             "INSPECTION_RECORD_DETAIL",
             "INSPECTION_RECTIFICATION_DETAIL",
             "EDGE_INSPECTION_TASK_DETAIL",
-            "EDGE_INSPECTION_RECTIFICATION_DETAIL"
+            "EDGE_INSPECTION_RECTIFICATION_DETAIL",
+            "DOCUMENT_DISTRIBUTION_DETAIL"
     );
     private static final Comparator<PersonalTodoVO> TODO_ORDER =
             Comparator.comparingInt((PersonalTodoVO todo) -> priorityRank(todo.getPriority()))
@@ -94,6 +116,8 @@ public class PersonalWorkCenterService {
     private final ProjectInfoMapper projectInfoMapper;
     private final SysUserProjectMapper userProjectMapper;
     private final ObjectMapper objectMapper;
+    private DocumentDistributionRecipientMapper documentRecipientMapper;
+    private DocumentDistributionBatchMapper documentBatchMapper;
     private GeneralInspectionTaskService generalInspectionTaskService;
 
     public PersonalWorkCenterService(InspectionService inspectionService,
@@ -116,6 +140,16 @@ public class PersonalWorkCenterService {
         this.projectInfoMapper = projectInfoMapper;
         this.userProjectMapper = userProjectMapper;
         this.objectMapper = objectMapper;
+    }
+
+    @Autowired(required = false)
+    public void setDocumentRecipientMapper(DocumentDistributionRecipientMapper documentRecipientMapper) {
+        this.documentRecipientMapper = documentRecipientMapper;
+    }
+
+    @Autowired(required = false)
+    public void setDocumentBatchMapper(DocumentDistributionBatchMapper documentBatchMapper) {
+        this.documentBatchMapper = documentBatchMapper;
     }
 
     @Autowired(required = false)
@@ -163,7 +197,8 @@ public class PersonalWorkCenterService {
     }
 
     @Transactional(readOnly = true)
-    public PageResult<InboxNotificationVO> inbox(String readStatus, String businessType, Long projectId,
+    public PageResult<InboxNotificationVO> inbox(String readStatus, String businessType, String businessGroup,
+                                                 Long projectId,
                                                  Integer pageNo, Integer pageSize, SysUser currentUser) {
         SysUser user = requireEnabledUser(currentUser);
         ProjectScope scope = resolveProjectScope(user, projectId);
@@ -171,12 +206,22 @@ public class PersonalWorkCenterService {
         int pageSizeValue = normalizePageSize(pageSize);
         LambdaQueryWrapper<UserNotification> query = notificationScopeQuery(scope, user.getId());
         applyReadStatus(query, readStatus);
+        if (StringUtils.hasText(businessType) && StringUtils.hasText(businessGroup)) {
+            throw new BusinessException("业务类型与业务分组不能同时筛选");
+        }
         if (StringUtils.hasText(businessType)) {
             String normalizedBusinessType = businessType.trim().toUpperCase(Locale.ROOT);
             if (normalizedBusinessType.length() > 50) {
                 throw new BusinessException("业务类型长度不能超过50个字符");
             }
             query.eq(UserNotification::getBusinessType, normalizedBusinessType);
+        } else if (StringUtils.hasText(businessGroup)) {
+            String normalizedBusinessGroup = businessGroup.trim().toUpperCase(Locale.ROOT);
+            Set<String> businessTypes = NOTIFICATION_BUSINESS_GROUPS.get(normalizedBusinessGroup);
+            if (businessTypes == null) {
+                throw new BusinessException("业务分组仅支持 QUALITY 或 INSPECTION");
+            }
+            query.in(UserNotification::getBusinessType, businessTypes);
         }
         query.orderByDesc(UserNotification::getCreateTime).orderByDesc(UserNotification::getId);
         Page<UserNotification> result = notificationMapper.selectPage(
@@ -275,15 +320,18 @@ public class PersonalWorkCenterService {
             }
         }
         todos.addAll(sealApprovalTodos(scope, user));
+        todos.addAll(documentReceiptTodos(scope, user));
         return todos;
     }
 
     private List<PersonalTodoVO> generalInspectionTodos(ProjectScope scope, SysUser user) {
         if (generalInspectionTaskService == null) return List.of();
         List<PersonalTodoVO> result = new ArrayList<>();
+        LocalDateTime now = LocalDateTime.now(BUSINESS_ZONE);
         for (GeneralInspectionTaskVO task : generalInspectionTaskService.listTasks(
                 null, "PENDING", null, null, true, user)) {
             if (!scope.projectIds().contains(task.getProjectId())) continue;
+            if (task.getAvailableTime() != null && task.getAvailableTime().isAfter(now)) continue;
             PersonalTodoVO todo = new PersonalTodoVO();
             todo.setId(task.getId());
             todo.setTodoKey("EDGE_INSPECTION_TASK:" + task.getId());
@@ -310,6 +358,7 @@ public class PersonalWorkCenterService {
             try {
                 for (GeneralInspectionTaskVO task : generalInspectionTaskService.listTasksNeedingAssignment(
                         candidateProjectId, user)) {
+                    if (task.getAvailableTime() != null && task.getAvailableTime().isAfter(now)) continue;
                     PersonalTodoVO todo = new PersonalTodoVO();
                     todo.setId(task.getId());
                     todo.setTodoKey("EDGE_INSPECTION_TASK_ASSIGN:" + task.getId());
@@ -399,6 +448,57 @@ public class PersonalWorkCenterService {
             } catch (BusinessException ignored) {
                 // 当前成员没有该项目临边巡检管理权限时不生成管理待办。
             }
+        }
+        return result;
+    }
+
+    private List<PersonalTodoVO> documentReceiptTodos(ProjectScope scope, SysUser user) {
+        if (documentRecipientMapper == null || documentBatchMapper == null || scope.projectIds().isEmpty()) {
+            return List.of();
+        }
+        List<DocumentDistributionRecipient> recipients = safeList(documentRecipientMapper.selectList(
+                new LambdaQueryWrapper<DocumentDistributionRecipient>()
+                        .eq(DocumentDistributionRecipient::getUserId, user.getId())
+                        .eq(DocumentDistributionRecipient::getStatus, "PENDING")
+                        .in(DocumentDistributionRecipient::getProjectId, scope.projectIds())
+                        .orderByDesc(DocumentDistributionRecipient::getCreateTime)));
+        if (recipients.isEmpty()) return List.of();
+        Set<Long> batchIds = recipients.stream().map(DocumentDistributionRecipient::getBatchId)
+                .filter(Objects::nonNull).collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<Long, DocumentDistributionBatch> batches = safeList(documentBatchMapper.selectList(
+                new LambdaQueryWrapper<DocumentDistributionBatch>()
+                        .in(DocumentDistributionBatch::getId, batchIds)))
+                .stream().collect(Collectors.toMap(DocumentDistributionBatch::getId, Function.identity()));
+        LocalDateTime now = LocalDateTime.now(BUSINESS_ZONE);
+        List<PersonalTodoVO> result = new ArrayList<>();
+        for (DocumentDistributionRecipient recipient : recipients) {
+            DocumentDistributionBatch batch = batches.get(recipient.getBatchId());
+            if (batch == null || !Set.of("PUBLISHED", "DISPUTED").contains(batch.getStatus())
+                    || !"ACTIVE".equals(batch.getQrStatus())
+                    || !"ACTIVE".equals(projectPermissionService.getProjectAccessStatus(user.getId(), batch.getProjectId()))
+                    || !projectPermissionService.hasSystemPermission(user.getId(), batch.getProjectId(),
+                    SystemPermissionCodes.DOCUMENT_VIEW)) continue;
+            PersonalTodoVO todo = new PersonalTodoVO();
+            todo.setId(recipient.getId());
+            todo.setTodoKey("DOCUMENT_RECEIPT:" + recipient.getId());
+            todo.setBusinessType(BUSINESS_DOCUMENT_DISTRIBUTION);
+            todo.setTaskType(TASK_DOCUMENT_RECEIPT);
+            todo.setType(TASK_DOCUMENT_RECEIPT);
+            todo.setTargetId(batch.getId());
+            todo.setProjectId(batch.getProjectId());
+            todo.setProjectName(scope.projectNames().get(batch.getProjectId()));
+            todo.setTitle("待签收图纸资料 " + batch.getDistributionNo());
+            todo.setSummary("渠道：" + recipient.getChannel());
+            todo.setDueAt(batch.getDeadline());
+            boolean overdue = batch.getDeadline() != null && batch.getDeadline().isBefore(now);
+            todo.setDueText(overdue ? "已逾期，请立即处理" : "请于签收期限前处理");
+            todo.setPriority(overdue ? "danger" : "warning");
+            todo.setCreatedAt(batch.getPublishedTime());
+            todo.setRouteCode("DOCUMENT_DISTRIBUTION_DETAIL");
+            todo.setRouteParams(Map.of("distributionId", batch.getId()));
+            todo.setScope(SCOPE_PENDING);
+            todo.setReadOnly(false);
+            result.add(todo);
         }
         return result;
     }
@@ -606,10 +706,11 @@ public class PersonalWorkCenterService {
                     .filter(todo -> Set.of(BUSINESS_EDGE_INSPECTION_TASK, BUSINESS_EDGE_INSPECTION_RECTIFICATION,
                             BUSINESS_EDGE_INSPECTION_REVIEW).contains(todo.getBusinessType()))
                     .collect(Collectors.toCollection(ArrayList::new));
-            case "GENERAL_INSPECTION", "GENERAL_INSPECTION_TASK" -> todos.stream()
-                    .filter(todo -> BUSINESS_GENERAL_INSPECTION.equals(todo.getBusinessType()))
+            case "DOCUMENT", "DOCUMENT_DISTRIBUTION" -> todos.stream()
+                    .filter(todo -> BUSINESS_DOCUMENT_DISTRIBUTION.equals(todo.getBusinessType()))
                     .collect(Collectors.toCollection(ArrayList::new));
-            case "INSPECTION", "REVIEW", "RECTIFICATION", "RECHECK", TASK_SEAL_APPROVAL -> todos.stream()
+            case "INSPECTION", "REVIEW", "RECTIFICATION", "RECHECK", TASK_SEAL_APPROVAL,
+                    TASK_DOCUMENT_RECEIPT -> todos.stream()
                     .filter(todo -> normalized.equals(todo.getTaskType()))
                     .collect(Collectors.toCollection(ArrayList::new));
             default -> throw new BusinessException("不支持的待办类型: " + normalized);

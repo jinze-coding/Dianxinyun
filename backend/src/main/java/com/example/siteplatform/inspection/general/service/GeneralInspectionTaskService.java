@@ -40,7 +40,6 @@ public class GeneralInspectionTaskService {
     private final GeneralInspectionTemplateVersionMapper templateVersionMapper;
     private final GeneralInspectionRectificationMapper rectificationMapper;
     private final GeneralInspectionActionLogMapper actionLogMapper;
-    private final GeneralInspectionProjectSettingMapper settingMapper;
     private final SysUserMapper userMapper;
     private final FileResourceService fileResourceService;
     private final UserNotificationService notificationService;
@@ -52,17 +51,11 @@ public class GeneralInspectionTaskService {
         requireUser(currentUser);
         LambdaQueryWrapper<GeneralInspectionTask> query = new LambdaQueryWrapper<>();
         if (projectId != null) {
-            if (mine) permissionService.requireEnabled(projectId, currentUser);
+            if (mine) permissionService.requireProjectAccess(projectId, currentUser);
             else permissionService.requireRecordView(projectId, currentUser);
             query.eq(GeneralInspectionTask::getProjectId, projectId);
         } else {
             if (!mine) throw new BusinessException("跨项目记录查询必须指定项目");
-            List<Long> enabledProjectIds = settingMapper.selectList(
-                            new LambdaQueryWrapper<GeneralInspectionProjectSetting>()
-                                    .eq(GeneralInspectionProjectSetting::getEnabled, 1))
-                    .stream().map(GeneralInspectionProjectSetting::getProjectId).toList();
-            if (enabledProjectIds.isEmpty()) return List.of();
-            query.in(GeneralInspectionTask::getProjectId, enabledProjectIds);
         }
         if (mine) query.eq(GeneralInspectionTask::getAssigneeId, currentUser.getId());
         query.isNotNull(GeneralInspectionTask::getPointTypeCode);
@@ -103,7 +96,7 @@ public class GeneralInspectionTaskService {
     public GeneralInspectionTaskVO getTask(Long id, SysUser currentUser) {
         GeneralInspectionTask task = requireTask(id);
         if (!isEdgeTask(task)) throw BusinessException.notFound("临边巡检任务不存在");
-        permissionService.requireEnabled(task.getProjectId(), currentUser);
+        permissionService.requireProjectAccess(task.getProjectId(), currentUser);
         if (!canReadTask(task, currentUser, false)) throw BusinessException.forbidden("无该巡检任务访问权限");
         return toTaskVO(task, true, currentUser);
     }
@@ -115,7 +108,7 @@ public class GeneralInspectionTaskService {
                 .eq(GeneralInspectionPoint::getPublicCode, code)
                 .eq(GeneralInspectionPoint::getDeleted, 0).last("LIMIT 1"));
         if (point == null) throw BusinessException.notFound("巡检点位码不存在或已换码");
-        permissionService.requireEnabled(point.getProjectId(), currentUser);
+        permissionService.requireProjectAccess(point.getProjectId(), currentUser);
         GeneralInspectionScanVO vo = baseScan(point);
         vo.setMode("INTERNAL");
         List<GeneralInspectionTask> eligible = taskMapper.selectList(new LambdaQueryWrapper<GeneralInspectionTask>()
@@ -375,15 +368,8 @@ public class GeneralInspectionTaskService {
         requireUser(currentUser);
         LambdaQueryWrapper<GeneralInspectionRectification> query = new LambdaQueryWrapper<>();
         if (projectId != null) {
-            permissionService.requireEnabled(projectId, currentUser);
+            permissionService.requireProjectAccess(projectId, currentUser);
             query.eq(GeneralInspectionRectification::getProjectId, projectId);
-        } else {
-            List<Long> enabledProjectIds = settingMapper.selectList(
-                            new LambdaQueryWrapper<GeneralInspectionProjectSetting>()
-                                    .eq(GeneralInspectionProjectSetting::getEnabled, 1))
-                    .stream().map(GeneralInspectionProjectSetting::getProjectId).toList();
-            if (enabledProjectIds.isEmpty()) return List.of();
-            query.in(GeneralInspectionRectification::getProjectId, enabledProjectIds);
         }
         String normalizedScope = StringUtils.hasText(scope) ? scope.trim().toUpperCase() : "MINE";
         if ("RECTIFY".equals(normalizedScope)) query.eq(GeneralInspectionRectification::getAssigneeId, currentUser.getId());
@@ -404,7 +390,7 @@ public class GeneralInspectionTaskService {
 
     public GeneralInspectionRectificationVO getRectification(Long id, SysUser currentUser) {
         GeneralInspectionRectification rectification = requireRectification(id);
-        permissionService.requireEnabled(rectification.getProjectId(), currentUser);
+        permissionService.requireProjectAccess(rectification.getProjectId(), currentUser);
         if (!canReadRectification(rectification, currentUser)) throw BusinessException.forbidden("无该整改任务访问权限");
         return toRectificationVO(rectification, currentUser);
     }
@@ -507,7 +493,7 @@ public class GeneralInspectionTaskService {
                 .isNotNull(GeneralInspectionTask::getPointTypeCode)
                 .gt(GeneralInspectionTask::getAbnormalCount, 0);
         if (projectId != null) {
-            permissionService.requireEnabled(projectId, currentUser);
+            permissionService.requireProjectAccess(projectId, currentUser);
             switch (normalizedScope) {
                 case "ALL" -> permissionService.requireRecordView(projectId, currentUser);
                 case "RECTIFY" -> permissionService.requireRectify(projectId, currentUser);
@@ -519,12 +505,6 @@ public class GeneralInspectionTaskService {
             taskQuery.eq(GeneralInspectionTask::getProjectId, projectId);
         } else {
             if ("ALL".equals(normalizedScope)) throw new BusinessException("管理查询必须指定项目");
-            List<Long> enabledProjects = settingMapper.selectList(
-                            new LambdaQueryWrapper<GeneralInspectionProjectSetting>()
-                                    .eq(GeneralInspectionProjectSetting::getEnabled, 1))
-                    .stream().map(GeneralInspectionProjectSetting::getProjectId).toList();
-            if (enabledProjects.isEmpty()) return List.of();
-            taskQuery.in(GeneralInspectionTask::getProjectId, enabledProjects);
         }
         List<GeneralInspectionTask> tasks = taskMapper.selectList(taskQuery
                 .orderByAsc(GeneralInspectionTask::getDueTime)
@@ -546,7 +526,7 @@ public class GeneralInspectionTaskService {
     public EdgeInspectionRectificationSheetVO getEdgeRectificationSheet(Long taskId, SysUser currentUser) {
         GeneralInspectionTask task = requireTask(taskId);
         if (!isEdgeTask(task)) throw BusinessException.notFound("临边巡检整改单不存在");
-        permissionService.requireEnabled(task.getProjectId(), currentUser);
+        permissionService.requireProjectAccess(task.getProjectId(), currentUser);
         List<GeneralInspectionRectification> rectifications = listRectificationsByTask(taskId).stream()
                 .filter(rectification -> !"VOIDED".equals(rectification.getStatus())).toList();
         if (rectifications.isEmpty()) throw BusinessException.notFound("临边巡检整改单不存在");

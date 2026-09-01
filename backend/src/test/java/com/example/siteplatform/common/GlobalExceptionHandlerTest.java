@@ -39,6 +39,14 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void businessErrorCanReturnSafeStructuredConflictContext() throws Exception {
+        mockMvc.perform(get("/test/business-error-data"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.data.currentVersionId").value(23));
+    }
+
+    @Test
     void invalidRequestBodyReturnsHttp400WithFirstValidationMessage() throws Exception {
         mockMvc.perform(post("/test/validate")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -93,6 +101,11 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/test/business-error/{code}")
         Result<Void> businessError(@PathVariable Integer code) {
             throw BusinessException.of(code, "业务错误");
+        }
+
+        @GetMapping("/test/business-error-data")
+        Result<Void> businessErrorData() {
+            throw BusinessException.of(409, "版本冲突", java.util.Map.of("currentVersionId", 23));
         }
 
         @PostMapping("/test/validate")

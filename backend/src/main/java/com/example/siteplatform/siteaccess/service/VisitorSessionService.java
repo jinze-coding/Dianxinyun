@@ -19,6 +19,7 @@ import java.util.Objects;
 @Service
 public class VisitorSessionService {
     public static final String SOURCE_INVITATION = "INVITATION";
+    public static final String SOURCE_MEETING_INVITATION = "MEETING_INVITATION";
     public static final String SOURCE_GUARD_QR = "GUARD_QR";
     private static final String PREFIX = "site-access:visitor-session:";
     private static final Duration TTL = Duration.ofMinutes(30);
@@ -50,6 +51,11 @@ public class VisitorSessionService {
     public PublicVisitorSessionVO issueGuard(String wechatCode, Long guardQrId, Long projectId) {
         return issue(wechatCode, SOURCE_GUARD_QR, guardQrId, projectId,
                 "public-site-guard-session-identity");
+    }
+
+    public PublicVisitorSessionVO issueMeeting(String wechatCode, Long invitationId, Long projectId) {
+        return issue(wechatCode, SOURCE_MEETING_INVITATION, invitationId, projectId,
+                "public-site-meeting-session-identity");
     }
 
     private PublicVisitorSessionVO issue(String wechatCode, String sourceType, Long sourceId,
@@ -102,6 +108,16 @@ public class VisitorSessionService {
                 || !Objects.equals(context.effectiveSourceId(), guardQrId)
                 || !Objects.equals(context.projectId(), projectId)) {
             throw BusinessException.of(403, "访客会话与当前门卫登记码不匹配");
+        }
+        return context;
+    }
+
+    public VisitorSessionContext requireMeeting(String token, Long invitationId, Long projectId) {
+        VisitorSessionContext context = require(token);
+        if (!SOURCE_MEETING_INVITATION.equals(context.effectiveSourceType())
+                || !Objects.equals(context.effectiveSourceId(), invitationId)
+                || !Objects.equals(context.projectId(), projectId)) {
+            throw BusinessException.of(403, "访客会话与当前会议邀请不匹配");
         }
         return context;
     }

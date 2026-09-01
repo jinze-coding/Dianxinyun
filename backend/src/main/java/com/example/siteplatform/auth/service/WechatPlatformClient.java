@@ -102,8 +102,9 @@ public class WechatPlatformClient {
                 .retrieve().body(String.class));
         JsonNode json = read(body);
         ensureSuccess(json, "微信登录失败");
-        if (!json.hasNonNull("openid")) throw new BusinessException("微信登录未返回 openid");
-        return new WechatIdentity(appId, json.path("openid").asText(), json.path("unionid").asText(null));
+        String openid = json.path("openid").asText(null);
+        if (!StringUtils.hasText(openid)) throw new BusinessException("微信登录未返回有效身份");
+        return new WechatIdentity(appId, openid, json.path("unionid").asText(null));
     }
 
     public String getPhoneNumber(String phoneCode, String mockPhone) {

@@ -17,7 +17,11 @@ const loading = ref(false);
 const errorMessage = ref('');
 const { scrollStyle } = usePageScrollHeight({ bottomRpx: 30, minHeight: 260 });
 
-onLoad((options) => { projectId.value = Number(options?.projectId || 0); });
+onLoad((options) => {
+  projectId.value = Number(options?.projectId || 0);
+  const filter = String(options?.filter || '').toUpperCase();
+  if (['RECTIFY', 'REVIEW'].includes(filter)) activeFilter.value = filter;
+});
 onShow(async () => {
   if (!await authStore.ensureRootAccess('/pages/inspection/index')) return;
   await load();
@@ -26,6 +30,7 @@ onShow(async () => {
 const filteredSheets = computed(() => sheets.value.filter((sheet) => {
   if (activeFilter.value === 'ALL') return true;
   if (activeFilter.value === 'ACTIVE') return !['CLOSED', 'VOIDED'].includes(sheet.status);
+  if (activeFilter.value === 'RECTIFY') return ['UNASSIGNED', 'PENDING', 'REJECTED'].includes(sheet.status);
   if (activeFilter.value === 'REVIEW') return sheet.status === 'COMPLETED';
   return sheet.status === activeFilter.value;
 }));
@@ -73,7 +78,7 @@ function goBack() {
     <scroll-view class="page-scroll" scroll-y enable-flex :style="scrollStyle">
       <view class="content">
         <view class="filter-row">
-          <button v-for="filter in [{ code: 'ACTIVE', name: '待处理' }, { code: 'REVIEW', name: '待复查' }, { code: 'CLOSED', name: '已闭环' }, { code: 'ALL', name: '全部' }]"
+          <button v-for="filter in [{ code: 'ACTIVE', name: '待处理' }, { code: 'RECTIFY', name: '待整改' }, { code: 'REVIEW', name: '待复查' }, { code: 'CLOSED', name: '已闭环' }, { code: 'ALL', name: '全部' }]"
             :key="filter.code" class="filter" :class="{ active: activeFilter === filter.code }" @tap="activeFilter = filter.code">{{ filter.name }}</button>
         </view>
         <view v-if="loading" class="state">正在加载临边整改单…</view>

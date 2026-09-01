@@ -29,6 +29,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.time.LocalDate;
 
 @Tag(name = "质量管理", description = "质量问题检查、整改和复查闭环接口")
 @RestController
@@ -51,9 +52,12 @@ public class QualityIssueController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false, defaultValue = "ALL") String source,
+            @RequestParam(required = false) LocalDate startDate,
+            @RequestParam(required = false) LocalDate endDate,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
-        return Result.success(qualityIssueService.listIssues(projectId, status, keyword, source, currentUser));
+        return Result.success(qualityIssueService.listIssues(
+                projectId, status, keyword, source, startDate, endDate, currentUser));
     }
 
     @Operation(summary = "分页获取质量问题列表")
@@ -63,12 +67,15 @@ public class QualityIssueController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false, defaultValue = "ALL") String source,
+            @RequestParam(required = false) LocalDate startDate,
+            @RequestParam(required = false) LocalDate endDate,
             @RequestParam(defaultValue = "1") Integer pageNo,
             @RequestParam(defaultValue = "20") Integer pageSize,
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
         return Result.success(qualityIssueService.pageIssues(
-                projectId, status, keyword, source, pageNo, pageSize, currentUser));
+                projectId, status, keyword, source, startDate, endDate,
+                pageNo, pageSize, currentUser));
     }
 
     @Operation(summary = "获取质量问题统计")

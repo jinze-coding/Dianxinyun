@@ -1,0 +1,63 @@
+.dc-void,
+.dc-reissue {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--document-center-border, #dce2eb);
+}
+
+.dc-void textarea {
+  min-height: 76px;
+}
+
+.dc-reissue h3 {
+  margin: 0 0 4px;
+}
+
+.dc-copy-grid {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--document-center-border, #dce2eb);
+}
+
+.dc-copy-grid label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px 18px;
+  align-items: center;
+  gap: 6px;
+}
+
+.dc-copy-grid label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dc-copy-grid input {
+  padding: 6px;
+}
+
+.dc-copy-grid em {
+  color: var(--document-center-secondary, #657085);
+}
+
+.dc-template {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--document-center-active, #edf4ff);
+  color: var(--document-center-secondary, #657085);
+}
+
+.dc-detail-recipient > span {
+  min-width: 0;
+}
+
+.dc-detail-recipient small {
+  display: block;
+  margin-top: 5px;
+  color: var(--document-center-muted, #9aa3b1);
+  font-weight: 400;
+}

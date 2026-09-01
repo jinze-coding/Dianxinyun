@@ -1,10 +1,13 @@
 {
   "name": "电信云平台现场端",
   "appid": "__UNI__SITE_PLATFORM",
-  "description": "项目现场电箱检查小程序原型",
-  "versionName": "0.1.4",
-  "versionCode": "104",
+  "description": "电信云平台项目现场综合管理系统微信端",
+  "versionName": "0.1.8",
+  "versionCode": "108",
   "transformPx": false,
+  "uniStatistics": {
+    "enable": false
+  },
   "h5": {
     "router": {
       "mode": "hash"
@@ -13,7 +16,7 @@
   "mp-weixin": {
     "appid": "wxc2c8114ac4b5679a",
     "setting": {
-      "urlCheck": false,
+      "urlCheck": true,
       "es6": true,
       "postcss": true,
       "minified": true

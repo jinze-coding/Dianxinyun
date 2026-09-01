@@ -195,17 +195,23 @@ public class ProjectDocumentController {
     @GetMapping("/{id}/preview")
     public ResponseEntity<Resource> preview(@PathVariable Long id,
                                             @RequestParam(required = false) Long versionId,
+                                            @RequestParam(defaultValue = "false") boolean acknowledgeSuperseded,
+                                            @RequestParam(required = false) Long distributionBatchId,
                                             @RequestHeader("Authorization") String token,
                                             HttpServletRequest request) {
-        return contentResponse(documentService.content(id, versionId, currentUser(token), request, true), true);
+        return contentResponse(documentService.content(id, versionId, currentUser(token), request, true,
+                acknowledgeSuperseded, distributionBatchId), true);
     }
 
     @GetMapping("/{id}/download")
     public ResponseEntity<Resource> download(@PathVariable Long id,
                                              @RequestParam(required = false) Long versionId,
+                                             @RequestParam(defaultValue = "false") boolean acknowledgeSuperseded,
+                                             @RequestParam(required = false) Long distributionBatchId,
                                              @RequestHeader("Authorization") String token,
                                              HttpServletRequest request) {
-        return contentResponse(documentService.content(id, versionId, currentUser(token), request, false), false);
+        return contentResponse(documentService.content(id, versionId, currentUser(token), request, false,
+                acknowledgeSuperseded, distributionBatchId), false);
     }
 
     private ResponseEntity<Resource> contentResponse(ProjectDocumentContent content, boolean inline) {

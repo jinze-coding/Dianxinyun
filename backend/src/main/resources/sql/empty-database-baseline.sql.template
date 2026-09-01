@@ -352,6 +352,7 @@ CREATE TABLE project_document (
     document_no VARCHAR(100),
     title VARCHAR(200) NOT NULL,
     category VARCHAR(40) NOT NULL DEFAULT 'PROJECT_DATA' COMMENT '历史兼容字段，正式界面不再维护',
+    document_type VARCHAR(30) NOT NULL DEFAULT 'GENERAL' COMMENT 'GENERAL/DRAWING/TECHNICAL_DOCUMENT',
     status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
     current_version_id BIGINT,
     created_by BIGINT NOT NULL,
@@ -375,6 +376,13 @@ CREATE TABLE project_document_version (
     version_no INT NOT NULL,
     file_resource_id BIGINT NOT NULL,
     change_note VARCHAR(500),
+    external_revision VARCHAR(100) COMMENT '外部版次',
+    version_status VARCHAR(20) NOT NULL DEFAULT 'CURRENT' COMMENT 'CURRENT/SUPERSEDED/WITHDRAWN',
+    superseded_by_version_id BIGINT COMMENT '替代本版本的新版本ID',
+    published_by BIGINT COMMENT '发布人ID',
+    published_by_name VARCHAR(100) COMMENT '发布人姓名快照',
+    published_time DATETIME COMMENT '正式发布时间',
+    withdrawn_reason VARCHAR(500) COMMENT '撤回原因',
     created_by BIGINT NOT NULL,
     created_by_name VARCHAR(100),
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -382,6 +390,172 @@ CREATE TABLE project_document_version (
     KEY idx_document_version_file (file_resource_id),
     KEY idx_document_version_time (document_id, create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='工程资料版本';
+
+CREATE TABLE document_incoming_batch (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    incoming_no VARCHAR(40) NOT NULL,
+    source_organization VARCHAR(200) NOT NULL,
+    sender_name VARCHAR(100),
+    source_reference_no VARCHAR(100),
+    receive_method VARCHAR(30),
+    received_at DATETIME NOT NULL,
+    receiver_id BIGINT NOT NULL,
+    receiver_name VARCHAR(100) NOT NULL,
+    remark VARCHAR(500),
+    status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+    published_by BIGINT,
+    published_by_name VARCHAR(100),
+    published_time DATETIME,
+    voided_by BIGINT,
+    voided_by_name VARCHAR(100),
+    voided_time DATETIME,
+    void_reason VARCHAR(500),
+    version INT NOT NULL DEFAULT 0,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_document_incoming_no (incoming_no),
+    KEY idx_document_incoming_project (project_id, status, received_at),
+    KEY idx_document_incoming_receiver (receiver_id, status, update_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='图纸技术文件收文批次';
+
+CREATE TABLE document_incoming_item (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    batch_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    file_resource_id BIGINT NOT NULL,
+    folder_id BIGINT NOT NULL DEFAULT 0,
+    item_order INT NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    document_no VARCHAR(100),
+    document_type VARCHAR(30) NOT NULL,
+    external_revision VARCHAR(100),
+    match_mode VARCHAR(20) NOT NULL,
+    target_document_id BIGINT,
+    duplicate_revision_reason VARCHAR(500),
+    change_note VARCHAR(500),
+    published_document_id BIGINT,
+    published_version_id BIGINT,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_document_incoming_item_order (batch_id, item_order),
+    UNIQUE KEY uk_document_incoming_file (file_resource_id),
+    KEY idx_document_incoming_item_batch (batch_id, status, item_order),
+    KEY idx_document_incoming_item_target (project_id, target_document_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='收文批次文件核对项';
+
+CREATE TABLE document_distribution_batch (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    incoming_batch_id BIGINT,
+    distribution_no VARCHAR(40) NOT NULL,
+    deadline DATETIME NOT NULL,
+    notification_template VARCHAR(500) NOT NULL,
+    message_note VARCHAR(500),
+    electronic_signature_required TINYINT NOT NULL DEFAULT 0,
+    paper_signature_required TINYINT NOT NULL DEFAULT 1,
+    qr_scene_digest CHAR(64) NOT NULL,
+    qr_scene_ciphertext VARCHAR(500) NOT NULL,
+    qr_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    status VARCHAR(20) NOT NULL DEFAULT 'PUBLISHED',
+    published_by BIGINT NOT NULL,
+    published_by_name VARCHAR(100) NOT NULL,
+    published_time DATETIME NOT NULL,
+    overdue_notification_time DATETIME,
+    voided_by BIGINT,
+    voided_by_name VARCHAR(100),
+    voided_time DATETIME,
+    void_reason VARCHAR(500),
+    version INT NOT NULL DEFAULT 0,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_document_distribution_no (distribution_no),
+    UNIQUE KEY uk_document_distribution_scene (qr_scene_digest),
+    KEY idx_document_distribution_project (project_id, status, deadline),
+    KEY idx_document_distribution_incoming (incoming_batch_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='图纸技术文件发放批次';
+
+CREATE TABLE document_distribution_item (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    batch_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    item_order INT NOT NULL,
+    document_id BIGINT NOT NULL,
+    version_id BIGINT NOT NULL,
+    document_no_snapshot VARCHAR(100),
+    title_snapshot VARCHAR(200) NOT NULL,
+    document_type_snapshot VARCHAR(30) NOT NULL,
+    system_version_no INT NOT NULL,
+    external_revision_snapshot VARCHAR(100),
+    file_name_snapshot VARCHAR(255) NOT NULL,
+    sha256_snapshot CHAR(64),
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_document_distribution_item_order (batch_id, item_order),
+    UNIQUE KEY uk_document_distribution_item_version (batch_id, version_id),
+    KEY idx_document_distribution_item_document (document_id, version_id),
+    KEY idx_document_distribution_item_project (project_id, batch_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='发放批次精确版本快照';
+
+CREATE TABLE document_distribution_recipient (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    batch_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    username_snapshot VARCHAR(100) NOT NULL,
+    real_name_snapshot VARCHAR(100) NOT NULL,
+    phone_snapshot VARCHAR(30),
+    role_names_snapshot VARCHAR(500),
+    member_status_snapshot VARCHAR(20) NOT NULL,
+    channel VARCHAR(20) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    mandatory TINYINT NOT NULL DEFAULT 0,
+    notified_time DATETIME,
+    reminder_sent_time DATETIME,
+    confirmed_time DATETIME,
+    signature_file_id BIGINT,
+    dispute_note VARCHAR(500),
+    dispute_time DATETIME,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_document_distribution_recipient (batch_id, user_id),
+    KEY idx_document_recipient_todo (user_id, status, project_id, update_time),
+    KEY idx_document_recipient_batch (batch_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='发放批次接收人及签收状态';
+
+CREATE TABLE document_distribution_recipient_item (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    batch_id BIGINT NOT NULL,
+    recipient_id BIGINT NOT NULL,
+    distribution_item_id BIGINT NOT NULL,
+    paper_copy_count INT NOT NULL DEFAULT 0,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_document_recipient_item (recipient_id, distribution_item_id),
+    KEY idx_document_recipient_item_batch (batch_id, recipient_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='接收人逐文件纸质份数';
+
+CREATE TABLE document_circulation_event (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    incoming_batch_id BIGINT,
+    distribution_batch_id BIGINT,
+    recipient_id BIGINT,
+    document_id BIGINT,
+    version_id BIGINT,
+    user_id BIGINT,
+    user_name VARCHAR(100),
+    event_type VARCHAR(50) NOT NULL,
+    channel VARCHAR(20),
+    event_result VARCHAR(20) NOT NULL DEFAULT 'SUCCESS',
+    event_summary VARCHAR(500),
+    event_data_json TEXT,
+    client_ip VARCHAR(64),
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_document_event_project (project_id, event_type, create_time),
+    KEY idx_document_event_distribution (distribution_batch_id, recipient_id, create_time),
+    KEY idx_document_event_version (document_id, version_id, event_type, create_time),
+    KEY idx_document_event_user_version (user_id, version_id, event_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='图纸资料收发结构化追溯事件';
 
 -- =============================================
 -- 11. 摄像头资源表
@@ -503,6 +677,22 @@ CREATE TABLE electric_box (
     KEY idx_electric_box_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='电箱台账表';
 
+CREATE TABLE electric_box_inspection_scope (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '巡检范围记录ID',
+    project_id BIGINT NOT NULL COMMENT '项目ID',
+    electric_box_id BIGINT NOT NULL COMMENT '电箱ID',
+    included TINYINT NOT NULL DEFAULT 1 COMMENT '是否纳入日检: 0否 1是',
+    effective_date DATE NOT NULL COMMENT '生效日期',
+    end_date DATE COMMENT '结束日期，空表示持续有效',
+    reason VARCHAR(300) COMMENT '变更原因',
+    operator_id BIGINT COMMENT '操作人ID',
+    operator_name VARCHAR(50) COMMENT '操作人姓名',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    KEY idx_box_scope_box_date (electric_box_id, effective_date, end_date),
+    KEY idx_box_scope_project_date (project_id, effective_date, end_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='电箱日检范围历史';
+
 -- =============================================
 -- 18. 电箱二维码生命周期留痕
 -- =============================================
@@ -524,6 +714,23 @@ CREATE TABLE electric_box_qr_log (
     KEY idx_eb_qr_log_old_code (old_qr_code),
     KEY idx_eb_qr_log_new_code (new_qr_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='电箱二维码操作日志表';
+
+CREATE TABLE project_inspection_setting (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '配置ID',
+    project_id BIGINT NOT NULL COMMENT '项目ID',
+    daily_cutoff_time TIME NOT NULL DEFAULT '18:00:00' COMMENT '每日日检截止时间',
+    pre_due_reminder_minutes INT NOT NULL DEFAULT 60 COMMENT '兼容旧提前提醒分钟数',
+    review_due_hours INT NOT NULL DEFAULT 24 COMMENT '复核时限小时数',
+    rectification_days INT NOT NULL DEFAULT 3 COMMENT '整改自然日天数',
+    enabled TINYINT NOT NULL DEFAULT 1 COMMENT '电箱巡检设置是否启用',
+    submission_reminder_enabled TINYINT NOT NULL DEFAULT 0 COMMENT '到期未提交站内提醒开关',
+    reminder_effective_time DATETIME COMMENT '本次启用规则生效时间，仅后续箱日有效',
+    version INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY uk_project_inspection_setting (project_id),
+    KEY idx_project_inspection_reminder (submission_reminder_enabled, daily_cutoff_time, project_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='项目电箱巡检设置';
 
 -- =============================================
 -- 19. 现场检查模板及模板项
@@ -737,6 +944,27 @@ CREATE TABLE quality_weekly_inspection_draft_item (
     KEY idx_quality_weekly_item_inspection (inspection_id, item_order)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='质量周检问题共享草稿';
 
+CREATE TABLE quality_weekly_reminder_setting (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '质量周检提醒设置ID',
+    project_id BIGINT NOT NULL COMMENT '项目ID',
+    enabled TINYINT NOT NULL DEFAULT 0 COMMENT '是否启用站内提醒',
+    day_of_week TINYINT NOT NULL DEFAULT 7 COMMENT '提醒星期，1周一至7周日',
+    trigger_time TIME NOT NULL DEFAULT '18:00:00' COMMENT '提醒时间',
+    responsible_user_id BIGINT COMMENT '唯一主责任人用户ID',
+    responsible_user_name VARCHAR(50) COMMENT '主责任人姓名快照',
+    effective_time DATETIME COMMENT '本次启用规则生效时间，仅后续周期有效',
+    version INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本',
+    created_by_id BIGINT COMMENT '创建人ID',
+    created_by_name VARCHAR(50) COMMENT '创建人姓名快照',
+    updated_by_id BIGINT COMMENT '最近操作人ID',
+    updated_by_name VARCHAR(50) COMMENT '最近操作人姓名快照',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_quality_weekly_reminder_project (project_id),
+    KEY idx_quality_weekly_reminder_schedule (enabled, day_of_week, trigger_time, project_id),
+    KEY idx_quality_weekly_reminder_owner (responsible_user_id, enabled)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='项目质量周检未提交站内提醒设置';
+
 -- =============================================
 -- 23. 质量问题闭环表
 -- =============================================
@@ -745,6 +973,7 @@ CREATE TABLE quality_issue (
     project_id                      BIGINT NOT NULL COMMENT '施工区域/项目ID',
     weekly_inspection_id            BIGINT COMMENT '所属质量周检ID，历史独立问题为空',
     inspection_item_order           INT COMMENT '周检内问题顺序',
+    record_date                     DATE NOT NULL COMMENT '质量问题业务日期',
     issue_no                        VARCHAR(40) NOT NULL COMMENT '问题编号',
     request_key                     VARCHAR(100) COMMENT '客户端创建请求幂等键',
     title                           VARCHAR(200) NOT NULL COMMENT '问题标题',
@@ -773,7 +1002,8 @@ CREATE TABLE quality_issue (
     KEY idx_quality_issue_project_status (project_id, status, deleted),
     KEY idx_quality_issue_assignee (assignee_id, status, deleted),
     KEY idx_quality_issue_deadline (project_id, deadline, status, deleted),
-    KEY idx_quality_issue_weekly (weekly_inspection_id, inspection_item_order, deleted)
+    KEY idx_quality_issue_weekly (weekly_inspection_id, inspection_item_order, deleted),
+    KEY idx_quality_issue_project_record_date (project_id, record_date, status, deleted)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='质量问题闭环';
 
 -- =============================================
@@ -795,6 +1025,45 @@ CREATE TABLE quality_issue_log (
     KEY idx_quality_issue_log_project (project_id, create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='质量问题操作留痕';
 
+CREATE TABLE quality_issue_export_job (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '导出任务ID',
+    project_id BIGINT NOT NULL COMMENT '项目ID',
+    requested_by_id BIGINT NOT NULL COMMENT '申请人ID',
+    requested_by_name VARCHAR(50) COMMENT '申请人姓名快照',
+    start_date DATE NOT NULL COMMENT '问题业务日期起点',
+    end_date DATE NOT NULL COMMENT '问题业务日期终点',
+    issue_source VARCHAR(20) NOT NULL DEFAULT 'ALL' COMMENT 'ALL/WEEKLY/HISTORICAL',
+    issue_status VARCHAR(20) NOT NULL DEFAULT 'ALL' COMMENT 'ALL/PENDING/OVERDUE/RECHECK/CLOSED/VOIDED',
+    keyword VARCHAR(100) COMMENT '问题关键词',
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/RUNNING/SUCCEEDED/FAILED/EXPIRED',
+    progress INT NOT NULL DEFAULT 0 COMMENT '生成进度0-100',
+    issue_count INT NOT NULL DEFAULT 0 COMMENT '任务问题数快照',
+    photo_count INT NOT NULL DEFAULT 0 COMMENT '任务照片数快照',
+    photo_bytes BIGINT NOT NULL DEFAULT 0 COMMENT '任务照片原始字节数快照',
+    file_resource_id BIGINT COMMENT '生成的Excel文件ID',
+    error_message VARCHAR(1000) COMMENT '失败原因',
+    expires_time DATETIME COMMENT '文件过期时间',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_quality_export_project (project_id, create_time),
+    KEY idx_quality_export_requester (requested_by_id, status, create_time),
+    KEY idx_quality_export_dispatch (status, create_time),
+    KEY idx_quality_export_expiry (status, expires_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='质量问题异步含图Excel导出任务';
+
+CREATE TABLE quality_issue_export_job_item (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '任务问题快照ID',
+    project_id BIGINT NOT NULL COMMENT '项目ID',
+    job_id BIGINT NOT NULL COMMENT '导出任务ID',
+    issue_id BIGINT NOT NULL COMMENT '质量问题ID',
+    item_order INT NOT NULL COMMENT '导出顺序',
+    record_date DATE NOT NULL COMMENT '问题业务日期快照',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_quality_export_job_issue (job_id, issue_id),
+    UNIQUE KEY uk_quality_export_job_order (job_id, item_order),
+    KEY idx_quality_export_item_project (project_id, job_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='质量问题导出任务问题快照';
+
 -- =============================================
 -- 24-26. 场内管理外访邀请、逐人明细与加密审计
 -- RBAC 菜单和权限由 20260807_site_access_visitor_invitation.sql 增量迁移建立。
@@ -806,6 +1075,7 @@ CREATE TABLE site_visit_invitation (
     token_hash CHAR(64) NOT NULL,
     token_encrypted VARCHAR(512) NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    invite_type VARCHAR(20) NOT NULL DEFAULT 'SINGLE' COMMENT 'SINGLE/MEETING',
     visit_start_time DATETIME NOT NULL,
     visit_end_time DATETIME NOT NULL,
     purpose VARCHAR(300) NOT NULL,
@@ -838,6 +1108,7 @@ CREATE TABLE site_visit_invitation (
     UNIQUE KEY uk_site_visit_token_hash (token_hash),
     KEY idx_site_visit_project_time (project_id, visit_start_time, deleted),
     KEY idx_site_visit_project_status (project_id, status, visit_end_time, deleted),
+    KEY idx_site_visit_project_type_time (project_id, invite_type, visit_start_time, deleted),
     KEY idx_site_visit_host (project_id, host_user_id, visit_start_time),
     KEY idx_site_visit_vehicle (project_id, vehicle_plate),
     KEY idx_site_visit_source_profile (source_profile_id)
@@ -875,6 +1146,79 @@ CREATE TABLE site_visit_audit_log (
     KEY idx_site_visit_audit_invitation (invitation_id, create_time),
     KEY idx_site_visit_audit_project (project_id, action_type, create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='场内管理外访加密审计';
+
+CREATE TABLE site_meeting_visit_registration (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    registration_no VARCHAR(40) NOT NULL,
+    invitation_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    wechat_app_id VARCHAR(64) NOT NULL,
+    visitor_identity_hash CHAR(64) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'REGISTERED',
+    visitor_company VARCHAR(200) NOT NULL,
+    contact_name VARCHAR(50) NOT NULL,
+    contact_phone_encrypted VARCHAR(512) NOT NULL,
+    visitor_count INT NOT NULL DEFAULT 1,
+    travel_mode VARCHAR(20) NOT NULL,
+    vehicle_plate VARCHAR(20),
+    visitor_remark VARCHAR(500),
+    source_profile_id BIGINT,
+    privacy_agreed_time DATETIME NOT NULL,
+    registered_time DATETIME NOT NULL,
+    void_reason VARCHAR(300),
+    voided_by_id BIGINT,
+    voided_by_name VARCHAR(50),
+    voided_time DATETIME,
+    version INT NOT NULL DEFAULT 0,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    active_identity_key VARCHAR(200) GENERATED ALWAYS AS (
+        CASE WHEN deleted = 0 AND status = 'REGISTERED'
+             THEN CONCAT(invitation_id, ':', wechat_app_id, ':', visitor_identity_hash)
+             ELSE NULL END
+    ) STORED,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_site_meeting_visit_registration_no (registration_no),
+    UNIQUE KEY uk_site_meeting_visit_active_identity (active_identity_key),
+    KEY idx_site_meeting_visit_invitation_time (invitation_id, registered_time, deleted),
+    KEY idx_site_meeting_visit_project_time (project_id, registered_time, deleted),
+    KEY idx_site_meeting_visit_status (invitation_id, status, deleted),
+    KEY idx_site_meeting_visit_vehicle (project_id, vehicle_plate, deleted),
+    KEY idx_site_meeting_visit_profile (source_profile_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='共享会议邀请访客登记组';
+
+CREATE TABLE site_meeting_visit_person (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    registration_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    person_type VARCHAR(20) NOT NULL,
+    person_company VARCHAR(200),
+    person_name VARCHAR(50),
+    phone_encrypted VARCHAR(512),
+    sort_order INT NOT NULL DEFAULT 1,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_site_meeting_visit_person_registration (registration_id, deleted, sort_order),
+    KEY idx_site_meeting_visit_person_project (project_id, deleted)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='共享会议邀请登记人员明细';
+
+CREATE TABLE site_meeting_visit_audit_log (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    registration_id BIGINT,
+    invitation_id BIGINT COMMENT '单场操作关联邀请；跨会议批量导出时为空',
+    project_id BIGINT NOT NULL,
+    action_type VARCHAR(30) NOT NULL,
+    operator_id BIGINT,
+    operator_name VARCHAR(50) NOT NULL,
+    before_snapshot_encrypted LONGTEXT,
+    after_snapshot_encrypted LONGTEXT,
+    comment VARCHAR(500),
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_site_meeting_visit_audit_registration (registration_id, create_time),
+    KEY idx_site_meeting_visit_audit_invitation (invitation_id, create_time),
+    KEY idx_site_meeting_visit_audit_project (project_id, action_type, create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='共享会议邀请登记加密审计';
 
 -- =============================================
 -- 27-29. 外访人员同项目常用资料、逐人明细与加密审计
@@ -1076,7 +1420,7 @@ INSERT INTO sys_role (role_name, role_code, description) VALUES
 INSERT INTO sys_user_role (user_id, role_id)
 SELECT 1, id FROM sys_role WHERE role_code = 'PLATFORM_ADMIN';
 
--- 插入电箱巡检权限模板
+-- 插入电箱巡检权限模板；临边巡检权限独立配置，不写入历史电箱模板。
 INSERT INTO inspection_permission_template (template_name, template_code, description, permission_codes, enabled, builtin) VALUES
 ('项目管理员', 'PROJECT_ADMIN', '管理电箱台账、二维码、巡检记录、月表导出和项目用户授权', 'BOX_VIEW,BOX_MANAGE,BOX_QR_MANAGE,BOX_PUBLIC_ACCESS,INSPECTION_DAILY_SUBMIT,INSPECTION_RECORD_VIEW,SUMMARY_VIEW,SUMMARY_EXPORT,PERMISSION_MANAGE', 1, 1),
 ('巡检记录管理员', 'SAFETY_ADMIN', '查看项目电箱、巡检记录和月表导出，不包含用户授权', 'BOX_VIEW,BOX_MANAGE,BOX_QR_MANAGE,BOX_PUBLIC_ACCESS,INSPECTION_RECORD_VIEW,SUMMARY_VIEW,SUMMARY_EXPORT', 1, 1),
@@ -1453,6 +1797,7 @@ INSERT INTO sys_menu(parent_id, client_type, menu_code, menu_name, resource_type
                      permission_code, sort_order, visible, enabled, builtin, deleted)
 VALUES
 (@baseline_document_menu_id, 'WEB', 'DOCUMENT_SEAL', '用印申请', 'TAB', 'SEAL_APPLICATION', 'seal.view', 15, 1, 1, 1, 0),
+(@baseline_document_menu_id, 'WEB', 'DOCUMENT_CIRCULATION', '图纸收发', 'TAB', 'DOCUMENT_CIRCULATION', 'document.circulation.view', 12, 1, 1, 1, 0),
 (@baseline_system_menu_id, 'WEB', 'SYSTEM_APPROVAL', '用印审批', 'MENU', 'SYSTEM_APPROVAL', 'system.approval.view', 96, 1, 1, 1, 0)
 ON DUPLICATE KEY UPDATE menu_code = VALUES(menu_code);
 
@@ -1461,6 +1806,10 @@ VALUES
 ('seal.view', '查看项目用印申请', 'WEB_DOCUMENT', '查看本项目全部用印申请', 1, 1, 0),
 ('seal.manage', '管理用印与归档', 'WEB_DOCUMENT', '补传盖章件并管理项目用印归档', 1, 1, 0),
 ('seal.export', '导出用印台账', 'WEB_DOCUMENT', '按审批通过日期导出用印台账', 1, 1, 0),
+('document.receive', '登记和发布图纸收文', 'WEB_DOCUMENT', '收文草稿、分片上传、版本匹配与原子发布', 1, 1, 0),
+('document.issue', '发放图纸和管理签收', 'WEB_DOCUMENT', '现行版本发放、接收人、二维码和作废', 1, 1, 0),
+('document.circulation.view', '查看图纸收发台账', 'WEB_DOCUMENT', '查看项目收文、发放、签收和追溯记录', 1, 1, 0),
+('document.circulation.export', '导出图纸收发台账', 'WEB_DOCUMENT', '导出五个工作表的综合台账', 1, 1, 0),
 ('system.approval.view', '查看审批配置', 'SYSTEM_APPROVAL', '查看印章、用户审批与二维码配置', 1, 1, 0),
 ('system.approval.manage', '管理审批配置', 'SYSTEM_APPROVAL', '维护印章、直接选人审批、默认抄送、二维码与改派', 1, 1, 0)
 ON DUPLICATE KEY UPDATE permission_code = VALUES(permission_code);
@@ -1471,16 +1820,20 @@ SET @baseline_platform_admin_role_id = (
 INSERT IGNORE INTO sys_role_menu(role_id, menu_id)
 SELECT @baseline_platform_admin_role_id, id FROM sys_menu
 WHERE @baseline_platform_admin_role_id IS NOT NULL
-  AND menu_code IN ('DOCUMENT_SEAL', 'SYSTEM_APPROVAL') AND enabled = 1 AND deleted = 0;
+  AND menu_code IN ('DOCUMENT_SEAL', 'DOCUMENT_CIRCULATION', 'SYSTEM_APPROVAL') AND enabled = 1 AND deleted = 0;
 INSERT IGNORE INTO sys_role_permission(role_id, permission_id)
 SELECT @baseline_platform_admin_role_id, id FROM sys_permission
 WHERE @baseline_platform_admin_role_id IS NOT NULL
-  AND permission_code IN ('seal.view','seal.manage','seal.export','system.approval.view','system.approval.manage')
+  AND permission_code IN ('seal.view','seal.manage','seal.export',
+                          'document.receive','document.issue','document.circulation.view','document.circulation.export',
+                          'system.approval.view','system.approval.manage')
   AND enabled = 1 AND deleted = 0;
 
 INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260808_SEAL_APPLICATION_V1');
 INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260810_SITE_ACCESS_VISITOR_IDENTITY_HMAC_V1');
 INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260814_SITE_ACCESS_GUARD_VISITOR_REGISTRATION_V1');
+INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260826_SITE_ACCESS_MEETING_INVITATION_V1');
+INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260826_DOCUMENT_CIRCULATION_V1');
 
 -- 仅重命名已存在且启用的正式质量菜单；不创建或恢复历史入口。
 UPDATE sys_menu
@@ -1795,16 +2148,36 @@ CREATE TABLE IF NOT EXISTS general_inspection_export_job (
     requested_by_name VARCHAR(50),
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
+    export_type VARCHAR(20) NOT NULL DEFAULT 'LEGACY' COMMENT 'LEGACY/EDGE',
     status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/RUNNING/SUCCEEDED/FAILED/EXPIRED',
     progress INT NOT NULL DEFAULT 0,
+    point_count INT NOT NULL DEFAULT 0,
+    task_count INT NOT NULL DEFAULT 0,
+    photo_count INT NOT NULL DEFAULT 0,
+    photo_bytes BIGINT NOT NULL DEFAULT 0,
     file_resource_id BIGINT,
     error_message VARCHAR(1000),
     expires_time DATETIME,
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     KEY idx_general_export_requester (requested_by_id, status, create_time),
-    KEY idx_general_export_expiry (status, expires_time)
+    KEY idx_general_export_expiry (status, expires_time),
+    KEY idx_general_export_dispatch (export_type, status, create_time, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='通用巡检异步含图Excel导出';
+
+CREATE TABLE IF NOT EXISTS general_inspection_export_job_task (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    job_id BIGINT NOT NULL,
+    task_id BIGINT NOT NULL,
+    item_order INT NOT NULL,
+    occurrence_date DATE NOT NULL,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_general_export_job_task (job_id, task_id),
+    UNIQUE KEY uk_general_export_job_order (job_id, item_order),
+    KEY idx_general_export_task_project (project_id, job_id),
+    KEY idx_general_export_task_business (task_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='临边巡检导出任务不可变关联快照';
 
 CREATE TABLE IF NOT EXISTS general_inspection_event_outbox (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -1860,12 +2233,16 @@ INSERT INTO sys_permission(permission_code, permission_name, module_code, descri
                            enabled, builtin, deleted)
 SELECT seed.permission_code, seed.permission_name, 'WEB_INSPECTION', seed.description, 1, 1, 0
 FROM (
-    SELECT 'inspection.view' permission_code, '查看巡检' permission_name, '查看巡检任务、记录和看板' description UNION ALL
-    SELECT 'inspection.submit', '提交巡检', '执行分配给本人的巡检任务' UNION ALL
-    SELECT 'inspection.manage', '管理巡检', '维护巡检配置、取消、纠错和改派' UNION ALL
-    SELECT 'inspection.rectify', '整改巡检异常', '提交分配给本人的巡检整改' UNION ALL
-    SELECT 'inspection.review', '复查巡检整改', '复查明确分配给本人的巡检整改' UNION ALL
-    SELECT 'inspection.export', '导出巡检', '创建并下载巡检导出文件'
+    SELECT 'inspection.view' permission_code, '查看电箱巡检' permission_name,
+           '电箱台账、巡检记录、整改与汇总的通用查看前置权限' description UNION ALL
+    SELECT 'inspection.submit', '提交电箱日检', '提交电箱每日巡检记录的通用前置权限' UNION ALL
+    SELECT 'inspection.manage', '管理电箱巡检', '管理电箱台账等电箱巡检配置的通用前置权限' UNION ALL
+    SELECT 'inspection.rectify', '提交电箱巡检整改', '提交明确分配给本人的电箱巡检整改' UNION ALL
+    SELECT 'inspection.review', '复查电箱巡检整改', '复查、关闭或退回明确分配给本人的电箱巡检整改' UNION ALL
+    SELECT 'inspection.export', '导出电箱巡检报表', '创建和下载电箱巡检报表的通用前置权限' UNION ALL
+    SELECT 'INSPECTION_RECORD_VIEW', '查看电箱巡检记录', '查看项目电箱巡检记录明细' UNION ALL
+    SELECT 'SUMMARY_VIEW', '查看电箱巡检汇总', '查看项目或单箱月度电箱巡检汇总' UNION ALL
+    SELECT 'SUMMARY_EXPORT', '导出电箱巡检报表', '导出电箱月度巡检记录 Excel'
 ) seed
 WHERE NOT EXISTS (
     SELECT 1 FROM sys_permission permission
@@ -1875,6 +2252,17 @@ WHERE NOT EXISTS (
 SET @general_inspection_web_parent = (
     SELECT id FROM sys_menu WHERE menu_code = 'WEB_INSPECTION' AND deleted = 0 LIMIT 1
 );
+
+-- 电箱与临边的子页面名称必须在空库目录中直接可区分；菜单码和路由沿用现行接口契约。
+INSERT INTO sys_menu(parent_id, client_type, menu_code, menu_name, resource_type, route_path,
+                     permission_code, sort_order, visible, enabled, builtin, deleted)
+VALUES
+(@general_inspection_web_parent, 'WEB', 'INSPECTION_RECORDS', '电箱巡检记录', 'TAB',
+ 'INSPECTION_RECORDS', 'inspection.view', 22, 1, 1, 1, 0),
+(@general_inspection_web_parent, 'WEB', 'INSPECTION_RECTIFICATIONS', '电箱整改闭环', 'TAB',
+ 'INSPECTION_RECTIFICATIONS', 'inspection.view', 23, 1, 1, 1, 0)
+ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name);
+
 INSERT INTO sys_menu(parent_id, client_type, menu_code, menu_name, resource_type, route_path,
                      permission_code, sort_order, visible, enabled, builtin, deleted)
 SELECT @general_inspection_web_parent, 'WEB', 'INSPECTION_CONFIG', '巡检配置', 'TAB',
@@ -2301,7 +2689,7 @@ WHERE @fixed_edge_already_applied = 0
     WHERE item.template_version_id = version.id AND BINARY item.item_key = BINARY seed.item_key
 );
 
--- 旧开放入口和权限停用；新菜单与五项操作权限独立授权。
+-- 旧开放入口和权限停用；新菜单与六项操作权限独立授权。
 UPDATE sys_menu
 SET visible = 0, enabled = 0, deleted = 0, update_time = CURRENT_TIMESTAMP
 WHERE menu_code = 'INSPECTION_CONFIG';
@@ -2318,7 +2706,8 @@ FROM (
     SELECT 'EDGE_INSPECTION_MANAGE', '管理临边巡检', '维护临边点位和周期设置，取消、改派任务与整改单' UNION ALL
     SELECT 'EDGE_INSPECTION_SUBMIT', '执行临边巡检', '执行明确分配给自己的固定式临边巡检任务' UNION ALL
     SELECT 'EDGE_INSPECTION_RECTIFY', '临边巡检整改', '整单提交明确分配给自己的临边整改反馈' UNION ALL
-    SELECT 'EDGE_INSPECTION_REVIEW', '临边巡检复查', '整单关闭或退回明确分配给自己的临边整改单'
+    SELECT 'EDGE_INSPECTION_REVIEW', '临边巡检复查', '整单关闭或退回明确分配给自己的临边整改单' UNION ALL
+    SELECT 'EDGE_INSPECTION_EXPORT', '导出临边巡检含图报表', '创建、查看并下载临边巡检含图 Excel 导出任务'
 ) seed
 WHERE @fixed_edge_already_applied = 0
   AND NOT EXISTS (
@@ -2331,7 +2720,8 @@ INNER JOIN (
     SELECT 'EDGE_INSPECTION_MANAGE', '管理临边巡检', '维护临边点位和周期设置，取消、改派任务与整改单' UNION ALL
     SELECT 'EDGE_INSPECTION_SUBMIT', '执行临边巡检', '执行明确分配给自己的固定式临边巡检任务' UNION ALL
     SELECT 'EDGE_INSPECTION_RECTIFY', '临边巡检整改', '整单提交明确分配给自己的临边整改反馈' UNION ALL
-    SELECT 'EDGE_INSPECTION_REVIEW', '临边巡检复查', '整单关闭或退回明确分配给自己的临边整改单'
+    SELECT 'EDGE_INSPECTION_REVIEW', '临边巡检复查', '整单关闭或退回明确分配给自己的临边整改单' UNION ALL
+    SELECT 'EDGE_INSPECTION_EXPORT', '导出临边巡检含图报表', '创建、查看并下载临边巡检含图 Excel 导出任务'
 ) seed ON BINARY seed.code = BINARY permission.permission_code
 SET permission.permission_name = seed.name,
     permission.module_code = 'WEB_INSPECTION',
@@ -2372,7 +2762,7 @@ WHERE @fixed_edge_already_applied = 0
   AND @platform_admin_role_id IS NOT NULL
   AND permission.permission_code IN (
       'EDGE_INSPECTION_VIEW','EDGE_INSPECTION_MANAGE','EDGE_INSPECTION_SUBMIT',
-      'EDGE_INSPECTION_RECTIFY','EDGE_INSPECTION_REVIEW'
+      'EDGE_INSPECTION_RECTIFY','EDGE_INSPECTION_REVIEW','EDGE_INSPECTION_EXPORT'
   ) AND permission.enabled = 1 AND permission.deleted = 0;
 
 INSERT IGNORE INTO sys_role_menu(role_id, menu_id)
@@ -2387,3 +2777,12 @@ DROP TEMPORARY TABLE IF EXISTS tmp_edge_point_type;
 
 INSERT IGNORE INTO sys_data_migration(migration_key)
 VALUES ('20260826_GENERAL_INSPECTION_FIXED_EDGE_V1');
+
+INSERT IGNORE INTO sys_data_migration(migration_key)
+VALUES ('20260828_EDGE_INSPECTION_EXPORT_V1');
+
+INSERT IGNORE INTO sys_data_migration(migration_key)
+VALUES ('20260829_INSPECTION_PERMISSION_SEPARATION_V1');
+
+INSERT IGNORE INTO sys_data_migration(migration_key)
+VALUES ('20260829_INSPECTION_SUBMISSION_REMINDER_V1');

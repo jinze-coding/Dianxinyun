@@ -13,6 +13,7 @@ public class ProjectDocumentVO {
     private String documentNo;
     private String title;
     private String category;
+    private String documentType;
     private String status;
     private String remark;
     private Long createdBy;

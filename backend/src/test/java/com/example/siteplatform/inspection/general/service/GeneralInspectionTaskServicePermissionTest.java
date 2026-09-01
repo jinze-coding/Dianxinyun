@@ -48,7 +48,6 @@ class GeneralInspectionTaskServicePermissionTest {
                 mock(GeneralInspectionTemplateVersionMapper.class),
                 mock(GeneralInspectionRectificationMapper.class),
                 mock(GeneralInspectionActionLogMapper.class),
-                mock(GeneralInspectionProjectSettingMapper.class),
                 mock(SysUserMapper.class),
                 mock(FileResourceService.class),
                 mock(UserNotificationService.class),

@@ -30,6 +30,7 @@ import com.example.siteplatform.siteaccess.entity.SiteVisitPerson;
 import com.example.siteplatform.siteaccess.mapper.SiteVisitAuditLogMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteVisitInvitationMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteVisitPersonMapper;
+import com.example.siteplatform.siteaccess.mapper.SiteMeetingVisitRegistrationMapper;
 import com.example.siteplatform.siteaccess.vo.PublicSiteVisitInvitationVO;
 import com.example.siteplatform.siteaccess.vo.PublicProjectLocationVO;
 import com.example.siteplatform.siteaccess.vo.PublicVisitorSessionVO;
@@ -79,12 +80,15 @@ import java.util.stream.Collectors;
 public class SiteAccessService {
     public static final String STATUS_PENDING = "PENDING";
     public static final String STATUS_SUBMITTED = "SUBMITTED";
+    public static final String STATUS_OPEN = "OPEN";
     public static final String STATUS_VOIDED = "VOIDED";
     public static final String STATUS_EXPIRED = "EXPIRED";
     public static final String PERSON_CONTACT = "CONTACT";
     public static final String PERSON_COMPANION = "COMPANION";
     public static final String TRAVEL_DRIVING = "DRIVING";
     public static final String TRAVEL_OTHER = "OTHER";
+    public static final String INVITE_TYPE_SINGLE = "SINGLE";
+    public static final String INVITE_TYPE_MEETING = "MEETING";
     private static final int MAX_EXPORT_ROWS = 50_000;
     private static final DateTimeFormatter FILE_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final DateTimeFormatter INVITE_DATE_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
@@ -93,6 +97,7 @@ public class SiteAccessService {
     private final SiteVisitInvitationMapper invitationMapper;
     private final SiteVisitPersonMapper personMapper;
     private final SiteVisitAuditLogMapper auditLogMapper;
+    private final SiteMeetingVisitRegistrationMapper meetingRegistrationMapper;
     private final ProjectInfoMapper projectInfoMapper;
     private final SysUserMapper userMapper;
     private final SysUserProjectMapper userProjectMapper;
@@ -107,12 +112,14 @@ public class SiteAccessService {
     private final ObjectMapper objectMapper;
     private final SecureRandom secureRandom = new SecureRandom();
     private final String miniProgramPage;
+    private final String meetingMiniProgramPage;
     private final String miniProgramEnvVersion;
 
     public SiteAccessService(
             SiteVisitInvitationMapper invitationMapper,
             SiteVisitPersonMapper personMapper,
             SiteVisitAuditLogMapper auditLogMapper,
+            SiteMeetingVisitRegistrationMapper meetingRegistrationMapper,
             ProjectInfoMapper projectInfoMapper,
             SysUserMapper userMapper,
             SysUserProjectMapper userProjectMapper,
@@ -126,10 +133,12 @@ public class SiteAccessService {
             OperationLogMapper operationLogMapper,
             ObjectMapper objectMapper,
             @Value("${wechat.mini-program.visitor-page:pages/public/visitor-invite}") String miniProgramPage,
+            @Value("${wechat.mini-program.meeting-visitor-page:pages/public/meeting-invite}") String meetingMiniProgramPage,
             @Value("${wechat.mini-program.env-version:release}") String miniProgramEnvVersion) {
         this.invitationMapper = invitationMapper;
         this.personMapper = personMapper;
         this.auditLogMapper = auditLogMapper;
+        this.meetingRegistrationMapper = meetingRegistrationMapper;
         this.projectInfoMapper = projectInfoMapper;
         this.userMapper = userMapper;
         this.userProjectMapper = userProjectMapper;
@@ -143,10 +152,11 @@ public class SiteAccessService {
         this.operationLogMapper = operationLogMapper;
         this.objectMapper = objectMapper;
         this.miniProgramPage = miniProgramPage;
+        this.meetingMiniProgramPage = meetingMiniProgramPage;
         this.miniProgramEnvVersion = miniProgramEnvVersion;
     }
 
-    public PageResult<SiteVisitInvitationVO> page(Long projectId, String status, String keyword,
+    public PageResult<SiteVisitInvitationVO> page(Long projectId, String inviteType, String status, String keyword,
                                                    LocalDate startDate, LocalDate endDate,
                                                    Integer pageNo, Integer pageSize, SysUser currentUser) {
         requirePermission(currentUser, projectId, SystemPermissionCodes.SITE_ACCESS_VIEW);
@@ -154,17 +164,19 @@ public class SiteAccessService {
         int current = pageNo == null ? 1 : Math.max(1, pageNo);
         int size = pageSize == null ? 20 : Math.max(1, Math.min(pageSize, 100));
         Page<SiteVisitInvitation> result = invitationMapper.selectPage(
-                new Page<>(current, size), query(projectId, status, keyword, range));
+                new Page<>(current, size), query(projectId, inviteType, status, keyword, range));
         ProjectInfo project = requireProject(projectId);
+        Map<Long, long[]> meetingStats = meetingStats(result.getRecords());
         return PageResult.of(current, size, result.getTotal(), result.getRecords().stream()
-                .map(item -> toVO(item, project, false))
+                .map(item -> toVO(item, project, false, meetingStats.get(item.getId())))
                 .toList());
     }
 
     public SiteVisitInvitationVO detail(Long id, SysUser currentUser) {
         SiteVisitInvitation invitation = requireInvitation(id);
         requirePermission(currentUser, invitation.getProjectId(), SystemPermissionCodes.SITE_ACCESS_VIEW);
-        return toVO(invitation, requireProject(invitation.getProjectId()), true);
+        return toVO(invitation, requireProject(invitation.getProjectId()), true,
+                meetingStats(List.of(invitation)).get(invitation.getId()));
     }
 
     public List<SiteVisitHostOptionVO> hostOptions(Long projectId, SysUser currentUser) {
@@ -194,11 +206,13 @@ public class SiteAccessService {
         SysUser host = requireHost(request.getProjectId(), request.getHostUserId(), currentUser);
         String rawToken = generateToken();
         SiteVisitInvitation invitation = new SiteVisitInvitation();
+        String inviteType = normalizeInviteType(request.getInviteType());
         invitation.setProjectId(request.getProjectId());
         invitation.setInviteNo(generateInviteNo(request.getVisitStartTime(), request.getVisitEndTime()));
         invitation.setTokenHash(cryptoService.digest(rawToken));
         invitation.setTokenEncrypted(cryptoService.encrypt(rawToken));
-        invitation.setStatus(STATUS_PENDING);
+        invitation.setInviteType(inviteType);
+        invitation.setStatus(INVITE_TYPE_MEETING.equals(inviteType) ? STATUS_OPEN : STATUS_PENDING);
         copyMeetingFields(invitation, request.getVisitStartTime(), request.getVisitEndTime(),
                 request.getPurpose(), request.getVisitLocation(), host, request.getInternalRemark());
         invitation.setVisitorCount(0);
@@ -213,9 +227,10 @@ public class SiteAccessService {
         } catch (DuplicateKeyException duplicate) {
             throw BusinessException.of(409, "邀请编号生成冲突，请重试");
         }
-        writeAudit(invitation, "CREATE", currentUser, null, snapshot(invitation), "创建单次外访邀请");
+        writeAudit(invitation, "CREATE", currentUser, null, snapshot(invitation),
+                INVITE_TYPE_MEETING.equals(inviteType) ? "创建共享会议邀请" : "创建单次外访邀请");
         recordOperation(currentUser, "CREATE_SITE_VISIT", invitation, "创建外访邀请 " + invitation.getInviteNo());
-        return toVO(invitation, project, true);
+        return toVO(invitation, project, true, null);
     }
 
     @Transactional
@@ -228,7 +243,8 @@ public class SiteAccessService {
         if (STATUS_VOIDED.equals(effectiveStatus) || STATUS_EXPIRED.equals(effectiveStatus)) {
             throw stateConflict("已作废或已过期邀请不能修改，请重新创建邀请");
         }
-        validateVisitTime(request.getVisitStartTime(), request.getVisitEndTime(), STATUS_PENDING.equals(invitation.getStatus()));
+        validateVisitTime(request.getVisitStartTime(), request.getVisitEndTime(),
+                STATUS_PENDING.equals(invitation.getStatus()) || STATUS_OPEN.equals(invitation.getStatus()));
         SysUser host = requireHost(invitation.getProjectId(), request.getHostUserId(), currentUser);
         Map<String, Object> before = snapshot(invitation);
         if (!Objects.equals(invitation.getVisitStartTime(), request.getVisitStartTime())
@@ -238,7 +254,7 @@ public class SiteAccessService {
         }
         copyMeetingFields(invitation, request.getVisitStartTime(), request.getVisitEndTime(),
                 request.getPurpose(), request.getVisitLocation(), host, request.getInternalRemark());
-        if (STATUS_SUBMITTED.equals(invitation.getStatus())) {
+        if (STATUS_SUBMITTED.equals(invitation.getStatus()) && isSingle(invitation)) {
             VisitorSubmissionNormalizer.Submission submission = normalizeSubmission(
                     request.getVisitorCompany(), request.getContactName(), request.getContactPhone(),
                     request.getCompanions(), request.getTravelMode(),
@@ -256,7 +272,8 @@ public class SiteAccessService {
         Map<String, Object> after = snapshot(invitation);
         writeAudit(invitation, "UPDATE", currentUser, before, after, "修改外访邀请或来访信息");
         recordOperation(currentUser, "UPDATE_SITE_VISIT", invitation, "修改外访邀请 " + invitation.getInviteNo());
-        return toVO(invitation, requireProject(invitation.getProjectId()), true);
+        return toVO(invitation, requireProject(invitation.getProjectId()), true,
+                meetingStats(List.of(invitation)).get(invitation.getId()));
     }
 
     @Transactional
@@ -279,31 +296,41 @@ public class SiteAccessService {
         requireSingleWrite(invitationMapper.updateById(invitation), "邀请作废");
         writeAudit(invitation, "VOID", currentUser, before, snapshot(invitation), normalizedReason);
         recordOperation(currentUser, "VOID_SITE_VISIT", invitation, "作废外访邀请 " + invitation.getInviteNo());
-        return toVO(invitation, requireProject(invitation.getProjectId()), true);
+        return toVO(invitation, requireProject(invitation.getProjectId()), true,
+                meetingStats(List.of(invitation)).get(invitation.getId()));
     }
 
     public SiteVisitMiniCodeVO miniCode(Long id, SysUser currentUser) {
         SiteVisitInvitation invitation = requireInvitation(id);
         requirePermission(currentUser, invitation.getProjectId(), SystemPermissionCodes.SITE_ACCESS_MANAGE);
         String status = invitation.getStatus();
-        if ((!STATUS_PENDING.equals(status) && !STATUS_SUBMITTED.equals(status))
+        boolean allowedStatus = isMeeting(invitation)
+                ? STATUS_OPEN.equals(status)
+                : STATUS_PENDING.equals(status) || STATUS_SUBMITTED.equals(status);
+        if (!allowedStatus
                 || invitation.getVisitEndTime() == null
                 || !invitation.getVisitEndTime().isAfter(LocalDateTime.now())) {
-            throw stateConflict("只有待填写或仍在计划来访时段内的已登记邀请可以查看小程序码");
+            throw stateConflict("只有仍在计划来访时段内的邀请可以查看小程序码");
         }
         String token = cryptoService.decrypt(invitation.getTokenEncrypted());
-        String scene = "V:" + token;
-        String image = wechatPlatformClient.generateUnlimitedCode(scene, miniProgramPage, miniProgramEnvVersion);
+        String pagePath = isMeeting(invitation) ? meetingMiniProgramPage : miniProgramPage;
+        String scene = (isMeeting(invitation) ? "M:" : "V:") + token;
+        String image = wechatPlatformClient.generateUnlimitedCode(scene, pagePath, miniProgramEnvVersion);
         SiteVisitMiniCodeVO vo = new SiteVisitMiniCodeVO();
         vo.setInvitationId(invitation.getId());
         vo.setInviteNo(invitation.getInviteNo());
+        vo.setInviteType(inviteTypeOf(invitation));
         vo.setSceneCode(scene);
-        vo.setPagePath(miniProgramPage);
+        vo.setPagePath(pagePath);
         vo.setCodeType(image == null ? "DEVELOPMENT_SCENE" : "WECHAT_MINI_PROGRAM_CODE");
         vo.setImageMimeType(image == null ? null : "image/png");
         vo.setImageContent(image);
         String hint;
-        if (image == null) {
+        if (isMeeting(invitation)) {
+            hint = image == null
+                    ? "当前环境使用 scene 调试；共享会议码要求每位访客通过微信身份独立登记"
+                    : "共享会议小程序码；截止前每个微信身份可独立登记并查看自己的放行凭证";
+        } else if (image == null) {
             hint = STATUS_SUBMITTED.equals(status)
                     ? "当前环境使用 scene 调试；本次来访已登记，再次扫码可展示门卫放行凭证"
                     : "当前环境未配置正式微信小程序凭据，请在开发者工具使用 scene 调试";
@@ -322,6 +349,7 @@ public class SiteAccessService {
         LocalDateTime now = LocalDateTime.now();
         PublicSiteVisitInvitationVO vo = new PublicSiteVisitInvitationVO();
         vo.setInviteNo(invitation.getInviteNo());
+        vo.setInviteType(inviteTypeOf(invitation));
         vo.setStatus(publicStatus(invitation, now));
         vo.setProjectName(project.getProjectName());
         vo.setProjectShortName(project.getShortName());
@@ -345,6 +373,7 @@ public class SiteAccessService {
     public PublicVisitorSessionVO createVisitorSession(PublicVisitorSessionCreateRequest request) {
         if (request == null) throw new BusinessException("外访临时会话参数不能为空");
         SiteVisitInvitation invitation = findByToken(request.getInviteToken(), false);
+        if (!isSingle(invitation)) throw BusinessException.of(403, "会议邀请必须使用微信身份登记会话");
         if (!STATUS_PENDING.equals(effectiveStatus(invitation))) {
             throw stateConflict("当前邀请不能获取常用资料");
         }
@@ -407,6 +436,7 @@ public class SiteAccessService {
         String normalizedToken = normalizeToken(request.getInviteToken());
         SiteVisitInvitation invitation = invitationMapper.selectForUpdateByTokenHash(cryptoService.digest(normalizedToken));
         if (invitation == null) throw BusinessException.notFound("邀请不存在或已失效");
+        if (!isSingle(invitation)) throw BusinessException.of(403, "会议邀请不能使用单次预约提交接口");
         String status = effectiveStatus(invitation);
         if (STATUS_SUBMITTED.equals(status)) throw stateConflict("本次邀请已经提交，不能重复填写");
         if (STATUS_VOIDED.equals(status)) throw stateConflict("本次邀请已作废");
@@ -444,7 +474,7 @@ public class SiteAccessService {
         DateRange range = requireExportRange(startDate, endDate);
         String exportStatus = StringUtils.hasText(status) ? normalizeStatus(status) : STATUS_SUBMITTED;
         List<SiteVisitInvitation> invitations = invitationMapper.selectList(
-                query(projectId, exportStatus, keyword, range));
+                query(projectId, INVITE_TYPE_SINGLE, exportStatus, keyword, range));
         List<Long> invitationIds = invitations.stream().map(SiteVisitInvitation::getId).toList();
         Map<Long, List<SiteVisitPerson>> peopleByInvitation = invitationIds.isEmpty() ? Map.of()
                 : personMapper.selectList(new LambdaQueryWrapper<SiteVisitPerson>()
@@ -470,19 +500,26 @@ public class SiteAccessService {
         return new ExportFile(fileName, content);
     }
 
-    private LambdaQueryWrapper<SiteVisitInvitation> query(Long projectId, String status, String keyword, DateRange range) {
+    private LambdaQueryWrapper<SiteVisitInvitation> query(Long projectId, String inviteType, String status,
+                                                          String keyword, DateRange range) {
         LambdaQueryWrapper<SiteVisitInvitation> wrapper = new LambdaQueryWrapper<SiteVisitInvitation>()
                 .eq(SiteVisitInvitation::getProjectId, projectId)
                 .orderByAsc(SiteVisitInvitation::getVisitStartTime)
                 .orderByDesc(SiteVisitInvitation::getId);
+        if (StringUtils.hasText(inviteType)) {
+            wrapper.eq(SiteVisitInvitation::getInviteType, normalizeInviteType(inviteType));
+        }
         if (StringUtils.hasText(status)) {
             String normalized = normalizeStatus(status);
             if (STATUS_EXPIRED.equals(normalized)) {
-                wrapper.eq(SiteVisitInvitation::getStatus, STATUS_PENDING)
-                        .lt(SiteVisitInvitation::getVisitEndTime, LocalDateTime.now());
+                wrapper.in(SiteVisitInvitation::getStatus, STATUS_PENDING, STATUS_OPEN)
+                        .le(SiteVisitInvitation::getVisitEndTime, LocalDateTime.now());
             } else if (STATUS_PENDING.equals(normalized)) {
                 wrapper.eq(SiteVisitInvitation::getStatus, STATUS_PENDING)
                         .ge(SiteVisitInvitation::getVisitEndTime, LocalDateTime.now());
+            } else if (STATUS_OPEN.equals(normalized)) {
+                wrapper.eq(SiteVisitInvitation::getStatus, STATUS_OPEN)
+                        .gt(SiteVisitInvitation::getVisitEndTime, LocalDateTime.now());
             } else {
                 wrapper.eq(SiteVisitInvitation::getStatus, normalized);
             }
@@ -608,7 +645,7 @@ public class SiteAccessService {
         if (STATUS_VOIDED.equals(status)
                 || invitation.getVisitEndTime() == null
                 || !invitation.getVisitEndTime().isAfter(LocalDateTime.now())
-                || (!STATUS_PENDING.equals(status) && !STATUS_SUBMITTED.equals(status))) {
+                || (!STATUS_PENDING.equals(status) && !STATUS_SUBMITTED.equals(status) && !STATUS_OPEN.equals(status))) {
             throw stateConflict("当前邀请不可查看项目信息");
         }
         return invitation;
@@ -616,20 +653,21 @@ public class SiteAccessService {
 
     private String normalizeToken(String rawToken) {
         String token = requiredText(rawToken, 64, "邀请令牌");
-        if (token.startsWith("V:")) token = token.substring(2);
+        if (token.startsWith("V:") || token.startsWith("M:")) token = token.substring(2);
         if (!token.matches("^[A-Za-z0-9_-]{20,32}$")) throw BusinessException.notFound("邀请不存在或已失效");
         return token;
     }
 
     private String effectiveStatus(SiteVisitInvitation invitation) {
-        if (STATUS_PENDING.equals(invitation.getStatus())
+        if ((STATUS_PENDING.equals(invitation.getStatus()) || STATUS_OPEN.equals(invitation.getStatus()))
                 && invitation.getVisitEndTime() != null
-                && invitation.getVisitEndTime().isBefore(LocalDateTime.now())) return STATUS_EXPIRED;
+                && !invitation.getVisitEndTime().isAfter(LocalDateTime.now())) return STATUS_EXPIRED;
         return invitation.getStatus();
     }
 
     private String publicStatus(SiteVisitInvitation invitation, LocalDateTime now) {
-        if ((STATUS_PENDING.equals(invitation.getStatus()) || STATUS_SUBMITTED.equals(invitation.getStatus()))
+        if ((STATUS_PENDING.equals(invitation.getStatus()) || STATUS_SUBMITTED.equals(invitation.getStatus())
+                || STATUS_OPEN.equals(invitation.getStatus()))
                 && invitation.getVisitEndTime() != null
                 && !invitation.getVisitEndTime().isAfter(now)) return STATUS_EXPIRED;
         return invitation.getStatus();
@@ -639,7 +677,7 @@ public class SiteAccessService {
                                                           ProjectInfo project,
                                                           LocalDateTime now) {
         String status = invitation.getStatus();
-        if ((!STATUS_PENDING.equals(status) && !STATUS_SUBMITTED.equals(status))
+        if ((!STATUS_PENDING.equals(status) && !STATUS_SUBMITTED.equals(status) && !STATUS_OPEN.equals(status))
                 || invitation.getVisitEndTime() == null
                 || !invitation.getVisitEndTime().isAfter(now)) {
             return null;
@@ -658,13 +696,17 @@ public class SiteAccessService {
         return location;
     }
 
-    private SiteVisitInvitationVO toVO(SiteVisitInvitation invitation, ProjectInfo project, boolean detail) {
+    private SiteVisitInvitationVO toVO(SiteVisitInvitation invitation, ProjectInfo project,
+                                       boolean detail, long[] meetingStats) {
         SiteVisitInvitationVO vo = new SiteVisitInvitationVO();
         vo.setId(invitation.getId());
         vo.setProjectId(invitation.getProjectId());
         vo.setProjectName(project.getProjectName());
         vo.setInviteNo(invitation.getInviteNo());
+        vo.setInviteType(inviteTypeOf(invitation));
         vo.setStatus(effectiveStatus(invitation));
+        vo.setRegistrationGroupCount(meetingStats == null ? 0L : meetingStats[0]);
+        vo.setRegisteredPersonCount(meetingStats == null ? 0L : meetingStats[1]);
         vo.setVisitStartTime(invitation.getVisitStartTime());
         vo.setVisitEndTime(invitation.getVisitEndTime());
         vo.setPurpose(invitation.getPurpose());
@@ -731,6 +773,7 @@ public class SiteAccessService {
     private Map<String, Object> snapshot(SiteVisitInvitation invitation) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("inviteNo", invitation.getInviteNo());
+        result.put("inviteType", inviteTypeOf(invitation));
         result.put("status", effectiveStatus(invitation));
         result.put("visitStartTime", invitation.getVisitStartTime());
         result.put("visitEndTime", invitation.getVisitEndTime());
@@ -885,6 +928,7 @@ public class SiteAccessService {
         return switch (status) {
             case STATUS_PENDING -> "待填写";
             case STATUS_SUBMITTED -> "已提交";
+            case STATUS_OPEN -> "开放登记";
             case STATUS_EXPIRED -> "已过期";
             case STATUS_VOIDED -> "已作废";
             default -> status;
@@ -1006,10 +1050,46 @@ public class SiteAccessService {
 
     private String normalizeStatus(String status) {
         String value = status == null ? "" : status.trim().toUpperCase(Locale.ROOT);
-        if (!Set.of(STATUS_PENDING, STATUS_SUBMITTED, STATUS_EXPIRED, STATUS_VOIDED).contains(value)) {
+        if (!Set.of(STATUS_PENDING, STATUS_SUBMITTED, STATUS_OPEN, STATUS_EXPIRED, STATUS_VOIDED).contains(value)) {
             throw new BusinessException("外访状态不正确");
         }
         return value;
+    }
+
+    private String normalizeInviteType(String inviteType) {
+        String value = StringUtils.hasText(inviteType)
+                ? inviteType.trim().toUpperCase(Locale.ROOT) : INVITE_TYPE_SINGLE;
+        if (!Set.of(INVITE_TYPE_SINGLE, INVITE_TYPE_MEETING).contains(value)) {
+            throw new BusinessException("邀请类型不正确");
+        }
+        return value;
+    }
+
+    private String inviteTypeOf(SiteVisitInvitation invitation) {
+        return INVITE_TYPE_MEETING.equalsIgnoreCase(invitation.getInviteType())
+                ? INVITE_TYPE_MEETING : INVITE_TYPE_SINGLE;
+    }
+
+    private boolean isMeeting(SiteVisitInvitation invitation) {
+        return INVITE_TYPE_MEETING.equals(inviteTypeOf(invitation));
+    }
+
+    private boolean isSingle(SiteVisitInvitation invitation) {
+        return !isMeeting(invitation);
+    }
+
+    private Map<Long, long[]> meetingStats(List<SiteVisitInvitation> invitations) {
+        List<Long> ids = invitations.stream().filter(this::isMeeting)
+                .map(SiteVisitInvitation::getId).toList();
+        if (ids.isEmpty()) return Map.of();
+        Map<Long, long[]> result = new LinkedHashMap<>();
+        for (Map<String, Object> row : meetingRegistrationMapper.selectActiveStats(ids)) {
+            Long invitationId = ((Number) row.get("invitationId")).longValue();
+            long groups = ((Number) row.get("registrationGroupCount")).longValue();
+            long people = ((Number) row.get("registeredPersonCount")).longValue();
+            result.put(invitationId, new long[]{groups, people});
+        }
+        return result;
     }
 
     private String displayName(SysUser user) {

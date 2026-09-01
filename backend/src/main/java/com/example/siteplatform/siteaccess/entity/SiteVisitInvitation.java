@@ -18,6 +18,7 @@ public class SiteVisitInvitation {
     private String tokenHash;
     private String tokenEncrypted;
     private String status;
+    private String inviteType;
     private LocalDateTime visitStartTime;
     private LocalDateTime visitEndTime;
     private String purpose;

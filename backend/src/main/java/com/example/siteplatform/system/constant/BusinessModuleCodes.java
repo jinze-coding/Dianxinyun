@@ -21,11 +21,16 @@ public final class BusinessModuleCodes {
 
     public static final List<String> ALL = List.of(SITE_ACCESS, DOCUMENT, INSPECTION, QUALITY);
 
-    public static final Set<String> SITE_ACCESS_MENUS = Set.of("WEB_SITE_ACCESS");
+    public static final Set<String> SITE_ACCESS_MENUS = Set.of(
+            "WEB_SITE_ACCESS", "SITE_VISITOR");
     public static final Set<String> DOCUMENT_MENUS = Set.of(
-            "WEB_DOCUMENT", "MINI_DOCUMENT", "DOCUMENT_SEAL");
-    public static final Set<String> INSPECTION_MENUS = Set.of("WEB_INSPECTION", "MINI_INSPECTION");
-    public static final Set<String> QUALITY_MENUS = Set.of("WEB_QUALITY", "MINI_QUALITY");
+            "WEB_DOCUMENT", "MINI_DOCUMENT", "DOCUMENT_LIBRARY", "DOCUMENT_SEAL",
+            "DOCUMENT_CIRCULATION", "DOCUMENT_RECYCLE");
+    public static final Set<String> INSPECTION_MENUS = Set.of(
+            "WEB_INSPECTION", "MINI_INSPECTION", "INSPECTION_LEDGER", "INSPECTION_RECORDS",
+            "INSPECTION_RECTIFICATIONS", "INSPECTION_EDGE");
+    public static final Set<String> QUALITY_MENUS = Set.of(
+            "WEB_QUALITY", "MINI_QUALITY", "QUALITY_ISSUES", "QUALITY_DOCUMENTS");
 
     public static String fromMenuCode(String menuCode) {
         String normalized = normalize(menuCode);

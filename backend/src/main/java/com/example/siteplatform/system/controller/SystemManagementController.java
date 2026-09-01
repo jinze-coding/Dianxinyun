@@ -118,8 +118,19 @@ public class SystemManagementController {
                                          HttpServletRequest request) {
         SysUser operator = current(request);
         permissionService.requirePlatformPermission(operator, SystemPermissionCodes.USER_STATUS);
-        administrationService.changeUserStatus(userId, body.getStatus(), body.getReason(), operator);
+        administrationService.changeUserStatus(userId, body.getStatus(), body.getReason(),
+                body.isConfirmResponsibilityRelease(), operator);
         return Result.success();
+    }
+
+    @PostMapping("/users/{userId}/status/preview")
+    public Result<List<com.example.siteplatform.project.dto.ResponsibilityImpactVO>> previewUserStatusImpact(
+            @PathVariable Long userId,
+            @RequestBody SystemUserStatusRequest body,
+            HttpServletRequest request) {
+        SysUser operator = current(request);
+        permissionService.requirePlatformPermission(operator, SystemPermissionCodes.USER_STATUS);
+        return Result.success(administrationService.previewUserStatusImpact(userId, body.getStatus(), operator));
     }
 
     @PostMapping({"/users/{userId}/reset-password", "/users/{userId}/password/reset"})

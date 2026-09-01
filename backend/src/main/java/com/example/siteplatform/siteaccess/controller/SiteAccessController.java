@@ -10,11 +10,15 @@ import com.example.siteplatform.siteaccess.dto.SiteVisitVoidRequest;
 import com.example.siteplatform.siteaccess.dto.SiteGuardVisitQrRotateRequest;
 import com.example.siteplatform.siteaccess.dto.SiteGuardVisitQrStatusRequest;
 import com.example.siteplatform.siteaccess.dto.SiteGuardVisitRegistrationUpdateRequest;
+import com.example.siteplatform.siteaccess.dto.SiteMeetingVisitRegistrationUpdateRequest;
+import com.example.siteplatform.siteaccess.dto.SiteMeetingVisitRegistrationVoidRequest;
 import com.example.siteplatform.siteaccess.service.GuardVisitService;
+import com.example.siteplatform.siteaccess.service.MeetingVisitService;
 import com.example.siteplatform.siteaccess.service.SiteAccessService;
 import com.example.siteplatform.siteaccess.vo.SiteGuardVisitMiniCodeVO;
 import com.example.siteplatform.siteaccess.vo.SiteGuardVisitQrVO;
 import com.example.siteplatform.siteaccess.vo.SiteGuardVisitRegistrationVO;
+import com.example.siteplatform.siteaccess.vo.SiteMeetingVisitRegistrationVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitHostOptionVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitInvitationVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitMiniCodeVO;
@@ -44,18 +48,21 @@ import java.util.List;
 public class SiteAccessController {
     private final SiteAccessService service;
     private final GuardVisitService guardVisitService;
+    private final MeetingVisitService meetingVisitService;
     private final AuthService authService;
 
     public SiteAccessController(SiteAccessService service, GuardVisitService guardVisitService,
-                                AuthService authService) {
+                                MeetingVisitService meetingVisitService, AuthService authService) {
         this.service = service;
         this.guardVisitService = guardVisitService;
+        this.meetingVisitService = meetingVisitService;
         this.authService = authService;
     }
 
     @GetMapping("/invitations")
     public Result<PageResult<SiteVisitInvitationVO>> page(
             @RequestParam Long projectId,
+            @RequestParam(required = false) String inviteType,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
@@ -63,7 +70,7 @@ public class SiteAccessController {
             @RequestParam(defaultValue = "1") Integer pageNo,
             @RequestParam(defaultValue = "20") Integer pageSize,
             @RequestHeader(value = "Authorization", required = false) String token) {
-        return Result.success(service.page(projectId, status, keyword, startDate, endDate,
+        return Result.success(service.page(projectId, inviteType, status, keyword, startDate, endDate,
                 pageNo, pageSize, authService.getCurrentUser(token)));
     }
 
@@ -154,6 +161,62 @@ public class SiteAccessController {
             @PathVariable Long id,
             @RequestHeader(value = "Authorization", required = false) String token) {
         return Result.success(service.disableVisitorProfile(id, authService.getCurrentUser(token)));
+    }
+
+    @GetMapping("/invitations/{invitationId}/meeting-registrations")
+    public Result<PageResult<SiteMeetingVisitRegistrationVO>> meetingRegistrations(
+            @PathVariable Long invitationId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "1") Integer pageNo,
+            @RequestParam(defaultValue = "20") Integer pageSize,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(meetingVisitService.page(invitationId, status, keyword, pageNo, pageSize,
+                authService.getCurrentUser(token)));
+    }
+
+    @GetMapping("/meeting-registrations/{id}")
+    public Result<SiteMeetingVisitRegistrationVO> meetingRegistrationDetail(
+            @PathVariable Long id,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(meetingVisitService.detail(id, authService.getCurrentUser(token)));
+    }
+
+    @PutMapping("/meeting-registrations/{id}")
+    public Result<SiteMeetingVisitRegistrationVO> updateMeetingRegistration(
+            @PathVariable Long id,
+            @Valid @RequestBody SiteMeetingVisitRegistrationUpdateRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(meetingVisitService.update(id, request, authService.getCurrentUser(token)));
+    }
+
+    @PostMapping("/meeting-registrations/{id}/void")
+    public Result<SiteMeetingVisitRegistrationVO> voidMeetingRegistration(
+            @PathVariable Long id,
+            @Valid @RequestBody SiteMeetingVisitRegistrationVoidRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(meetingVisitService.voidRegistration(
+                id, request.getReason(), request.getVersion(), authService.getCurrentUser(token)));
+    }
+
+    @GetMapping("/meeting-registrations/export")
+    public ResponseEntity<byte[]> exportMeetingRegistrations(
+            @RequestParam Long projectId,
+            @RequestParam(required = false) Long invitationId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String meetingStatus,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        MeetingVisitService.ExportFile file = meetingVisitService.export(projectId, invitationId, status,
+                meetingStatus, keyword, startDate, endDate, authService.getCurrentUser(token));
+        String fileName = URLEncoder.encode(file.fileName(), StandardCharsets.UTF_8).replace("+", "%20");
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + fileName)
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(file.content());
     }
 
     @GetMapping("/guard/qr")

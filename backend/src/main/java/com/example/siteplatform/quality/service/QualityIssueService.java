@@ -34,6 +34,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -49,6 +50,7 @@ public class QualityIssueService {
     public static final String STATUS_CLOSED = "CLOSED";
     public static final String STATUS_VOIDED = "VOIDED";
     private static final String BUSINESS_TYPE_QUALITY_ISSUE = "QUALITY_ISSUE";
+    private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final String QUALITY_ORDER_SQL = """
             ORDER BY
               CASE WHEN status IN ('CLOSED', 'VOIDED') THEN 1 ELSE 0 END ASC,
@@ -95,8 +97,16 @@ public class QualityIssueService {
 
     public List<QualityIssueVO> listIssues(Long projectId, String status, String keyword,
                                            String source, SysUser currentUser) {
+        return listIssues(projectId, status, keyword, source, null, null, currentUser);
+    }
+
+    public List<QualityIssueVO> listIssues(Long projectId, String status, String keyword,
+                                           String source, LocalDate startDate, LocalDate endDate,
+                                           SysUser currentUser) {
         requireProject(projectId, currentUser);
-        return issueMapper.selectList(buildIssueQuery(projectId, status, keyword, source)).stream()
+        validateDateRange(startDate, endDate, false);
+        return issueMapper.selectList(buildIssueQuery(
+                        projectId, status, keyword, source, startDate, endDate)).stream()
                 .map(issue -> toVO(issue, currentUser, false))
                 .toList();
     }
@@ -109,11 +119,20 @@ public class QualityIssueService {
     public PageResult<QualityIssueVO> pageIssues(Long projectId, String status, String keyword,
                                                   String source, Integer pageNo, Integer pageSize,
                                                   SysUser currentUser) {
+        return pageIssues(projectId, status, keyword, source, null, null, pageNo, pageSize, currentUser);
+    }
+
+    public PageResult<QualityIssueVO> pageIssues(Long projectId, String status, String keyword,
+                                                  String source, LocalDate startDate, LocalDate endDate,
+                                                  Integer pageNo, Integer pageSize,
+                                                  SysUser currentUser) {
         requireProject(projectId, currentUser);
+        validateDateRange(startDate, endDate, false);
         int page = pageNo == null ? 1 : Math.max(1, pageNo);
         int size = pageSize == null ? 20 : Math.max(1, Math.min(pageSize, 100));
         Page<QualityIssue> result = issueMapper.selectPage(
-                new Page<>(page, size), buildIssueQuery(projectId, status, keyword, source));
+                new Page<>(page, size), buildIssueQuery(
+                        projectId, status, keyword, source, startDate, endDate));
         return PageResult.of(page, size, result.getTotal(), result.getRecords().stream()
                 .map(issue -> toVO(issue, currentUser, false))
                 .toList());
@@ -121,18 +140,17 @@ public class QualityIssueService {
 
     public QualityIssueSummaryVO getSummary(Long projectId, SysUser currentUser) {
         requireProject(projectId, currentUser);
-        LocalDateTime start = LocalDate.now().atStartOfDay();
-        int today = count(new LambdaQueryWrapper<QualityIssue>()
+        LocalDate currentDate = today();
+        int todayCount = count(new LambdaQueryWrapper<QualityIssue>()
                 .eq(QualityIssue::getProjectId, projectId)
-                .ge(QualityIssue::getCreateTime, start)
-                .lt(QualityIssue::getCreateTime, start.plusDays(1)));
+                .eq(QualityIssue::getRecordDate, currentDate));
         int pending = count(new LambdaQueryWrapper<QualityIssue>()
                 .eq(QualityIssue::getProjectId, projectId)
                 .eq(QualityIssue::getStatus, STATUS_PENDING));
         int overdue = count(new LambdaQueryWrapper<QualityIssue>()
                 .eq(QualityIssue::getProjectId, projectId)
                 .in(QualityIssue::getStatus, List.of(STATUS_PENDING, STATUS_RECHECK))
-                .lt(QualityIssue::getDeadline, LocalDate.now()));
+                .lt(QualityIssue::getDeadline, currentDate));
         int recheck = count(new LambdaQueryWrapper<QualityIssue>()
                 .eq(QualityIssue::getProjectId, projectId)
                 .eq(QualityIssue::getStatus, STATUS_RECHECK));
@@ -142,7 +160,7 @@ public class QualityIssueService {
         int total = pending + recheck + closed;
 
         QualityIssueSummaryVO summary = new QualityIssueSummaryVO();
-        summary.setTodayCheckCount(today);
+        summary.setTodayCheckCount(todayCount);
         summary.setPendingCount(pending);
         summary.setOverdueCount(overdue);
         summary.setRecheckCount(recheck);
@@ -173,6 +191,7 @@ public class QualityIssueService {
 
         QualityIssue issue = new QualityIssue();
         issue.setProjectId(request.getProjectId());
+        issue.setRecordDate(today());
         issue.setIssueNo(generateIssueNo());
         issue.setRequestKey(requestKey);
         issue.setTitle(request.getTitle().trim());
@@ -182,7 +201,7 @@ public class QualityIssueService {
         issue.setStatus(STATUS_PENDING);
         issue.setAssigneeId(assignee.getId());
         issue.setAssigneeName(displayName(assignee));
-        issue.setDeadline(request.getDeadline() == null ? LocalDate.now().plusDays(3) : request.getDeadline());
+        issue.setDeadline(request.getDeadline() == null ? today().plusDays(3) : request.getDeadline());
         issue.setCreatedById(currentUser.getId());
         issue.setCreatedByName(displayName(currentUser));
         issue.setVersion(0);
@@ -298,7 +317,7 @@ public class QualityIssueService {
         if (request == null || (request.getAssigneeId() == null && request.getDeadline() == null)) {
             throw new BusinessException("请选择整改人或调整期限");
         }
-        if (request.getDeadline() != null && request.getDeadline().isBefore(LocalDate.now())) {
+        if (request.getDeadline() != null && request.getDeadline().isBefore(today())) {
             throw new BusinessException("闭环期限不能早于今天");
         }
         String before = (issue.getAssigneeName() == null ? "-" : issue.getAssigneeName())
@@ -393,18 +412,13 @@ public class QualityIssueService {
     }
 
     private void appendRectificationTodos(List<QualityTodoCandidate> todos, ProjectInfo project, SysUser currentUser) {
-        issueMapper.selectList(new LambdaQueryWrapper<QualityIssue>()
-                        .eq(QualityIssue::getProjectId, project.getId())
-                        .eq(QualityIssue::getStatus, STATUS_PENDING)
-                        .eq(QualityIssue::getAssigneeId, currentUser.getId()))
+        issueMapper.selectRectificationTodos(project.getId(), currentUser.getId())
                 .forEach(issue -> todos.add(new QualityTodoCandidate(
                         toTodo(issue, project, "RECTIFICATION"), issue)));
     }
 
     private void appendRecheckTodos(List<QualityTodoCandidate> todos, ProjectInfo project) {
-        issueMapper.selectList(new LambdaQueryWrapper<QualityIssue>()
-                        .eq(QualityIssue::getProjectId, project.getId())
-                        .eq(QualityIssue::getStatus, STATUS_RECHECK))
+        issueMapper.selectRecheckTodos(project.getId())
                 .forEach(issue -> todos.add(new QualityTodoCandidate(
                         toTodo(issue, project, "RECHECK"), issue)));
     }
@@ -468,10 +482,39 @@ public class QualityIssueService {
         }
     }
 
+    List<QualityIssue> listIssueEntitiesForExport(Long projectId, String status, String keyword,
+                                                  String source, LocalDate startDate, LocalDate endDate,
+                                                  SysUser currentUser) {
+        requireProject(projectId, currentUser);
+        validateDateRange(startDate, endDate, true);
+        return issueMapper.selectList(buildIssueQuery(
+                projectId, status, keyword, source, startDate, endDate));
+    }
+
+    void validateDateRange(LocalDate startDate, LocalDate endDate, boolean required) {
+        if (startDate == null && endDate == null && !required) return;
+        if (startDate == null || endDate == null) {
+            throw new BusinessException("开始日期和结束日期必须同时填写");
+        }
+        if (endDate.isBefore(startDate)) {
+            throw new BusinessException("结束日期不能早于开始日期");
+        }
+        if (endDate.isAfter(today())) {
+            throw new BusinessException("结束日期不能晚于今天");
+        }
+        if (ChronoUnit.DAYS.between(startDate, endDate) > 365) {
+            throw new BusinessException("单次查询和导出最长支持366天");
+        }
+    }
+
     private LambdaQueryWrapper<QualityIssue> buildIssueQuery(Long projectId, String status,
-                                                               String keyword, String source) {
+                                                               String keyword, String source,
+                                                               LocalDate startDate, LocalDate endDate) {
         LambdaQueryWrapper<QualityIssue> wrapper = new LambdaQueryWrapper<QualityIssue>()
                 .eq(QualityIssue::getProjectId, projectId);
+        if (startDate != null && endDate != null) {
+            wrapper.between(QualityIssue::getRecordDate, startDate, endDate);
+        }
         String normalizedSource = StringUtils.hasText(source) ? source.trim().toUpperCase() : "ALL";
         if ("WEEKLY".equals(normalizedSource)) {
             wrapper.isNotNull(QualityIssue::getWeeklyInspectionId);
@@ -483,16 +526,20 @@ public class QualityIssueService {
         if (StringUtils.hasText(status) && !"ALL".equalsIgnoreCase(status)) {
             if ("OVERDUE".equalsIgnoreCase(status)) {
                 wrapper.in(QualityIssue::getStatus, List.of(STATUS_PENDING, STATUS_RECHECK))
-                        .lt(QualityIssue::getDeadline, LocalDate.now());
+                        .lt(QualityIssue::getDeadline, today());
             } else {
                 wrapper.eq(QualityIssue::getStatus, normalizeStatus(status));
             }
         }
         if (StringUtils.hasText(keyword)) {
             String text = keyword.trim();
-            wrapper.and(w -> w.like(QualityIssue::getTitle, text)
+            wrapper.and(w -> w.like(QualityIssue::getIssueNo, text)
+                    .or()
+                    .like(QualityIssue::getTitle, text)
                     .or()
                     .like(QualityIssue::getLocation, text)
+                    .or()
+                    .like(QualityIssue::getDescription, text)
                     .or()
                     .like(QualityIssue::getAssigneeName, text));
         }
@@ -670,7 +717,7 @@ public class QualityIssueService {
     private boolean isOverdue(QualityIssue issue) {
         return List.of(STATUS_PENDING, STATUS_RECHECK).contains(issue.getStatus())
                 && issue.getDeadline() != null
-                && issue.getDeadline().isBefore(LocalDate.now());
+                && issue.getDeadline().isBefore(today());
     }
 
     private boolean isTerminal(String status) {
@@ -725,6 +772,10 @@ public class QualityIssueService {
     private int count(LambdaQueryWrapper<QualityIssue> wrapper) {
         Long value = issueMapper.selectCount(wrapper);
         return value == null ? 0 : Math.toIntExact(value);
+    }
+
+    private LocalDate today() {
+        return LocalDate.now(BUSINESS_ZONE);
     }
 
     private String joinIds(List<Long> ids) {

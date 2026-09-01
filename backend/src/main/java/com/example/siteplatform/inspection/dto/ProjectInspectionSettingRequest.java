@@ -11,4 +11,6 @@ public class ProjectInspectionSettingRequest {
     private Integer reviewDueHours;
     private Integer rectificationDays;
     private Boolean enabled;
+    private Boolean submissionReminderEnabled;
+    private Integer expectedVersion;
 }

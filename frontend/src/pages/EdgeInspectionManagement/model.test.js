@@ -43,7 +43,21 @@ describe('fixed edge inspection model', () => {
       reviewerId: '',
       rectificationDays: 3,
       enabled: false,
+      submissionReminderEnabled: false,
+      reminderEffectiveTime: '',
+      nextReminderTime: '',
       expectedVersion: 3,
     });
+  });
+
+  it('preserves the internal overdue-submission reminder lifecycle fields', () => {
+    const value = normalizeEdgeSetting({
+      submissionReminderEnabled: true,
+      reminderEffectiveTime: '2026-08-29T10:00:00',
+      nextReminderTime: '2026-08-30T18:00:00',
+    }, 3);
+    assert.equal(value.submissionReminderEnabled, true);
+    assert.equal(value.reminderEffectiveTime, '2026-08-29T10:00:00');
+    assert.equal(value.nextReminderTime, '2026-08-30T18:00:00');
   });
 });

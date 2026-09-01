@@ -29,7 +29,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class GeneralInspectionTaskGenerationService {
 
-    private final GeneralInspectionProjectSettingMapper settingMapper;
     private final GeneralInspectionPlanMapper planMapper;
     private final GeneralInspectionPlanVersionMapper planVersionMapper;
     private final GeneralInspectionTemplateMapper templateMapper;
@@ -47,13 +46,7 @@ public class GeneralInspectionTaskGenerationService {
     public void generateScheduledTasks() {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime horizon = now.plusHours(25);
-        List<Long> enabledProjects = settingMapper.selectList(
-                        new LambdaQueryWrapper<GeneralInspectionProjectSetting>()
-                                .eq(GeneralInspectionProjectSetting::getEnabled, 1))
-                .stream().map(GeneralInspectionProjectSetting::getProjectId).toList();
-        if (enabledProjects.isEmpty()) return;
         List<GeneralInspectionPlan> plans = planMapper.selectList(new LambdaQueryWrapper<GeneralInspectionPlan>()
-                .in(GeneralInspectionPlan::getProjectId, enabledProjects)
                 .eq(GeneralInspectionPlan::getPlanCode, EdgeInspectionConfigService.EDGE_PLAN_CODE)
                 .eq(GeneralInspectionPlan::getStatus, "PUBLISHED")
                 .eq(GeneralInspectionPlan::getDeleted, 0));
@@ -72,8 +65,6 @@ public class GeneralInspectionTaskGenerationService {
     public int generatePlan(Long planId, LocalDateTime now, LocalDateTime horizon) {
         GeneralInspectionPlan plan = planMapper.selectByIdForUpdate(planId);
         if (plan == null || !"PUBLISHED".equals(plan.getStatus()) || !Integer.valueOf(0).equals(plan.getDeleted())) return 0;
-        GeneralInspectionProjectSetting setting = settingMapper.selectById(plan.getProjectId());
-        if (setting == null || !Integer.valueOf(1).equals(setting.getEnabled())) return 0;
 
         List<GeneralInspectionPlanVersion> versions = planVersionMapper.selectList(
                 new LambdaQueryWrapper<GeneralInspectionPlanVersion>()

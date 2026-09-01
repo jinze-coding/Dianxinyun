@@ -28,6 +28,43 @@ export function getSiteVisitMiniCode(id) {
   return get(`/site-access/invitations/${id}/mini-code`);
 }
 
+export function getMeetingVisitRegistrations(invitationId, params = {}) {
+  return get(`/site-access/invitations/${invitationId}/meeting-registrations`, params);
+}
+
+export function getMeetingVisitRegistration(id) {
+  return get(`/site-access/meeting-registrations/${id}`);
+}
+
+export function updateMeetingVisitRegistration(id, data) {
+  return put(`/site-access/meeting-registrations/${id}`, data);
+}
+
+export function voidMeetingVisitRegistration(id, reason, version) {
+  return post(`/site-access/meeting-registrations/${id}/void`, { reason, version });
+}
+
+export async function exportMeetingVisitRegistrations(params = {}) {
+  try {
+    const blob = await apiClient.get('/site-access/meeting-registrations/export', {
+      params,
+      responseType: 'blob',
+    });
+    return ensureFileBlob(blob, '会议登记导出失败');
+  } catch (error) {
+    const errorBlob = error?.response?.data;
+    if (errorBlob instanceof Blob && String(errorBlob.type || '').toLowerCase().includes('json')) {
+      try {
+        const result = JSON.parse(await errorBlob.text());
+        throw new Error(result.message || '会议登记导出失败');
+      } catch (parseError) {
+        if (!(parseError instanceof SyntaxError)) throw parseError;
+      }
+    }
+    throw error;
+  }
+}
+
 export function getSiteVisitorProfiles(params = {}) {
   return get('/site-access/visitor-profiles', params);
 }

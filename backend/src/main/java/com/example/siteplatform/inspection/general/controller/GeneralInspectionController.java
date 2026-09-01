@@ -4,18 +4,25 @@ import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.auth.service.AuthService;
 import com.example.siteplatform.common.Result;
 import com.example.siteplatform.inspection.general.dto.*;
-import com.example.siteplatform.inspection.general.entity.GeneralInspectionProjectSetting;
 import com.example.siteplatform.inspection.general.service.EdgeInspectionConfigService;
+import com.example.siteplatform.inspection.general.service.EdgeInspectionWorkspaceService;
 import com.example.siteplatform.inspection.general.service.GeneralInspectionReportingService;
+import com.example.siteplatform.inspection.general.service.GeneralInspectionExportService;
 import com.example.siteplatform.inspection.general.service.GeneralInspectionTaskService;
 import com.example.siteplatform.inspection.general.vo.*;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.Resource;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Tag(name = "临边巡检", description = "固定检查表的临边点位、周期、任务与整单整改闭环")
@@ -26,20 +33,15 @@ public class GeneralInspectionController {
 
     private final AuthService authService;
     private final EdgeInspectionConfigService configService;
+    private final EdgeInspectionWorkspaceService workspaceService;
     private final GeneralInspectionTaskService taskService;
     private final GeneralInspectionReportingService reportingService;
+    private final GeneralInspectionExportService exportService;
 
-    @GetMapping("/projects/{projectId}/feature")
-    public Result<GeneralInspectionProjectSetting> getFeature(@PathVariable Long projectId,
+    @GetMapping("/projects/{projectId}/workspace-summary")
+    public Result<EdgeInspectionWorkspaceSummaryVO> workspaceSummary(@PathVariable Long projectId,
             @RequestHeader(value = "Authorization", required = false) String token) {
-        return Result.success(configService.getFeature(projectId, user(token)));
-    }
-
-    @PutMapping("/projects/{projectId}/feature")
-    public Result<GeneralInspectionProjectSetting> updateFeature(@PathVariable Long projectId,
-            @Valid @RequestBody GeneralInspectionFeatureRequest request,
-            @RequestHeader(value = "Authorization", required = false) String token) {
-        return Result.success(configService.updateFeature(projectId, request, user(token)));
+        return Result.success(workspaceService.summary(projectId, user(token)));
     }
 
     @GetMapping("/point-types")
@@ -179,6 +181,40 @@ public class GeneralInspectionController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestHeader(value = "Authorization", required = false) String token) {
         return Result.success(reportingService.edgeStatistics(projectId, startDate, endDate, user(token)));
+    }
+
+    @PostMapping("/export-jobs")
+    public Result<EdgeInspectionExportJobVO> createExportJob(
+            @Valid @RequestBody GeneralInspectionExportRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(exportService.create(request, user(token)));
+    }
+
+    @GetMapping("/export-jobs")
+    public Result<List<EdgeInspectionExportJobVO>> listExportJobs(
+            @RequestParam Long projectId,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(exportService.list(projectId, user(token)));
+    }
+
+    @GetMapping("/export-jobs/{id}")
+    public Result<EdgeInspectionExportJobVO> getExportJob(
+            @PathVariable Long id,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(exportService.get(id, user(token)));
+    }
+
+    @GetMapping("/export-jobs/{id}/download")
+    public ResponseEntity<Resource> downloadExportJob(
+            @PathVariable Long id,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        GeneralInspectionExportService.Download download = exportService.download(id, user(token));
+        String filename = URLEncoder.encode(download.filename(), StandardCharsets.UTF_8).replace("+", "%20");
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + filename)
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(download.resource());
     }
 
     private SysUser user(String token) {

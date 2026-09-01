@@ -26,19 +26,16 @@ import static org.mockito.Mockito.when;
 class GeneralInspectionTaskGenerationServiceTest {
 
     private GeneralInspectionTaskGenerationService service;
-    private GeneralInspectionProjectSettingMapper settingMapper;
     private GeneralInspectionPlanMapper planMapper;
     private GeneralInspectionPointMapper pointMapper;
     private TransactionTemplate transactionTemplate;
 
     @BeforeEach
     void setUp() {
-        settingMapper = mock(GeneralInspectionProjectSettingMapper.class);
         planMapper = mock(GeneralInspectionPlanMapper.class);
         pointMapper = mock(GeneralInspectionPointMapper.class);
         transactionTemplate = mock(TransactionTemplate.class);
         service = new GeneralInspectionTaskGenerationService(
-                settingMapper,
                 planMapper,
                 mock(GeneralInspectionPlanVersionMapper.class),
                 mock(GeneralInspectionTemplateMapper.class),
@@ -120,16 +117,16 @@ class GeneralInspectionTaskGenerationServiceTest {
     }
 
     @Test
-    void reenableCursorSkipsDisabledPeriodButAllowsFutureOccurrences() {
-        LocalDateTime reenabledAt = LocalDateTime.of(2026, 8, 29, 15, 0);
+    void scheduleResumeCursorSkipsPausedPeriodButAllowsFutureOccurrences() {
+        LocalDateTime resumedAt = LocalDateTime.of(2026, 8, 29, 15, 0);
 
-        assertThat(GeneralInspectionTaskGenerationService.eligibleForGenerationLowerBound(true, reenabledAt,
+        assertThat(GeneralInspectionTaskGenerationService.eligibleForGenerationLowerBound(true, resumedAt,
                 LocalDateTime.of(2026, 8, 27, 8, 0))).isFalse();
-        assertThat(GeneralInspectionTaskGenerationService.eligibleForGenerationLowerBound(true, reenabledAt,
+        assertThat(GeneralInspectionTaskGenerationService.eligibleForGenerationLowerBound(true, resumedAt,
                 LocalDateTime.of(2026, 8, 29, 8, 0))).isFalse();
-        assertThat(GeneralInspectionTaskGenerationService.eligibleForGenerationLowerBound(true, reenabledAt,
-                reenabledAt)).isTrue();
-        assertThat(GeneralInspectionTaskGenerationService.eligibleForGenerationLowerBound(true, reenabledAt,
+        assertThat(GeneralInspectionTaskGenerationService.eligibleForGenerationLowerBound(true, resumedAt,
+                resumedAt)).isTrue();
+        assertThat(GeneralInspectionTaskGenerationService.eligibleForGenerationLowerBound(true, resumedAt,
                 LocalDateTime.of(2026, 8, 30, 8, 0))).isTrue();
     }
 
@@ -145,14 +142,14 @@ class GeneralInspectionTaskGenerationServiceTest {
 
     @Test
     void rollingCursorAheadDoesNotSuppressNextTaskForNewPoint() {
-        LocalDateTime featureLowerBound = LocalDateTime.of(2026, 8, 20, 9, 0);
+        LocalDateTime scheduleLowerBound = LocalDateTime.of(2026, 8, 20, 9, 0);
         LocalDateTime pointCreatedAt = LocalDateTime.of(2026, 8, 26, 17, 0);
         LocalDateTime rollingCursor = LocalDateTime.of(2026, 8, 27, 18, 0);
         LocalDateTime nextTaskStart = LocalDateTime.of(2026, 8, 27, 8, 0);
 
         assertThat(nextTaskStart).isBefore(rollingCursor);
         assertThat(GeneralInspectionTaskGenerationService.eligibleForGenerationLowerBound(true,
-                featureLowerBound, nextTaskStart)).isTrue();
+                scheduleLowerBound, nextTaskStart)).isTrue();
         assertThat(GeneralInspectionTaskGenerationService.eligibleForPointActivation(true,
                 pointCreatedAt, nextTaskStart)).isTrue();
     }
@@ -160,13 +157,9 @@ class GeneralInspectionTaskGenerationServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void scheduledGenerationWrapsEveryPlanInAnExplicitTransaction() {
-        GeneralInspectionProjectSetting setting = new GeneralInspectionProjectSetting();
-        setting.setProjectId(9L);
-        setting.setEnabled(1);
         GeneralInspectionPlan plan = new GeneralInspectionPlan();
         plan.setId(31L);
         plan.setProjectId(9L);
-        when(settingMapper.selectList(any())).thenReturn(List.of(setting));
         when(planMapper.selectList(any())).thenReturn(List.of(plan));
         when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
             TransactionCallback<Integer> callback = invocation.getArgument(0);

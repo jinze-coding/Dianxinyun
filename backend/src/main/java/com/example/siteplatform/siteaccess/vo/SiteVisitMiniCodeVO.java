@@ -6,6 +6,7 @@ import lombok.Data;
 public class SiteVisitMiniCodeVO {
     private Long invitationId;
     private String inviteNo;
+    private String inviteType;
     private String sceneCode;
     private String pagePath;
     private String codeType;

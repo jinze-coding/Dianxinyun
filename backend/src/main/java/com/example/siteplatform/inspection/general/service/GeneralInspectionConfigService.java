@@ -38,7 +38,6 @@ public class GeneralInspectionConfigService {
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final GeneralInspectionPermissionService permissionService;
-    private final GeneralInspectionProjectSettingMapper settingMapper;
     private final GeneralInspectionTemplateMapper templateMapper;
     private final GeneralInspectionTemplateVersionMapper templateVersionMapper;
     private final GeneralInspectionTemplateItemMapper templateItemMapper;
@@ -53,38 +52,6 @@ public class GeneralInspectionConfigService {
     private final FileResourceService fileResourceService;
     private final SysUserProjectMapper userProjectMapper;
     private final ElectricBoxService electricBoxService;
-
-    public GeneralInspectionProjectSetting getFeature(Long projectId, SysUser currentUser) {
-        return permissionService.getSetting(projectId, currentUser);
-    }
-
-    @Transactional
-    public GeneralInspectionProjectSetting updateFeature(Long projectId, GeneralInspectionFeatureRequest request,
-                                                         SysUser currentUser) {
-        permissionService.requirePlatformAdmin(currentUser);
-        permissionService.getSetting(projectId, currentUser);
-        GeneralInspectionProjectSetting existing = settingMapper.selectById(projectId);
-        if (existing == null) {
-            if (!Integer.valueOf(0).equals(request.getExpectedVersion())) {
-                throw conflict("项目开关版本已变化，请刷新后重试");
-            }
-            GeneralInspectionProjectSetting setting = new GeneralInspectionProjectSetting();
-            setting.setProjectId(projectId);
-            setting.setEnabled(Boolean.TRUE.equals(request.getEnabled()) ? 1 : 0);
-            setting.setVersion(0);
-            setting.setUpdatedById(currentUser.getId());
-            setting.setUpdatedByName(userName(currentUser));
-            requireOne(settingMapper.insert(setting), "临边巡检项目开关新增");
-        } else {
-            requireOne(settingMapper.updateFeature(projectId, Boolean.TRUE.equals(request.getEnabled()) ? 1 : 0,
-                    request.getExpectedVersion(), currentUser.getId(), userName(currentUser)),
-                    "项目开关版本已变化，请刷新后重试");
-        }
-        record(projectId, "SETTING", projectId, "FEATURE_TOGGLE", currentUser,
-                existing == null ? null : String.valueOf(existing.getEnabled()),
-                String.valueOf(request.getEnabled()), null, null, null);
-        return settingMapper.selectById(projectId);
-    }
 
     public List<GeneralInspectionTemplateVO> listTemplates(Long projectId, SysUser currentUser) {
         permissionService.requireView(projectId, currentUser);
