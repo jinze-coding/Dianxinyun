@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   EDGE_POINT_TYPE_OPTIONS,
+  EDGE_REMINDER_PROJECTION_LABEL,
+  EDGE_REMINDER_PROJECTION_NOTICE,
   edgeTaskDisplayStatus,
   edgeTaskStatusText,
   formatLocalDate,
@@ -59,5 +61,11 @@ describe('fixed edge inspection model', () => {
     assert.equal(value.submissionReminderEnabled, true);
     assert.equal(value.reminderEffectiveTime, '2026-08-29T10:00:00');
     assert.equal(value.nextReminderTime, '2026-08-30T18:00:00');
+  });
+
+  it('describes the projected reminder time without claiming a task exists', () => {
+    assert.equal(EDGE_REMINDER_PROJECTION_LABEL, '计划提醒时间');
+    assert.match(EDGE_REMINDER_PROJECTION_NOTICE, /不代表对应巡检任务已经生成/);
+    assert.match(EDGE_REMINDER_PROJECTION_NOTICE, /巡检记录和小程序为准/);
   });
 });

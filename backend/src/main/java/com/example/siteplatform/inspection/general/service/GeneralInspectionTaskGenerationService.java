@@ -29,6 +29,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class GeneralInspectionTaskGenerationService {
 
+    private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
+
     private final GeneralInspectionPlanMapper planMapper;
     private final GeneralInspectionPlanVersionMapper planVersionMapper;
     private final GeneralInspectionTemplateMapper templateMapper;
@@ -44,8 +46,6 @@ public class GeneralInspectionTaskGenerationService {
 
     @Scheduled(cron = "${general-inspection.task-generation-cron:0 */5 * * * ?}")
     public void generateScheduledTasks() {
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime horizon = now.plusHours(25);
         List<GeneralInspectionPlan> plans = planMapper.selectList(new LambdaQueryWrapper<GeneralInspectionPlan>()
                 .eq(GeneralInspectionPlan::getPlanCode, EdgeInspectionConfigService.EDGE_PLAN_CODE)
                 .eq(GeneralInspectionPlan::getStatus, "PUBLISHED")
@@ -54,7 +54,9 @@ public class GeneralInspectionTaskGenerationService {
             try {
                 // @Scheduled 与 generatePlan 位于同一 Bean，直接自调用不会经过
                 // @Transactional 代理；显式模板确保每个计划的行锁、任务/快照和游标原子提交。
-                transactionTemplate.execute(status -> generatePlan(plan.getId(), now, horizon));
+                // 不复用扫描列表前取得的旧时间；每个计划进入事务并取得计划行锁后
+                // 再读取业务时钟，避免计划较多时跨过截止点仍按旧 now 生成任务。
+                transactionTemplate.execute(status -> generatePlan(plan.getId(), null, null));
             } catch (RuntimeException ex) {
                 log.error("临边巡检计划任务生成失败，planId={}", plan.getId(), ex);
             }
@@ -65,12 +67,15 @@ public class GeneralInspectionTaskGenerationService {
     public int generatePlan(Long planId, LocalDateTime now, LocalDateTime horizon) {
         GeneralInspectionPlan plan = planMapper.selectByIdForUpdate(planId);
         if (plan == null || !"PUBLISHED".equals(plan.getStatus()) || !Integer.valueOf(0).equals(plan.getDeleted())) return 0;
+        if (now == null) now = LocalDateTime.now(BUSINESS_ZONE);
+        if (horizon == null) horizon = now.plusHours(25);
 
         List<GeneralInspectionPlanVersion> versions = planVersionMapper.selectList(
                 new LambdaQueryWrapper<GeneralInspectionPlanVersion>()
                         .eq(GeneralInspectionPlanVersion::getPlanId, planId)
                         .le(GeneralInspectionPlanVersion::getEffectiveTime, horizon)
-                        .orderByAsc(GeneralInspectionPlanVersion::getEffectiveTime));
+                        .orderByAsc(GeneralInspectionPlanVersion::getEffectiveTime)
+                        .orderByAsc(GeneralInspectionPlanVersion::getVersionNo));
         if (versions.isEmpty()) return 0;
         Map<Long, GeneralInspectionPlanConfig> configs = versions.stream().collect(Collectors.toMap(
                 GeneralInspectionPlanVersion::getId, version -> parseConfig(version.getConfigJson()), (a, b) -> b,
@@ -87,12 +92,13 @@ public class GeneralInspectionTaskGenerationService {
                 if (!matches(config, date)) continue;
                 for (GeneralInspectionPlanConfig.Slot slot : config.getSlots()) {
                     LocalDateTime taskStart = LocalDateTime.of(date, slot.getStartTime());
-                    if (!eligibleForGenerationLowerBound(edgePlan, generationLowerBound, taskStart)) continue;
-                    GeneralInspectionPlanVersion effectiveVersion = latestPlanVersion(versions, taskStart);
-                    if (effectiveVersion == null || !Objects.equals(effectiveVersion.getId(), version.getId())) continue;
+                    LocalDateTime due = dueTime(date, slot);
+                    if (!eligibleForActivationWindow(edgePlan, generationLowerBound,
+                            taskStart, due, now)) continue;
                     if (taskStart.isAfter(horizon)) continue;
                     for (GeneralInspectionPlanConfig.PointAssignment assignment : assignments(plan, config)) {
-                        if (materialize(plan, version, config, slot, assignment, date, taskStart)) created++;
+                        if (materialize(plan, versions, version, config, slot, assignment, date,
+                                taskStart, due, now, generationLowerBound)) created++;
                     }
                 }
             }
@@ -125,20 +131,27 @@ public class GeneralInspectionTaskGenerationService {
         return rows;
     }
 
-    boolean materialize(GeneralInspectionPlan plan, GeneralInspectionPlanVersion planVersion,
+    boolean materialize(GeneralInspectionPlan plan, List<GeneralInspectionPlanVersion> planVersions,
+                        GeneralInspectionPlanVersion planVersion,
                         GeneralInspectionPlanConfig config, GeneralInspectionPlanConfig.Slot slot,
                         GeneralInspectionPlanConfig.PointAssignment assignment, LocalDate date,
-                        LocalDateTime start) {
+                        LocalDateTime start, LocalDateTime due, LocalDateTime now,
+                        LocalDateTime generationLowerBound) {
         // 与点位停用共用同一行锁：生成事务读到 ACTIVE 后一直持锁到任务、快照和
         // 游标提交，停用随后必能扫描并取消该任务；反之生成会看到 INACTIVE 并跳过。
         GeneralInspectionPoint point = pointMapper.selectByIdForUpdate(assignment.getPointId());
         if (point == null || !Objects.equals(point.getProjectId(), plan.getProjectId()) || !"ACTIVE".equals(point.getStatus())) return false;
         boolean edgePlan = EdgeInspectionConfigService.EDGE_PLAN_CODE.equals(plan.getPlanCode());
         if (edgePlan && !StringUtils.hasText(point.getPointTypeCode())) return false;
-        LocalDateTime due = LocalDateTime.of(date.plusDays(value(slot.getDueDayOffset(), 0)), slot.getDueTime());
         LocalDateTime activeSince = point.getEdgeActiveSinceTime() == null
                 ? point.getCreateTime() : point.getEdgeActiveSinceTime();
+        // 新建点位只进入创建后的任务，不能借“当前时段尚未截止”补成一项
+        // 创建前已经开始的应检任务；放宽规则只适用于计划首次/恢复启用。
         if (!eligibleForPointActivation(edgePlan, activeSince, start)) return false;
+        LocalDateTime versionReferenceTime = activationAwareVersionReference(edgePlan, start,
+                generationLowerBound, activeSince);
+        GeneralInspectionPlanVersion effectiveVersion = latestPlanVersion(planVersions, versionReferenceTime);
+        if (effectiveVersion == null || !Objects.equals(effectiveVersion.getId(), planVersion.getId())) return false;
         Long templateId = plan.getTemplateId();
         if (edgePlan) {
             GeneralInspectionTemplate template = templateMapper.selectOne(
@@ -276,20 +289,51 @@ public class GeneralInspectionTaskGenerationService {
                 ? now.toLocalDate().minusDays(1)
                 : plan.getGeneratedThroughTime().toLocalDate().minusDays(1);
         LocalDate result = configuredStart.isAfter(cursorStart) ? configuredStart : cursorStart;
+        if (EdgeInspectionConfigService.EDGE_PLAN_CODE.equals(plan.getPlanCode())) {
+            // 临边时段最长可跨午夜 24 小时。25 小时预生成游标在深夜可能已经
+            // 跨到后天，仅按“游标日期 - 1 天”会漏掉仍在执行中的前一日跨夜任务。
+            // 因此每轮至少回看当前业务日期的前一天，之后仍由启用/点位激活
+            // 下界和截止时间判断阻止补出已截止的历史任务。
+            LocalDate openWindowStart = now.toLocalDate().minusDays(1);
+            LocalDate edgeStart = configuredStart.isAfter(openWindowStart)
+                    ? configuredStart : openWindowStart;
+            if (edgeStart.isBefore(result)) result = edgeStart;
+        }
         LocalDate safetyFloor = now.toLocalDate().minusDays(366);
         return result.isBefore(safetyFloor) ? safetyFloor : result;
     }
 
-    static boolean eligibleForGenerationLowerBound(boolean edgePlan, LocalDateTime lowerBound,
-                                                    LocalDateTime taskStart) {
-        return !edgePlan || lowerBound == null || !taskStart.isBefore(lowerBound);
+    static boolean eligibleForActivationWindow(boolean edgePlan, LocalDateTime activationTime,
+                                               LocalDateTime taskStart, LocalDateTime dueTime,
+                                               LocalDateTime now) {
+        if (!edgePlan || activationTime == null || taskStart == null
+                || !taskStart.isBefore(activationTime)) return true;
+        // 首次/恢复启用计划落在已开始的时段内时，
+        // 只要调度实际执行时仍未逾期就允许生成。「截止时刻」与提交
+        // 的逾期判定保持一致：只有 now.isAfter(dueTime) 才算已逾期。
+        return dueTime != null && now != null
+                && !activationTime.isAfter(dueTime) && !now.isAfter(dueTime);
     }
 
-    private GeneralInspectionPlanVersion latestPlanVersion(List<GeneralInspectionPlanVersion> versions,
-                                                            LocalDateTime taskStart) {
+    static LocalDateTime activationAwareVersionReference(boolean edgePlan, LocalDateTime taskStart,
+                                                         LocalDateTime generationLowerBound,
+                                                         LocalDateTime pointActiveSince) {
+        if (!edgePlan || taskStart == null) return taskStart;
+        LocalDateTime reference = taskStart;
+        if (generationLowerBound != null && generationLowerBound.isAfter(reference)) {
+            reference = generationLowerBound;
+        }
+        if (pointActiveSince != null && pointActiveSince.isAfter(reference)) {
+            reference = pointActiveSince;
+        }
+        return reference;
+    }
+
+    GeneralInspectionPlanVersion latestPlanVersion(List<GeneralInspectionPlanVersion> versions,
+                                                    LocalDateTime referenceTime) {
         GeneralInspectionPlanVersion result = null;
         for (GeneralInspectionPlanVersion version : versions) {
-            if (!version.getEffectiveTime().isAfter(taskStart)) result = version;
+            if (!version.getEffectiveTime().isAfter(referenceTime)) result = version;
             else break;
         }
         return result;
@@ -344,6 +388,10 @@ public class GeneralInspectionTaskGenerationService {
                                               LocalDateTime taskStartTime) {
         return !edgePlan || activeSinceTime == null || taskStartTime == null
                 || !taskStartTime.isBefore(activeSinceTime);
+    }
+
+    private LocalDateTime dueTime(LocalDate date, GeneralInspectionPlanConfig.Slot slot) {
+        return LocalDateTime.of(date.plusDays(value(slot.getDueDayOffset(), 0)), slot.getDueTime());
     }
 
     private BusinessException conflict(String message) {

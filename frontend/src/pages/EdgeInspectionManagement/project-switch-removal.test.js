@@ -57,6 +57,15 @@ test('workspace explains the point-to-task flow and uses the project summary end
   assert.match(styles, /\.edge-flow-equation/);
 });
 
+test('setting presents reminder time as a projection instead of generated-task evidence', () => {
+  assert.match(page, /EDGE_REMINDER_PROJECTION_LABEL/);
+  assert.match(page, /EDGE_REMINDER_PROJECTION_NOTICE/);
+  assert.match(page, /实际任务到达截止时间后才可能产生提醒/);
+  assert.match(page, /若当前时段尚未截止会生成本时段任务/);
+  assert.match(page, /新建点位仍从创建后的下一适用时段开始纳入/);
+  assert.doesNotMatch(page, /下一次提醒/);
+});
+
 test('edge inspection export uses asynchronous jobs, polling and a controlled blob download', () => {
   assert.match(page, /createEdgeInspectionExportJob/);
   assert.match(page, /window\.setInterval\(refresh, 3000\)/);

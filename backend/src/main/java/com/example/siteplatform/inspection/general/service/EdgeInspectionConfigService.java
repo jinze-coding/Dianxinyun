@@ -125,7 +125,7 @@ public class EdgeInspectionConfigService {
             point.setProjectId(request.getProjectId());
             point.setPointCode(newPointCode());
             point.setStatus("ACTIVE");
-            point.setEdgeActiveSinceTime(LocalDateTime.now());
+            point.setEdgeActiveSinceTime(LocalDateTime.now(BUSINESS_ZONE));
             point.setVersion(0);
             point.setCreatedById(user.getId());
             point.setCreatedByName(userName(user));
@@ -255,7 +255,8 @@ public class EdgeInspectionConfigService {
             plan.setPlanName("临边巡检周期设置");
             plan.setStatus(Boolean.TRUE.equals(request.getEnabled()) ? "PUBLISHED" : "PAUSED");
             plan.setDraftConfigJson(json(config));
-            // 新计划从保存时刻开始生成，不能因开始日期较早而补出历史逾期任务。
+            // 新计划从保存时刻开始生成；当前已开始但尚未截止的
+            // 时段由生成器纳入，已截止的历史时段仍不追补。
             plan.setGeneratedThroughTime(savedAt);
             plan.setEdgeGenerationLowerBoundTime(savedAt);
             plan.setVersion(0);
@@ -275,7 +276,8 @@ public class EdgeInspectionConfigService {
             plan.setStatus(Boolean.TRUE.equals(request.getEnabled()) ? "PUBLISHED" : "PAUSED");
             plan.setDraftConfigJson(json(config));
             // 普通保存保留游标，以维持已启用期间的停机补偿；暂停后恢复才把
-            // 下界推进至恢复时刻，避免补生成暂停期间的逾期任务。
+            // 下界推进至恢复时刻：当前尚未截止的时段可生成，
+            // 暂停期间已截止的历史时段不追补。
             plan.setGeneratedThroughTime(settingSaveCursor(previousCursor, resumed, savedAt));
             plan.setEdgeGenerationLowerBoundTime(settingSaveCursor(previousLowerBound, resumed, savedAt));
             plan.setVersion(value(plan.getVersion()) + 1);
@@ -298,7 +300,8 @@ public class EdgeInspectionConfigService {
         if (resumed) {
             record(projectId, "PLAN", plan.getId(), "PLAN_RESUME_GENERATION_BOUND", user,
                     String.valueOf(previousLowerBound), String.valueOf(plan.getEdgeGenerationLowerBoundTime()),
-                    "临边巡检设置恢复，仅生成恢复时刻之后的任务；游标=" + plan.getGeneratedThroughTime());
+                    "临边巡检设置恢复，生成恢复后新时段及当前未截止时段，"
+                            + "不追补已截止历史任务；游标=" + plan.getGeneratedThroughTime());
         }
         return toSettingVO(plan);
     }

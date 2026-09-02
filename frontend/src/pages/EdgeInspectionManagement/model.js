@@ -27,6 +27,9 @@ export const EDGE_RECTIFICATION_STATUS_TEXT = Object.freeze({
   VOIDED: '已作废',
 });
 
+export const EDGE_REMINDER_PROJECTION_LABEL = '计划提醒时间';
+export const EDGE_REMINDER_PROJECTION_NOTICE = '按当前周期推算，不代表对应巡检任务已经生成；实际任务以巡检记录和小程序为准。';
+
 export function edgeTaskDisplayStatus(task, now = new Date()) {
   const explicit = String(task?.displayStatus || task?.recordStatus || '').toUpperCase();
   if (explicit) return explicit;
