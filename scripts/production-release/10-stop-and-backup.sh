@@ -31,10 +31,16 @@ done
 [ -n "$backup_dir" ] || usage_error '必须提供 --backup-dir'
 assert_safe_absolute_path "$backup_dir" '备份目录'
 require_confirmation STOP_AND_BACKUP_DIANXINYUN "$confirmation"
-require_commands "$MYSQL_BIN" "$MYSQLDUMP_BIN" systemctl readlink sha256sum gzip tar find sort xargs stat awk hostname uname nginx
+require_commands "$MYSQL_BIN" "$MYSQLDUMP_BIN" systemctl readlink sha256sum gzip tar find sort xargs stat awk hostname uname nginx ln mktemp chown flock apt-config
 init_mysql_args
 
 [ ! -e "$backup_dir" ] || die "备份目录已存在，拒绝覆盖：$backup_dir"
+assert_service_boot_enabled || die '停机升级前主服务必须保持开机自启'
+assert_release_window_reboot_safe || die '生产维护窗口重启门禁未通过'
+validate_maintenance_lock_path || die '生产维护锁路径校验失败'
+if maintenance_lock_present; then
+  die "已有生产维护锁，必须先核对并完成原发布或回滚：$MAINTENANCE_LOCK_FILE"
+fi
 
 if [ "$DRY_RUN" = 1 ]; then
   log "DRY-RUN：将只读核对 68 表/13 标记，停止 $SERVICE_NAME，并创建 $backup_dir"
@@ -43,6 +49,11 @@ if [ "$DRY_RUN" = 1 ]; then
 fi
 
 require_root
+acquire_release_operation_lock || die '无法取得生产发布全程互斥锁'
+assert_release_window_reboot_safe || die '生产维护窗口重启门禁未通过'
+assert_service_boot_enabled || die '取得发布互斥锁后主服务开机自启状态发生变化'
+[ ! -e "$backup_dir" ] && [ ! -L "$backup_dir" ] \
+  || die "取得发布互斥锁后发现备份目录已存在，拒绝复用：$backup_dir"
 "$SCRIPT_DIR/00-preflight-readonly.sh"
 
 jar_target="$(canonical_existing_path "$JAR_LINK" '当前 JAR')"
@@ -51,17 +62,40 @@ upload_target="$(canonical_existing_path "$UPLOAD_LINK" '当前 uploads')"
 fragment_path="$(systemctl show "$SERVICE_NAME" --property=FragmentPath --value)"
 [ -f "$fragment_path" ] || die "systemd FragmentPath 不可读：$fragment_path"
 
-service_stopped=0
+maintenance_lock_acquired=0
 backup_complete=0
 on_exit() {
   local rc=$?
-  if [ "$rc" -ne 0 ] && [ "$service_stopped" = 1 ] && [ "$backup_complete" = 0 ]; then
-    warn '备份未完成；数据库尚未迁移，正在尝试恢复原服务'
-    systemctl start "$SERVICE_NAME" || warn '原服务自动重启失败，请立即人工处理'
+  trap - EXIT ERR INT TERM HUP
+  if [ "$rc" -ne 0 ] && [ "$maintenance_lock_acquired" = 1 ] && [ "$backup_complete" = 0 ]; then
+    set +e
+    warn '备份未完成且数据库尚未迁移；正在验证原服务恢复后再决定是否解除维护锁'
+    if ! systemctl is-active --quiet "$SERVICE_NAME"; then
+      systemctl start "$SERVICE_NAME" || warn '原服务自动启动失败，请立即人工处理'
+    fi
+    if wait_for_backend_health; then
+      if systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 \
+          && assert_service_boot_enabled; then
+        release_maintenance_lock "$backup_dir" \
+          || warn "原服务已健康，但维护锁解除失败，请人工核对：$MAINTENANCE_LOCK_FILE"
+      else
+        warn '原服务已健康，但未能恢复开机自启；维护锁继续保留'
+      fi
+    else
+      warn "原服务未通过完整健康门禁，维护锁继续保留：$MAINTENANCE_LOCK_FILE"
+    fi
   fi
   exit "$rc"
 }
 trap on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+
+acquire_watchdog_coordination_lock || die '无法取得 watchdog 协调锁'
+create_maintenance_lock "$backup_dir" || die '无法安全创建生产维护锁'
+maintenance_lock_acquired=1
+systemctl disable "$SERVICE_NAME"
+assert_service_boot_disabled || die '无法关闭维护期主服务开机自启'
 
 mkdir -p "$backup_dir"/{database,files,runtime,config,inventory}
 chmod 0700 "$backup_dir" "$backup_dir"/{database,files,runtime,config,inventory}
@@ -97,8 +131,8 @@ grep -E '^[A-Z0-9_]+=' "$ENV_FILE" | cut -d= -f1 | LC_ALL=C sort -u \
 
 log "停止 $SERVICE_NAME，建立一致性停机点"
 systemctl stop "$SERVICE_NAME"
-service_stopped=1
-systemctl is-active --quiet "$SERVICE_NAME" && die "$SERVICE_NAME 未停止"
+assert_service_inactive
+release_watchdog_coordination_lock || die '后端停稳后无法释放 watchdog 协调锁'
 
 capture_current_tables "$backup_dir/inventory/tables.txt"
 capture_current_markers "$backup_dir/inventory/migration-markers.txt"
@@ -138,6 +172,6 @@ printf 'BACKUP_STATE=COMPLETE\nCOMPLETED_AT=%s\n' "$(date -Iseconds)" > "$backup
 
 verify_backup_directory "$backup_dir"
 backup_complete=1
-trap - EXIT
+trap - EXIT INT TERM HUP
 log "停服一致性备份完成且已验证：$backup_dir"
-log "$SERVICE_NAME 保持停止；下一步只能配置新密钥并执行迁移，或运行同点回滚"
+log "$SERVICE_NAME 保持停止且维护锁继续生效；下一步只能配置新密钥并执行迁移，或运行同点回滚"

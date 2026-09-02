@@ -40,7 +40,12 @@ assert_safe_absolute_path "$proof_file" '兼容停点证明'
 case "$operator$evidence" in *$'\n'*|*$'\r'*) die '验收人和证据引用不得包含换行' ;; esac
 require_confirmation TRANSITION_WEB_CURRENT_MINI_COMPATIBILITY_PASSED "$confirmation"
 require_commands systemctl curl grep sha256sum install
+if [ "$DRY_RUN" != 1 ]; then
+  require_root
+  acquire_release_operation_lock || die '无法取得生产发布全程互斥锁'
+fi
 systemctl is-active --quiet "$SERVICE_NAME" || die '新后端不是 active'
+assert_service_boot_enabled || die '记录兼容停点前主服务开机自启必须是 enabled'
 health_check_backend
 
 current_web="$(canonical_existing_path "$WEB_LINK" '当前 transition Web')"
@@ -54,7 +59,6 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-require_root
 [ ! -e "$proof_file" ] || die "证明文件已存在，拒绝覆盖：$proof_file"
 install -d -o root -g root -m 0700 "$(dirname "$proof_file")"
 {

@@ -20,7 +20,8 @@ usage() {
     --backup-dir /已验证停机备份 --log-file /新日志文件
 
 VERIFY 默认只读；APPLY 必须逐项传入同一停机窗口 VERIFY 输出。脚本通过 systemd EnvironmentFile
-载入正式密钥，不 source 环境文件，不输出密钥。所有一次性参数都显式 export 后传给离线进程。
+载入正式密钥，不 source 环境文件，不输出密钥。离线控制参数由 wrapper 在 Java exec 前最后覆盖，
+避免被正式 EnvironmentFile 中的在线调度配置反向覆盖。
 EOF
 }
 
@@ -60,10 +61,16 @@ case "$mode" in verify|apply|post-verify) ;; *) usage_error '--mode 必须是 ve
 [ -n "$log_file" ] || usage_error '必须提供 --log-file'
 assert_safe_absolute_path "$jar_path" '离线 JAR'
 assert_safe_absolute_path "$log_file" '迁移日志文件'
-require_commands systemd-run systemctl runuser "$MYSQL_BIN" grep tee sha256sum
+require_commands systemd-run systemctl runuser env "$MYSQL_BIN" grep tee sha256sum ln mktemp chown chmod rm
 init_mysql_args
+if [ "$DRY_RUN" != 1 ]; then
+  require_root
+  acquire_release_operation_lock || die '无法取得生产发布全程互斥锁'
+fi
 verify_backup_directory "$backup_dir"
+assert_maintenance_lock "$backup_dir" || die '生产维护锁与本次停机备份不匹配'
 assert_service_inactive
+assert_service_boot_disabled || die '维护期主服务开机自启未保持 disabled'
 [ -f "$jar_path" ] || die "离线 JAR 不存在：$jar_path"
 assert_readable_by_user "$SERVICE_USER" "$jar_path"
 [ ! -e "$log_file" ] || die "日志文件已存在，拒绝覆盖：$log_file"
@@ -97,7 +104,6 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-require_root
 export SPRING_PROFILES_ACTIVE='prod,visitor-legacy-reencrypt'
 export SPRING_MAIN_WEB_APPLICATION_TYPE='none'
 export APP_SCHEDULING_ENABLED='false'
@@ -115,26 +121,90 @@ else
 fi
 
 unit_name="dianxinyun-visitor-reencrypt-${mode//-/_}-$(date +%s)-$$"
+worker_wrapper="$SCRIPT_DIR/lib/offline-worker-wrapper.sh"
+env_bin="$(command -v env)"
+assert_safe_absolute_path "$env_bin" 'env 命令'
+[ -f "$worker_wrapper" ] && [ ! -L "$worker_wrapper" ] \
+  || die "离线 worker 包装器缺失或不安全：$worker_wrapper"
+offline_marker_created=0
+worker_submission_started=0
+cleanup_unsubmitted_marker() {
+  local rc=$?
+  trap - EXIT INT TERM HUP
+  set +e
+  if [ "$offline_marker_created" = 1 ] \
+      && [ "$worker_submission_started" = 0 ] \
+      && { [ -e "$OFFLINE_WORKER_MARKER_FILE" ] \
+           || [ -L "$OFFLINE_WORKER_MARKER_FILE" ]; }; then
+    if acquire_offline_worker_coordination_lock; then
+      remove_offline_worker_marker_if_matches "$unit_name" SUBMITTING \
+        || warn "未能清理尚未提交的离线 worker 标记，请按故障恢复流程处理：$OFFLINE_WORKER_MARKER_FILE"
+      release_offline_worker_coordination_lock \
+        || warn '未能释放离线 worker 协调锁；进程退出后内核将回收租约'
+    else
+      warn "未能取得离线 worker 协调锁；保留标记并按故障恢复流程处理：$OFFLINE_WORKER_MARKER_FILE"
+    fi
+  fi
+  exit "$rc"
+}
+trap cleanup_unsubmitted_marker EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+create_offline_worker_marker "$unit_name" || die '无法创建离线 worker 存活标记'
+offline_marker_created=1
 systemd_args=(
   --quiet --wait --collect --pipe --unit "$unit_name"
-  --property=Type=exec --property="User=$SERVICE_USER" --property="Group=$SERVICE_GROUP"
+  --property=Type=exec
   --property="WorkingDirectory=$APP_ROOT" --property="EnvironmentFile=$ENV_FILE"
-  --setenv=SPRING_PROFILES_ACTIVE --setenv=SPRING_MAIN_WEB_APPLICATION_TYPE
-  --setenv=APP_SCHEDULING_ENABLED --setenv=SITE_ACCESS_LEGACY_REENCRYPTION_ENABLED
-  --setenv=SITE_ACCESS_LEGACY_REENCRYPTION_MODE
+)
+worker_command=(
+  "$env_bin"
+  -u SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_TOTAL
+  -u SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_CURRENT
+  -u SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_LEGACY
+  -u SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_TOKEN_MATCHES
+  -u SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_FINGERPRINT
+  -u SITE_ACCESS_LEGACY_REENCRYPTION_CONFIRMATION
+  "SPRING_PROFILES_ACTIVE=$SPRING_PROFILES_ACTIVE"
+  "SPRING_MAIN_WEB_APPLICATION_TYPE=$SPRING_MAIN_WEB_APPLICATION_TYPE"
+  "APP_SCHEDULING_ENABLED=$APP_SCHEDULING_ENABLED"
+  "SITE_ACCESS_LEGACY_REENCRYPTION_ENABLED=$SITE_ACCESS_LEGACY_REENCRYPTION_ENABLED"
+  "SITE_ACCESS_LEGACY_REENCRYPTION_MODE=$SITE_ACCESS_LEGACY_REENCRYPTION_MODE"
 )
 if [ "$mode" = apply ]; then
-  systemd_args+=(
-    --setenv=SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_TOTAL
-    --setenv=SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_CURRENT
-    --setenv=SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_LEGACY
-    --setenv=SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_TOKEN_MATCHES
-    --setenv=SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_FINGERPRINT
-    --setenv=SITE_ACCESS_LEGACY_REENCRYPTION_CONFIRMATION
+  worker_command+=(
+    "SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_TOTAL=$SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_TOTAL"
+    "SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_CURRENT=$SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_CURRENT"
+    "SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_LEGACY=$SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_LEGACY"
+    "SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_TOKEN_MATCHES=$SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_TOKEN_MATCHES"
+    "SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_FINGERPRINT=$SITE_ACCESS_LEGACY_REENCRYPTION_EXPECTED_FINGERPRINT"
+    "SITE_ACCESS_LEGACY_REENCRYPTION_CONFIRMATION=$SITE_ACCESS_LEGACY_REENCRYPTION_CONFIRMATION"
   )
 fi
+worker_command+=("$JAVA_BIN" -jar "$jar_path")
 
-systemd-run "${systemd_args[@]}" "$JAVA_BIN" -jar "$jar_path" 2>&1 | tee "$log_file"
+worker_submission_started=1
+set +e
+systemd-run "${systemd_args[@]}" \
+  "$worker_wrapper" "$OFFLINE_WORKER_MARKER_FILE" "$unit_name" \
+  "$SERVICE_USER" "$SERVICE_GROUP" "${worker_command[@]}" \
+  2>&1 | tee "$log_file"
+pipeline_status=("${PIPESTATUS[@]}")
+set -e
+systemd_run_rc="${pipeline_status[0]:-1}"
+tee_rc="${pipeline_status[1]:-1}"
+if [ "$systemd_run_rc" -ne 0 ]; then
+  if [ -e "$OFFLINE_WORKER_MARKER_FILE" ] \
+      || [ -L "$OFFLINE_WORKER_MARKER_FILE" ]; then
+    reconcile_submitting_offline_worker_marker "$unit_name" \
+      || warn 'transient worker 可能已进入执行态；已保留标记并封锁后续生产写操作'
+  fi
+  die "systemd transient worker 执行失败：unit=$unit_name rc=$systemd_run_rc"
+fi
+[ "$tee_rc" -eq 0 ] || die "离线 worker 日志写入失败：$log_file rc=$tee_rc"
+[ ! -e "$OFFLINE_WORKER_MARKER_FILE" ] && [ ! -L "$OFFLINE_WORKER_MARKER_FILE" ] \
+  || die "离线 worker 已退出但存活标记未清理，后续写阶段将保持锁定：$OFFLINE_WORKER_MARKER_FILE"
+trap - EXIT INT TERM HUP
 
 if [ "$mode" = verify ]; then
   grep -q '访客历史密钥 VERIFY 完成' "$log_file" || die 'VERIFY 日志缺少完成标记'

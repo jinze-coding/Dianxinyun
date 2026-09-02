@@ -42,6 +42,10 @@ assert_safe_absolute_path "$log_dir" '迁移日志目录'
 require_confirmation MIGRATE_DIANXINYUN_68_TO_98 "$confirmation"
 require_commands "$MYSQL_BIN" sha256sum sort diff awk grep tee mktemp find wc
 init_mysql_args
+if [ "$DRY_RUN" != 1 ]; then
+  require_root
+  acquire_release_operation_lock || die '无法取得生产发布全程互斥锁'
+fi
 
 migration_dir="$release_dir/database/migrations"
 [ -d "$migration_dir" ] || die "发布包缺少迁移目录：$migration_dir"
@@ -66,7 +70,9 @@ while IFS='|' read -r order filename expected_tables expected_marker expected_sh
 done < "$MIGRATION_PLAN_FILE"
 
 verify_backup_directory "$backup_dir"
+assert_maintenance_lock "$backup_dir" || die '生产维护锁与本次停机备份不匹配'
 assert_service_inactive
+assert_service_boot_disabled || die '维护期主服务开机自启未保持 disabled'
 
 if [ "$DRY_RUN" = 1 ]; then
   log 'DRY-RUN：11 个 SQL 文件、顺序和 SHA-256 均通过；不会连接数据库或创建日志'
@@ -74,7 +80,6 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-require_root
 [ ! -e "$log_dir" ] || die "迁移日志目录已存在，拒绝覆盖：$log_dir"
 mkdir -p "$log_dir"
 chmod 0700 "$log_dir"

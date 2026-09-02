@@ -63,6 +63,10 @@ else
   require_confirmation INSTALL_FINAL_WEB_DIANXINYUN "$confirmation"
 fi
 require_commands sha256sum tar gzip find sort diff grep awk install runuser nginx systemctl curl mktemp
+if [ "$DRY_RUN" != 1 ]; then
+  require_root
+  acquire_release_operation_lock || die '无法取得生产发布全程互斥锁'
+fi
 verify_backup_directory "$backup_dir"
 [ -f "$artifact" ] || die "Web 归档不存在：$artifact"
 [ ! -e "$destination" ] || die "Web 版本目录已存在，拒绝覆盖：$destination"
@@ -73,9 +77,15 @@ gzip -t "$artifact"
 assert_no_appledouble_or_unsafe_members "$artifact"
 
 if [ "$stage" = transition ]; then
+  assert_maintenance_lock "$backup_dir" || die '生产维护锁与本次停机备份不匹配'
   assert_service_inactive
+  assert_service_boot_disabled || die '维护期主服务开机自启未保持 disabled'
 else
+  validate_maintenance_lock_path || die '生产维护锁路径校验失败'
+  maintenance_lock_present \
+    && die "生产维护锁仍存在，必须先完成或回滚当前维护窗口：$MAINTENANCE_LOCK_FILE"
   systemctl is-active --quiet "$SERVICE_NAME" || die '安装 final Web 前新后端必须 active'
+  assert_service_boot_enabled || die '安装 final Web 前主服务开机自启必须是 enabled'
   [ -f "$transition_proof" ] || die 'final Web 缺少 transition 兼容停点证明'
   [ -f "$mini_live_proof" ] || die 'final Web 缺少小程序正式生效证明'
   [ -f "$transition_proof.sha256" ] || die 'transition 证明缺少 SHA-256 sidecar'
@@ -98,7 +108,6 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-require_root
 parent_dir="$(dirname "$destination")"
 install -d -o root -g "$NGINX_GROUP" -m 0755 "$parent_dir"
 staging_dir="$(mktemp -d "$parent_dir/.web-${stage}.staging.XXXXXX")"

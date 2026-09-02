@@ -10,6 +10,17 @@ import sys
 import tarfile
 
 
+SELF_HEAL_REQUIRED_MEMBERS = (
+    "ops/05-self-heal-control.sh",
+    "ops/06-offline-worker-recovery.sh",
+    "ops/assets/self-heal/60-self-heal.conf",
+    "ops/assets/self-heal/site-platform-watchdog.service",
+    "ops/assets/self-heal/site-platform-watchdog.timer",
+    "ops/assets/self-heal/site-platform-watchdog.sh",
+    "ops/lib/offline-worker-wrapper.sh",
+)
+
+
 def fail(message: str) -> None:
     raise ValueError(message)
 
@@ -93,6 +104,7 @@ def verify_outer(members: list[tarfile.TarInfo]) -> None:
         f"{root}/verification",
         f"{root}/source-reference",
     }
+    required.update(f"{root}/{relative_path}" for relative_path in SELF_HEAL_REQUIRED_MEMBERS)
     names = {member.name.rstrip("/") for member in members}
     missing = sorted(required - names)
     if missing:

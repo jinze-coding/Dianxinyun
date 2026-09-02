@@ -31,8 +31,14 @@ done
 [ -n "$backup_dir" ] || usage_error '必须提供 --backup-dir'
 require_confirmation CONFIGURE_DOCUMENT_CIRCULATION_KEY "$confirmation"
 require_commands systemctl grep stat mktemp install openssl
+if [ "$DRY_RUN" != 1 ]; then
+  require_root
+  acquire_release_operation_lock || die '无法取得生产发布全程互斥锁'
+fi
 verify_backup_directory "$backup_dir"
+assert_maintenance_lock "$backup_dir" || die '生产维护锁与本次停机备份不匹配'
 assert_service_inactive
+assert_service_boot_disabled || die '维护期主服务开机自启未保持 disabled'
 [ -f "$ENV_FILE" ] || die "环境文件不存在：$ENV_FILE"
 [ "$(stat -c '%a' "$ENV_FILE")" = 600 ] || die '环境文件权限必须为 600'
 
@@ -49,7 +55,6 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-require_root
 temp_env="$(mktemp "$(dirname "$ENV_FILE")/.site-platform.env.next.XXXXXX")"
 env_installed=0
 cleanup() {

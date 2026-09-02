@@ -45,8 +45,12 @@ require_confirmation RESTORE_DIANXINYUN_FROM_SAMEPOINT_BACKUP "$confirmation"
 if [ "$mini_state" = released ]; then
   require_confirmation MINI_0_1_8_ROLLBACK_OR_OLD_BACKEND_COMPATIBILITY_APPROVED "$mini_confirmation"
 fi
-require_commands "$MYSQL_BIN" "$MYSQLDUMP_BIN" systemctl readlink sha256sum gzip zgrep tar find sort xargs stat awk nginx curl install runuser mv sleep
+require_commands "$MYSQL_BIN" "$MYSQLDUMP_BIN" systemctl readlink sha256sum gzip zgrep tar find sort xargs stat awk nginx curl install runuser mv sleep flock
 init_mysql_args
+if [ "$DRY_RUN" != 1 ]; then
+  require_root
+  acquire_release_operation_lock || die '无法取得生产发布全程互斥锁'
+fi
 verify_backup_directory "$backup_dir"
 [ ! -e "$failure_dir" ] || die "故障现场目录已存在，拒绝覆盖：$failure_dir"
 
@@ -71,16 +75,27 @@ case "$backup_systemd_fragment" in /etc/systemd/system/*) ;; *) die 'systemd Fra
 database_dump="$backup_dir/database/$MYSQL_DATABASE.sql.gz"
 zgrep -Fq "DROP DATABASE IF EXISTS \`$MYSQL_DATABASE\`" "$database_dump" || die '数据库备份不含 DROP DATABASE，不能保证完整同点恢复'
 zgrep -Fq "CREATE DATABASE" "$database_dump" || die '数据库备份不含 CREATE DATABASE'
+validate_maintenance_lock_path || die '生产维护锁路径校验失败'
 
 if [ "$DRY_RUN" = 1 ]; then
+  if maintenance_lock_present; then
+    assert_maintenance_lock "$backup_dir" || die '现有生产维护锁与本次同点备份不匹配'
+    log "DRY-RUN：现有生产维护锁与同点备份匹配：$MAINTENANCE_LOCK_FILE"
+  else
+    log "DRY-RUN：正式回滚将在停服前创建生产维护锁：$MAINTENANCE_LOCK_FILE"
+  fi
   log "DRY-RUN：同点备份全部校验通过；将先保存故障现场到 $failure_dir，再整体恢复数据库、uploads、JAR/Web/env/Nginx/systemd"
   [ "$mini_state" = released ] && log 'DRY-RUN：已声明小程序 0.1.8 发布，正式执行时必须另行确认客户端回退或旧后端兼容性'
   exit 0
 fi
 
-require_root
+acquire_watchdog_coordination_lock || die '无法取得 watchdog 协调锁'
+ensure_maintenance_lock "$backup_dir" || die '无法取得与同点备份严格匹配的生产维护锁'
+systemctl disable "$SERVICE_NAME"
+assert_service_boot_disabled || die '无法关闭回滚维护期主服务开机自启'
 systemctl stop "$SERVICE_NAME" || true
 assert_service_inactive
+release_watchdog_coordination_lock || die '后端停稳后无法释放 watchdog 协调锁'
 
 mkdir -p "$failure_dir"/{database,files,runtime,config,inventory}
 chmod 0700 "$failure_dir" "$failure_dir"/{database,files,runtime,config,inventory}
@@ -132,8 +147,9 @@ on_restore_exit() {
   [ "$restore_complete" = 1 ] && [ "$rc" = 0 ] && return 0
   [ "$rc" -ne 0 ] || rc=1
   set +e
-  warn "同点恢复失败（exit=$rc，phase=$restore_phase）；正在确保 $SERVICE_NAME 停止，数据库和文件不得继续人工拼接"
+  warn "同点恢复失败（exit=$rc，phase=$restore_phase）；正在确保 $SERVICE_NAME 停止，维护锁继续保留"
   systemctl stop "$SERVICE_NAME" >/dev/null 2>&1
+  systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
   if systemctl is-active --quiet "$SERVICE_NAME"; then
     warn "$SERVICE_NAME 常规停止后仍为 active，执行服务范围内的强制终止"
     systemctl kill --kill-who=all --signal=SIGKILL "$SERVICE_NAME" >/dev/null 2>&1
@@ -236,11 +252,15 @@ restore_phase='old-service-start-and-health'
 systemctl start "$SERVICE_NAME"
 systemctl is-active --quiet "$SERVICE_NAME"
 wait_for_backend_health
+systemctl enable "$SERVICE_NAME"
+assert_service_boot_enabled || die '旧后端健康，但无法恢复主服务开机自启'
 
 printf 'ROLLBACK_STATE=COMPLETE\nCOMPLETED_AT=%s\nSOURCE_BACKUP=%s\nFAILURE_SNAPSHOT=%s\n' \
   "$(date -Iseconds)" "$backup_dir" "$failure_dir" > "$rollback_release/ROLLBACK_COMPLETE"
 chmod 0600 "$rollback_release/ROLLBACK_COMPLETE"
 restore_complete=1
 trap - EXIT INT TERM HUP
+release_maintenance_lock "$backup_dir" \
+  || die "同点回滚已健康，但生产维护锁未能安全解除，请立即人工核对：$MAINTENANCE_LOCK_FILE"
 log "同点回滚完成：旧数据库 68 表/13 标记、配对 uploads、旧 JAR/Web/env/Nginx/systemd 已恢复"
 log "故障现场保存在：$failure_dir；被置换的 Nginx 配置保存在：$nginx_displaced"

@@ -45,8 +45,14 @@ case "$destination" in "$APP_ROOT"/releases/*/backend) ;; *) die "后端版本�
 validate_sha256 "$expected_sha" 'JAR 期待摘要'
 require_confirmation STAGE_BACKEND_DIANXINYUN "$confirmation"
 require_commands sha256sum unzip install runuser systemctl
+if [ "$DRY_RUN" != 1 ]; then
+  require_root
+  acquire_release_operation_lock || die '无法取得生产发布全程互斥锁'
+fi
 verify_backup_directory "$backup_dir"
+assert_maintenance_lock "$backup_dir" || die '生产维护锁与本次停机备份不匹配'
 assert_service_inactive
+assert_service_boot_disabled || die '维护期主服务开机自启未保持 disabled'
 [ -f "$jar_source" ] || die "JAR 不存在：$jar_source"
 [ ! -e "$destination" ] || die "后端版本目录已存在，拒绝覆盖：$destination"
 
@@ -59,7 +65,6 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-require_root
 install -d -o root -g "$SERVICE_GROUP" -m 0750 "$destination"
 install -o root -g "$SERVICE_GROUP" -m 0640 "$jar_source" "$destination/site-platform.jar"
 printf '%s  site-platform.jar\n' "$actual_sha" > "$destination/SHA256SUMS"

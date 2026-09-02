@@ -1,0 +1,13 @@
+[Unit]
+Description=Run Site Platform conservative self-healing check every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=5s
+RandomizedDelaySec=5s
+Persistent=false
+Unit=site-platform-watchdog.service
+
+[Install]
+WantedBy=timers.target

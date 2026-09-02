@@ -1,0 +1,12 @@
+[Unit]
+Description=Site Platform conservative self-healing check
+After=network-online.target mysql.service redis-server.service
+ConditionPathExists=!/etc/site-platform/maintenance.lock
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/local/sbin/site-platform-watchdog --repair-inactive
+TimeoutStartSec=360s

@@ -40,14 +40,19 @@ done
 [ -n "$operator" ] || usage_error '必须提供 --operator'
 [ -n "$evidence" ] || usage_error '必须提供 --evidence'
 assert_safe_absolute_path "$proof_file" '小程序生效证明'
+require_confirmation MINI_0_1_8_IS_LIVE_FOR_USERS "$confirmation"
+require_commands systemctl curl grep sha256sum install
+if [ "$DRY_RUN" != 1 ]; then
+  require_root
+  acquire_release_operation_lock || die '无法取得生产发布全程互斥锁'
+fi
 [ -f "$transition_proof" ] || die 'transition 兼容停点证明不存在'
 [ -f "$transition_proof.sha256" ] || die 'transition 兼容停点证明缺少 SHA-256 sidecar'
 (cd "$(dirname "$transition_proof")" && sha256sum -c "$(basename "$transition_proof.sha256")")
 [ "$(read_kv "$transition_proof" STATUS)" = PASSED ] || die 'transition 兼容停点未通过'
 case "$operator$evidence" in *$'\n'*|*$'\r'*) die '验收人和证据引用不得包含换行' ;; esac
-require_confirmation MINI_0_1_8_IS_LIVE_FOR_USERS "$confirmation"
-require_commands systemctl curl grep sha256sum install
 systemctl is-active --quiet "$SERVICE_NAME" || die '记录小程序生效前新后端必须 active'
+assert_service_boot_enabled || die '记录小程序生效前主服务开机自启必须是 enabled'
 health_check_backend
 current_web="$(canonical_existing_path "$WEB_LINK" '当前 transition Web')"
 current_manifest="$(dirname "$current_web")/RELEASE_MANIFEST.txt"
@@ -59,7 +64,6 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-require_root
 [ ! -e "$proof_file" ] || die "证明文件已存在，拒绝覆盖：$proof_file"
 install -d -o root -g root -m 0700 "$(dirname "$proof_file")"
 {

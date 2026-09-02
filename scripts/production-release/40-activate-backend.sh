@@ -42,8 +42,14 @@ case "$jar_path" in "$APP_ROOT"/releases/*/backend/site-platform.jar) ;; *) die 
 require_confirmation ACTIVATE_BACKEND_WITH_TRANSITION_WEB "$confirmation"
 require_commands systemctl journalctl curl grep runuser "$MYSQL_BIN" readlink sha256sum sleep
 init_mysql_args
+if [ "$DRY_RUN" != 1 ]; then
+  require_root
+  acquire_release_operation_lock || die '无法取得生产发布全程互斥锁'
+fi
 verify_backup_directory "$backup_dir"
+assert_maintenance_lock "$backup_dir" || die '缺少与本次停机备份严格匹配的生产维护锁'
 assert_service_inactive
+assert_service_boot_disabled || die '维护期主服务开机自启未保持 disabled'
 [ -f "$jar_path" ] || die "新 JAR 不存在：$jar_path"
 assert_readable_by_user "$SERVICE_USER" "$jar_path"
 [ ! -e "$log_file" ] || die "日志文件已存在：$log_file"
@@ -69,7 +75,6 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-require_root
 old_jar_target="$(canonical_existing_path "$JAR_LINK" '旧 JAR')"
 link_swapped=0
 activation_complete=0
@@ -79,8 +84,9 @@ on_activation_exit() {
   [ "$activation_complete" = 1 ] && [ "$rc" = 0 ] && return 0
   [ "$rc" -ne 0 ] || rc=1
   set +e
-  warn "新后端验收失败（exit=$rc），正在停止服务并恢复旧 JAR 软链；不会在新结构上自动启动旧服务"
+  warn "新后端验收失败（exit=$rc），正在停止服务并恢复旧 JAR 软链；维护锁继续保留"
   systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+  systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
   if systemctl is-active --quiet "$SERVICE_NAME"; then
     systemctl kill --kill-who=all --signal=SIGKILL "$SERVICE_NAME" >/dev/null 2>&1 || true
     systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
@@ -108,7 +114,11 @@ if grep -Eiq 'APPLICATION FAILED TO START|OutOfMemoryError|(^|[^0-9])500([^0-9]|
   die '后端启动日志出现失败、OOM 或 500 信号'
 fi
 sha256sum "$log_file" > "$log_file.sha256"
+systemctl enable "$SERVICE_NAME"
+assert_service_boot_enabled || die '新后端健康，但无法恢复主服务开机自启'
 activation_complete=1
 trap - EXIT INT TERM HUP
+release_maintenance_lock "$backup_dir" \
+  || die "新后端已健康，但生产维护锁未能安全解除，请立即人工核对：$MAINTENANCE_LOCK_FILE"
 log "新后端已启动且基础健康门禁通过：$jar_path"
-log '仍处于发布兼容停点；必须完成 transition Web + 当前正式小程序冒烟后才能结束维护窗口'
+log '后端维护锁已解除；仍处于发布兼容停点，必须完成 transition Web + 当前正式小程序冒烟后才能结束发布窗口'

@@ -187,6 +187,7 @@ install -m 0644 "$immutable_archive_verifier" "$release_dir/ops/verify-release-a
 for document in \
   '阿里云正式更新步骤.md' \
   '生产升级与回滚手册.md' \
+  '生产服务自恢复保护.md' \
   '生产数据兼容测试报告-20260901.md'; do
   install -m 0644 "$immutable_docs_root/$document" "$release_dir/docs/$document"
   [ "$(shasum -a 256 "$immutable_docs_root/$document" | awk '{print $1}')" = \
@@ -218,10 +219,15 @@ source_sha256="$(shasum -a 256 "$verified_source_archive" | awk '{print $1}')"
   printf 'cd %s\n' "$release_name"
   printf 'sha256sum -c SHA256SUMS\n'
   printf 'python3 ops/verify-release-archive.py outer ../%s.tar.gz\n' "$release_name"
+  printf 'bash ops/99-self-test.sh\n'
   printf 'bash ops/00-preflight-readonly.sh\n'
+  printf 'bash ops/05-self-heal-control.sh install\n'
+  printf 'bash ops/05-self-heal-control.sh verify\n'
   printf '```\n\n'
-  printf '正式顺序固定为：实时预检与停服备份 → 11 项数据库迁移 → 历史密文 VERIFY/APPLY/VERIFY → '
+  printf '正式顺序固定为：实时预检与自恢复保护 → 停服同点备份 → 11 项数据库迁移 → 历史密文 VERIFY/APPLY/VERIFY → '
   printf '过渡 Web → 新后端 → 兼容停点 → 小程序 0.1.8 审核并确认生效 → 最终 Web。\n\n'
+  printf '06-offline-worker-recovery 仅用于离线 worker 已确定退出但存活标记残留的受控恢复，不属于正常顺序；'
+  printf '必须核对日志、unit、同点备份和数据库精确状态，禁止直接删除标记。\n\n'
   printf '过渡 Web 已适配新后端但关闭会议创建；小程序生效前禁止切最终 Web。真实密钥、数据库和 uploads '
   printf '均不在本包内。\n'
 } > "$release_dir/README-先看这里.md"
