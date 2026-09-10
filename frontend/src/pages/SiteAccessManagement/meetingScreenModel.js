@@ -4,8 +4,10 @@ export function parseMeetingScreenTarget(search) {
   return /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : 0;
 }
 
-export function meetingScreenUrl(invitationId) {
-  return `/?meetingScreen=${encodeURIComponent(invitationId)}`;
+export function meetingScreenUrl(invitationId, returnContext = '') {
+  const params = new URLSearchParams({ meetingScreen: String(invitationId) });
+  if (/^[\w-]{1,80}$/.test(returnContext)) params.set('returnContext', returnContext);
+  return `/?${params}`;
 }
 
 export function meetingScreenQrVisible(data, now) {

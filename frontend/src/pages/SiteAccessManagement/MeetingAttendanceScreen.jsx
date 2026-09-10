@@ -10,7 +10,7 @@ const unwrap = (response) => {
   return response.data;
 };
 
-export default function MeetingAttendanceScreen({ invitationId }) {
+export default function MeetingAttendanceScreen({ invitationId, theme, onBack, backDisabled = false }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [fatal, setFatal] = useState('');
@@ -100,9 +100,9 @@ export default function MeetingAttendanceScreen({ invitationId }) {
   };
   const showQr = meetingScreenQrVisible(data, clock);
 
-  return <main className="meeting-screen" ref={containerRef}>
-    <div className="meeting-screen-tools"><a href="/">返回工作台</a><button type="button" onClick={() => reloadRef.current()}>刷新</button><button type="button" onClick={fullScreen}>全屏切换</button></div>
-    {fatal ? <div className="meeting-screen-state" role="alert"><strong>{fatal}</strong><a href="/">返回后台</a></div> : !data ? <div className="meeting-screen-state">{error || '正在加载会议签到…'}</div> : <>
+  return <main className="meeting-screen" data-theme={theme.id} ref={containerRef}>
+    <div className="meeting-screen-tools"><button type="button" disabled={backDisabled} onClick={() => onBack(data?.projectId)}>返回上一页</button><button type="button" onClick={() => reloadRef.current()}>刷新</button><button type="button" onClick={fullScreen}>全屏切换</button></div>
+    {fatal ? <div className="meeting-screen-state" role="alert"><strong>{fatal}</strong><button type="button" disabled={backDisabled} onClick={() => onBack(data?.projectId)}>返回上一页</button></div> : !data ? <div className="meeting-screen-state">{error || '正在加载会议签到…'}</div> : <>
       <header className="meeting-screen-header"><div><span className="meeting-screen-eyebrow">会议现场 · 签到看板</span><h1>{data.title || '会议签到'}</h1><p>{formatTime(data.visitStartTime).slice(0, 16)} — {formatTime(data.visitEndTime).slice(0, 16)}</p></div><div className="meeting-screen-live"><i className={error || data.meetingStatus !== 'OPEN' ? 'paused' : ''} />{data.meetingStatus === 'ENDED' ? '会议已结束' : data.meetingStatus === 'VOIDED' ? '会议已作废' : error ? '连接中断' : '实时更新'}<small>最后更新 {lastUpdated}</small></div></header>
       {error && <div className="meeting-screen-connection" role="status">{error} · 当前显示 {lastUpdated} 的数据</div>}
       <section className="meeting-screen-counts" aria-label="会议签到统计">

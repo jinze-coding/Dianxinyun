@@ -41,6 +41,7 @@ import SystemManagementPage from './pages/SystemManagement';
 import SiteAccessManagementPage from './pages/SiteAccessManagement';
 import MeetingAttendanceScreen from './pages/SiteAccessManagement/MeetingAttendanceScreen';
 import { parseMeetingScreenTarget } from './pages/SiteAccessManagement/meetingScreenModel';
+import { readMeetingScreenReturn } from './pages/SiteAccessManagement/meetingScreenNavigation';
 import ProjectInformationPage from './pages/ProjectInformation';
 import EdgeInspectionManagement from './pages/EdgeInspectionManagement';
 import { getPersonalTodoSummary, getUnreadNotificationCount } from './services/personalInbox';
@@ -7048,7 +7049,8 @@ function ElectricInspectionPage({ projectId, theme: T, currentUser, businessTarg
 // 根组件 App
 // ============================================
 export default function App() {
-  const [meetingScreenTarget] = useState(() => parseMeetingScreenTarget(window.location.search));
+  const [meetingScreenTarget, setMeetingScreenTarget] = useState(() => parseMeetingScreenTarget(window.location.search));
+  const [siteAccessReturnState, setSiteAccessReturnState] = useState(null);
   const [isAuth, setIsAuth] = useState(isLoggedIn());
   const [currentPage, setCurrentPage] = useState(AUTHENTICATED_LANDING_PAGE);
   const [currentProject, setCurrentProject] = useState(null);
@@ -7163,6 +7165,7 @@ export default function App() {
 
   useEffect(() => {
     const handleAuthExpired = () => {
+      setSiteAccessReturnState(null);
       setCurrentUser(null);
       setCurrentUserError('');
       setProjectList([]);
@@ -7182,6 +7185,7 @@ export default function App() {
   }, []);
 
   const handleLogin = useCallback(() => {
+    setSiteAccessReturnState(null);
     setProjectList([]);
     setCurrentProject(null);
     setProjectListError('');
@@ -7196,6 +7200,7 @@ export default function App() {
   }, []);
 
   const handleLogout = useCallback(async () => {
+    setSiteAccessReturnState(null);
     try {
       await logout();
     } catch (error) {
@@ -7218,6 +7223,7 @@ export default function App() {
   }, []);
 
   const navigatePage = useCallback((pageId) => {
+    setSiteAccessReturnState(null);
     setSealApplicationTarget(null);
     setQualityIssueTarget(null);
     setInspectionBusinessTarget(null);
@@ -7226,12 +7232,28 @@ export default function App() {
   }, []);
 
   const changeProject = useCallback((projectId) => {
+    setSiteAccessReturnState(null);
     setSealApplicationTarget(null);
     setQualityIssueTarget(null);
     setInspectionBusinessTarget(null);
     setDocumentDistributionTarget(null);
     setCurrentProject(projectId);
   }, []);
+
+  const returnFromMeetingScreen = useCallback((meetingProjectId) => {
+    let restored = null;
+    try {
+      restored = readMeetingScreenReturn(window.localStorage, window.location.search, currentUser?.id, meetingProjectId);
+    } catch { /* Browser storage may be disabled. */ }
+    const targetProjectId = Number(meetingProjectId || restored?.projectId || currentProject);
+    const allowed = projectList.some((project) => project.id === targetProjectId)
+      && canAccessPage(currentUser, PAGE_IDS.SITE_ACCESS, targetProjectId);
+    window.history.replaceState(window.history.state, '', window.location.pathname);
+    setMeetingScreenTarget(null);
+    setSiteAccessReturnState(allowed ? restored : null);
+    if (allowed) setCurrentProject(targetProjectId);
+    setCurrentPage(allowed ? PAGE_IDS.SITE_ACCESS : AUTHENTICATED_LANDING_PAGE);
+  }, [currentProject, currentUser, projectList]);
 
   const openProjectInformation = useCallback(() => {
     if (currentProject === null) return;
@@ -7328,7 +7350,7 @@ export default function App() {
     }
     switch (currentPage) {
       case PAGE_IDS.SITE_ACCESS:
-        return <SiteAccessManagementPage {...pageProps} />;
+        return <SiteAccessManagementPage {...pageProps} initialState={siteAccessReturnState} />;
       case PAGE_IDS.PERSON_MANAGEMENT:
         return <PersonnelManagementPage {...pageProps} />;
       case PAGE_IDS.QUALITY_MANAGEMENT:
@@ -7365,7 +7387,7 @@ export default function App() {
   }
 
   if (meetingScreenTarget !== null) {
-    return <MeetingAttendanceScreen invitationId={meetingScreenTarget} />;
+    return <MeetingAttendanceScreen invitationId={meetingScreenTarget} theme={theme} onBack={returnFromMeetingScreen} backDisabled={projectListLoading} />;
   }
 
   // 如果进入了镜头管理页面，单独渲染

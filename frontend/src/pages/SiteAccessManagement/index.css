@@ -154,3 +154,32 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
+
+
+.site-access-table-card .site-access-invitation-actions {
+  width: 410px;
+  min-width: 390px;
+  vertical-align: middle;
+}
+
+.site-access-invitation-actions .site-access-row-actions {
+  align-items: center;
+  gap: 6px;
+}
+
+.site-access-invitation-actions .site-access-row-actions button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 5px 8px;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.site-access-invitation-actions .site-access-row-actions button:focus-visible {
+  outline: 2px solid var(--sa-accent);
+  outline-offset: 2px;
+}

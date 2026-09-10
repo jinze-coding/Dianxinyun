@@ -33,6 +33,7 @@ import {
 } from '../../utils/siteAccessProfileRequests';
 import GuardVisitPanel from './GuardVisitPanel';
 import { meetingQrImage, meetingScreenUrl } from './meetingScreenModel';
+import { saveMeetingScreenReturn } from './meetingScreenNavigation';
 import MeetingRegistrationPanel from './MeetingRegistrationPanel';
 import {
   createSiteAccessRequestGuard,
@@ -271,19 +272,25 @@ function HostCombobox({ hosts, value, onChange }) {
   );
 }
 
-export default function SiteAccessManagementPage({ projectId, theme: T, currentUser }) {
+export default function SiteAccessManagementPage({ projectId, theme: T, currentUser, initialState }) {
+  const [restoredState] = useState(() => initialState?.projectId === Number(projectId) ? initialState.filters : null);
+  const restoreProjectRef = useRef(projectId);
+  const restorePageRef = useRef(restoredState?.pageNo || 1);
+  const restoreQueryRef = useRef(null);
+  const restoreScrollRef = useRef(restoredState?.scrollTop || 0);
+  const pageRef = useRef(null);
   const [activeSection, setActiveSection] = useState('INVITATION');
   const today = useMemo(() => formatLocalDate(new Date()), []);
-  const [periodMode, setPeriodMode] = useState('DAY');
-  const [anchorDate, setAnchorDate] = useState(today);
-  const [customStart, setCustomStart] = useState(today);
-  const [customEnd, setCustomEnd] = useState(today);
-  const [status, setStatus] = useState('');
-  const [inviteType, setInviteType] = useState('');
+  const [periodMode, setPeriodMode] = useState(restoredState?.periodMode || 'DAY');
+  const [anchorDate, setAnchorDate] = useState(restoredState?.anchorDate || today);
+  const [customStart, setCustomStart] = useState(restoredState?.customStart || today);
+  const [customEnd, setCustomEnd] = useState(restoredState?.customEnd || today);
+  const [status, setStatus] = useState(restoredState?.status || '');
+  const [inviteType, setInviteType] = useState(restoredState?.inviteType || '');
   const [clockNow, setClockNow] = useState(Date.now);
-  const [keywordInput, setKeywordInput] = useState('');
-  const [keyword, setKeyword] = useState('');
-  const [pageNo, setPageNo] = useState(1);
+  const [keywordInput, setKeywordInput] = useState(restoredState?.keywordInput || '');
+  const [keyword, setKeyword] = useState(restoredState?.keyword || '');
+  const [pageNo, setPageNo] = useState(restoredState?.pageNo || 1);
   const [pageData, setPageData] = useState({ records: [], total: 0, pageNo: 1, pageSize: PAGE_SIZE });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -380,9 +387,14 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
     profileListRequestGuardRef.current.invalidate();
     profileDetailRequestGuardRef.current.invalidate();
     profileMutationRequestGuardRef.current.invalidate();
-    setPageNo(1);
-    setKeyword('');
-    setKeywordInput('');
+    if (restoreProjectRef.current !== projectId) {
+      restoreProjectRef.current = projectId;
+      restorePageRef.current = 1;
+      restoreScrollRef.current = 0;
+      setPageNo(1);
+      setKeyword('');
+      setKeywordInput('');
+    }
     setDetail(null);
     setEditing(null);
     setQrCode(null);
@@ -395,8 +407,29 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
   }, [projectId]);
 
   useEffect(() => {
-    load(1);
+    const query = JSON.stringify([projectId, periodMode, anchorDate, customStart, customEnd, inviteType, status, keyword]);
+    if (restoreQueryRef.current !== null && restoreQueryRef.current !== query) restorePageRef.current = 1;
+    restoreQueryRef.current = query;
+    load(restorePageRef.current);
   }, [projectId, periodMode, anchorDate, customStart, customEnd, inviteType, status, keyword]);
+
+  useEffect(() => {
+    if (loading || !pageData.records?.length || !restoreScrollRef.current) return;
+    pageRef.current?.scrollTo({ top: restoreScrollRef.current });
+    restoreScrollRef.current = 0;
+  }, [loading, pageData]);
+
+  const openMeetingScreen = (invitationId) => {
+    let returnContext = '';
+    try {
+      returnContext = saveMeetingScreenReturn(window.localStorage, window.crypto.randomUUID(), {
+        invitationId, projectId, userId: currentUser?.id,
+        filters: { periodMode, anchorDate, customStart, customEnd, inviteType, status, keyword, keywordInput, pageNo,
+          scrollTop: pageRef.current?.scrollTop || 0 },
+      });
+    } catch { /* A restricted browser can still open the screen and return to its meeting's project. */ }
+    window.open(meetingScreenUrl(invitationId, returnContext), '_blank', 'noopener,noreferrer');
+  };
 
   const loadHosts = async (requestProjectId) => {
     const response = await getSiteVisitHostOptions(requestProjectId);
@@ -754,7 +787,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
   const totalPages = Math.max(1, Math.ceil(Number(pageData.total || 0) / PAGE_SIZE));
 
   return (
-    <div className="site-access-page" data-release-marker={WEB_RELEASE_MARKER} style={{ '--sa-accent': T.accent, '--sa-border': T.borderColor, '--sa-card': T.cardBg, '--sa-page': T.pageBg, '--sa-text': T.textPrimary, '--sa-secondary': T.textSecondary, '--sa-muted': T.textMuted }}>
+    <div className="site-access-page" ref={pageRef} data-release-marker={WEB_RELEASE_MARKER} style={{ '--sa-accent': T.accent, '--sa-border': T.borderColor, '--sa-card': T.cardBg, '--sa-page': T.pageBg, '--sa-text': T.textPrimary, '--sa-secondary': T.textSecondary, '--sa-muted': T.textMuted }}>
       <section className="site-access-title-card">
         <div>
           <h1>场内管理</h1>
@@ -824,7 +857,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
       <section className="site-access-table-card">
         <div className="site-access-table-wrap">
           <table>
-            <thead><tr><th className="site-access-invitation-topic-column">邀请主题 / 类型</th><th>计划来访时间</th><th>登记概况</th><th>人数</th><th>出行</th><th>接待人</th><th>状态</th><th>创建 / 提交</th><th>操作</th></tr></thead>
+            <thead><tr><th className="site-access-invitation-topic-column">邀请主题 / 类型</th><th>计划来访时间</th><th>登记概况</th><th>人数</th><th>出行</th><th>接待人</th><th>状态</th><th>创建 / 提交</th><th className="site-access-invitation-actions">操作</th></tr></thead>
             <tbody>
               {!loading && records.map((item) => {
                 const invitationTopic = String(item.purpose || '').trim() || '未填写主题';
@@ -838,11 +871,11 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
                     <td>{item.hostName || '-'}</td>
                     <td><span className={`site-access-status ${String(effectiveInvitationStatus(item, clockNow) || '').toLowerCase()}`}>{STATUS_LABELS[effectiveInvitationStatus(item, clockNow)] || effectiveInvitationStatus(item, clockNow)}</span></td>
                     <td>{formatDateTime(item.createTime)}<small>{item.inviteType === 'MEETING' ? '持续开放至截止' : (item.submittedTime ? `提交 ${formatDateTime(item.submittedTime)}` : '尚未提交')}</small></td>
-                    <td><div className="site-access-row-actions">
+                    <td className="site-access-invitation-actions"><div className="site-access-row-actions">
                       <button type="button" onClick={() => openDetail(item.id)}>详情</button>
                       {canManage && isInvitationActive(item, clockNow) && <button type="button" onClick={() => showQr(item.id)}>预约码</button>}
                       {item.inviteType === 'MEETING' && canManage && isInvitationActive(item, clockNow) && <button type="button" onClick={() => showQr(item.id, true)}>签到码</button>}
-                      {item.inviteType === 'MEETING' && <a href={meetingScreenUrl(item.id)} target="_blank" rel="noopener noreferrer">签到大屏</a>}
+                      {item.inviteType === 'MEETING' && <button className="secondary" type="button" onClick={() => openMeetingScreen(item.id)}>签到大屏</button>}
                       {canManage && isInvitationActive(item, clockNow) && <button type="button" onClick={() => openEdit(item.id)}>修改</button>}
                       {canManage && isInvitationActive(item, clockNow) && <button className="danger" type="button" onClick={() => voidInvitation(item)}>作废</button>}
                       {isPlatformAdmin(currentUser) && <button className="danger" type="button" onClick={() => deleteInvitation(item)}>删除</button>}
