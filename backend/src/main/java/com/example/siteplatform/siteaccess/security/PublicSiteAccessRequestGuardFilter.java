@@ -59,6 +59,10 @@ public class PublicSiteAccessRequestGuardFilter extends OncePerRequestFilter {
                     new RateLimitRule("public-site-visitor-profile-disable", 10, Duration.ofMinutes(30))),
             Map.entry(BASE_PATH + "/guard/session",
                     new RateLimitRule("public-site-guard-session", 20, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/guard/state",
+                    new RateLimitRule("public-site-guard-state", 600, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/guard/meetings",
+                    new RateLimitRule("public-site-guard-meetings", 120, Duration.ofMinutes(10))),
             Map.entry(BASE_PATH + "/guard/submit",
                     new RateLimitRule("public-site-guard-submit", 10, Duration.ofMinutes(30))),
             Map.entry(BASE_PATH + "/guard/project-profile",
@@ -80,7 +84,19 @@ public class PublicSiteAccessRequestGuardFilter extends OncePerRequestFilter {
             Map.entry(BASE_PATH + "/meeting/profiles/detail",
                     new RateLimitRule("public-site-meeting-profile-detail", 60, Duration.ofMinutes(10))),
             Map.entry(BASE_PATH + "/meeting/profiles/disable",
-                    new RateLimitRule("public-site-meeting-profile-disable", 10, Duration.ofMinutes(30))));
+                    new RateLimitRule("public-site-meeting-profile-disable", 10, Duration.ofMinutes(30))),
+            Map.entry(BASE_PATH + "/meeting-check-in/session",
+                    new RateLimitRule("public-site-meeting-checkin-session", 20, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/meeting-check-in/confirm",
+                    new RateLimitRule("public-site-meeting-checkin-confirm", 10, Duration.ofMinutes(30))),
+            Map.entry(BASE_PATH + "/meeting-check-in/walk-in",
+                    new RateLimitRule("public-site-meeting-checkin-walkin", 10, Duration.ofMinutes(30))),
+            Map.entry(BASE_PATH + "/meeting-check-in/profiles/list",
+                    new RateLimitRule("public-site-meeting-checkin-profile-list", 60, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/meeting-check-in/profiles/detail",
+                    new RateLimitRule("public-site-meeting-checkin-profile-detail", 60, Duration.ofMinutes(10))),
+            Map.entry(BASE_PATH + "/meeting-check-in/profiles/disable",
+                    new RateLimitRule("public-site-meeting-checkin-profile-disable", 10, Duration.ofMinutes(30))));
 
     private final RedisRateLimitService rateLimitService;
     private final ObjectMapper objectMapper;

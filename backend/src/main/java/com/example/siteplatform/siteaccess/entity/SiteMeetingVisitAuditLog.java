@@ -13,6 +13,8 @@ public class SiteMeetingVisitAuditLog {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long registrationId;
+    private Long personId;
+    private Long checkinQrId;
     private Long invitationId;
     private Long projectId;
     private String actionType;

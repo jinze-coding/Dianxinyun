@@ -1152,9 +1152,10 @@ CREATE TABLE site_meeting_visit_registration (
     registration_no VARCHAR(40) NOT NULL,
     invitation_id BIGINT NOT NULL,
     project_id BIGINT NOT NULL,
-    wechat_app_id VARCHAR(64) NOT NULL,
-    visitor_identity_hash CHAR(64) NOT NULL,
+    wechat_app_id VARCHAR(64),
+    visitor_identity_hash CHAR(64),
     status VARCHAR(20) NOT NULL DEFAULT 'REGISTERED',
+    registration_source VARCHAR(20) NOT NULL DEFAULT 'INVITATION',
     visitor_company VARCHAR(200) NOT NULL,
     contact_name VARCHAR(50) NOT NULL,
     contact_phone_encrypted VARCHAR(512) NOT NULL,
@@ -1206,6 +1207,8 @@ CREATE TABLE site_meeting_visit_person (
 CREATE TABLE site_meeting_visit_audit_log (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     registration_id BIGINT,
+    person_id BIGINT,
+    checkin_qr_id BIGINT,
     invitation_id BIGINT COMMENT '单场操作关联邀请；跨会议批量导出时为空',
     project_id BIGINT NOT NULL,
     action_type VARCHAR(30) NOT NULL,
@@ -1216,9 +1219,69 @@ CREATE TABLE site_meeting_visit_audit_log (
     comment VARCHAR(500),
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     KEY idx_site_meeting_visit_audit_registration (registration_id, create_time),
+    KEY idx_site_meeting_visit_audit_person (person_id, create_time),
     KEY idx_site_meeting_visit_audit_invitation (invitation_id, create_time),
     KEY idx_site_meeting_visit_audit_project (project_id, action_type, create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='共享会议邀请登记加密审计';
+
+CREATE TABLE site_meeting_checkin_qr (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    invitation_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    scene_token_hash CHAR(64) NOT NULL,
+    scene_token_encrypted VARCHAR(512) NOT NULL,
+    qr_status VARCHAR(20) NOT NULL DEFAULT 'ENABLED',
+    qr_version INT NOT NULL DEFAULT 1,
+    checkin_start_time DATETIME NOT NULL,
+    checkin_end_time DATETIME NOT NULL,
+    location_radius_meters INT NOT NULL DEFAULT 300,
+    created_by_id BIGINT NOT NULL,
+    created_by_name VARCHAR(50) NOT NULL,
+    updated_by_id BIGINT NOT NULL,
+    updated_by_name VARCHAR(50) NOT NULL,
+    version INT NOT NULL DEFAULT 0,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    current_invitation_key BIGINT GENERATED ALWAYS AS (
+        CASE WHEN deleted = 0 AND qr_status IN ('ENABLED', 'DISABLED') THEN invitation_id ELSE NULL END
+    ) STORED,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_site_meeting_checkin_scene_hash (scene_token_hash),
+    UNIQUE KEY uk_site_meeting_checkin_current_invitation (current_invitation_key),
+    KEY idx_site_meeting_checkin_project (project_id, checkin_start_time, checkin_end_time, deleted),
+    KEY idx_site_meeting_checkin_invitation_version (invitation_id, qr_version, deleted)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='共享会议现场签到码';
+
+CREATE TABLE site_meeting_attendance (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    invitation_id BIGINT NOT NULL,
+    registration_id BIGINT NOT NULL,
+    person_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    checkin_qr_id BIGINT,
+    status VARCHAR(20) NOT NULL DEFAULT 'CHECKED_IN',
+    checkin_method VARCHAR(20) NOT NULL,
+    checkin_time DATETIME NOT NULL,
+    wechat_app_id VARCHAR(64),
+    checkin_identity_hash CHAR(64),
+    location_result VARCHAR(30) NOT NULL,
+    distance_meters INT,
+    accuracy_meters INT,
+    reference_project_version INT,
+    revoked_by_id BIGINT,
+    revoked_by_name VARCHAR(50),
+    revoked_time DATETIME,
+    revoke_reason VARCHAR(300),
+    version INT NOT NULL DEFAULT 0,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_site_meeting_attendance_person (person_id),
+    KEY idx_site_meeting_attendance_invitation (invitation_id, status, checkin_time, deleted),
+    KEY idx_site_meeting_attendance_registration (registration_id, status, deleted),
+    KEY idx_site_meeting_attendance_project (project_id, checkin_time, deleted),
+    KEY idx_site_meeting_attendance_qr (checkin_qr_id, checkin_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='共享会议逐人签到当前状态';
 
 -- =============================================
 -- 27-29. 外访人员同项目常用资料、逐人明细与加密审计
@@ -1833,6 +1896,7 @@ INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260808_SEAL_APPL
 INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260810_SITE_ACCESS_VISITOR_IDENTITY_HMAC_V1');
 INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260814_SITE_ACCESS_GUARD_VISITOR_REGISTRATION_V1');
 INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260826_SITE_ACCESS_MEETING_INVITATION_V1');
+INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260902_SITE_ACCESS_MEETING_CHECKIN_V1');
 INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260826_DOCUMENT_CIRCULATION_V1');
 
 -- 仅重命名已存在且启用的正式质量菜单；不创建或恢复历史入口。
@@ -2786,3 +2850,78 @@ VALUES ('20260829_INSPECTION_PERMISSION_SEPARATION_V1');
 
 INSERT IGNORE INTO sys_data_migration(migration_key)
 VALUES ('20260829_INSPECTION_SUBMISSION_REMINDER_V1');
+
+-- 本人快捷资料、单次预约微信归属与门卫多会议预约关联。
+-- 在会议签到迁移之后执行；历史单次预约身份保持空，不按手机号回填。
+
+-- 必须先完成会议签到迁移；在任何结构写入前验证依赖，缺少依赖时 PREPARE 直接失败。
+SET @visitor_reuse_preflight = IF(
+    EXISTS(SELECT 1 FROM sys_data_migration WHERE migration_key='20260902_SITE_ACCESS_MEETING_CHECKIN_V1')
+    AND EXISTS(SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='site_meeting_attendance')
+    AND EXISTS(SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='site_meeting_checkin_qr')
+    AND EXISTS(SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='site_meeting_visit_registration' AND COLUMN_NAME='registration_source'),
+    'SELECT 1', 'SELECT VISITOR_REUSE_REQUIRES_20260902_MEETING_CHECKIN_MIGRATION');
+PREPARE stmt FROM @visitor_reuse_preflight; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @visitor_reuse_sql = IF(EXISTS(SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='site_visit_invitation' AND COLUMN_NAME='wechat_app_id'),
+    'SELECT 1', 'ALTER TABLE site_visit_invitation ADD COLUMN wechat_app_id VARCHAR(64) NULL');
+PREPARE stmt FROM @visitor_reuse_sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @visitor_reuse_sql = IF(EXISTS(SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='site_visit_invitation' AND COLUMN_NAME='visitor_identity_hash'),
+    'SELECT 1', 'ALTER TABLE site_visit_invitation ADD COLUMN visitor_identity_hash CHAR(64) NULL');
+PREPARE stmt FROM @visitor_reuse_sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @visitor_reuse_sql = IF(EXISTS(SELECT 1 FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='site_visit_invitation' AND INDEX_NAME='idx_site_visit_owner_window'),
+    'SELECT 1', 'ALTER TABLE site_visit_invitation ADD INDEX idx_site_visit_owner_window (project_id,wechat_app_id,visitor_identity_hash,status,visit_start_time,visit_end_time,deleted)');
+PREPARE stmt FROM @visitor_reuse_sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+CREATE TABLE IF NOT EXISTS site_visitor_personal_profile (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    wechat_app_id VARCHAR(64) NOT NULL,
+    owner_identity_hash CHAR(64) NOT NULL,
+    remember_enabled TINYINT NOT NULL DEFAULT 0,
+    visitor_company VARCHAR(200),
+    contact_name VARCHAR(50),
+    contact_phone_encrypted VARCHAR(512),
+    travel_mode VARCHAR(20),
+    vehicle_plate VARCHAR(20),
+    privacy_agreed_time DATETIME,
+    last_submitted_time DATETIME NOT NULL,
+    version INT NOT NULL DEFAULT 0,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_site_personal_profile_owner (project_id,wechat_app_id,owner_identity_hash)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='访客同项目本人快捷资料及记住偏好';
+
+CREATE TABLE IF NOT EXISTS site_visitor_personal_profile_audit (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    profile_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    action VARCHAR(20) NOT NULL,
+    before_encrypted LONGTEXT,
+    after_encrypted LONGTEXT NOT NULL,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_site_personal_audit_profile (profile_id,create_time),
+    KEY idx_site_personal_audit_project (project_id,create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='本人快捷资料加密审计';
+
+CREATE TABLE IF NOT EXISTS site_guard_meeting_registration (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    guard_registration_id BIGINT NOT NULL,
+    invitation_id BIGINT NOT NULL,
+    meeting_registration_id BIGINT NOT NULL,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_guard_meeting_registration (guard_registration_id,meeting_registration_id),
+    KEY idx_guard_meeting_invitation (invitation_id,meeting_registration_id),
+    KEY idx_guard_meeting_project (project_id,guard_registration_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='门卫登记关联多场会议预约';
+
+INSERT INTO sys_data_migration(migration_key)
+VALUES ('20260910_VISITOR_REUSE_GUARD_MEETING_V1') AS incoming
+ON DUPLICATE KEY UPDATE migration_key = incoming.migration_key;

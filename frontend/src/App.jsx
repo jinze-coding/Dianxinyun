@@ -39,6 +39,8 @@ import DocumentCenterPage from './pages/DocumentCenter';
 import PersonalInboxPage from './pages/PersonalInbox';
 import SystemManagementPage from './pages/SystemManagement';
 import SiteAccessManagementPage from './pages/SiteAccessManagement';
+import MeetingAttendanceScreen from './pages/SiteAccessManagement/MeetingAttendanceScreen';
+import { parseMeetingScreenTarget } from './pages/SiteAccessManagement/meetingScreenModel';
 import ProjectInformationPage from './pages/ProjectInformation';
 import EdgeInspectionManagement from './pages/EdgeInspectionManagement';
 import { getPersonalTodoSummary, getUnreadNotificationCount } from './services/personalInbox';
@@ -7046,6 +7048,7 @@ function ElectricInspectionPage({ projectId, theme: T, currentUser, businessTarg
 // 根组件 App
 // ============================================
 export default function App() {
+  const [meetingScreenTarget] = useState(() => parseMeetingScreenTarget(window.location.search));
   const [isAuth, setIsAuth] = useState(isLoggedIn());
   const [currentPage, setCurrentPage] = useState(AUTHENTICATED_LANDING_PAGE);
   const [currentProject, setCurrentProject] = useState(null);
@@ -7359,6 +7362,10 @@ export default function App() {
         ) : '正在加载账号权限…'}
       </div>
     );
+  }
+
+  if (meetingScreenTarget !== null) {
+    return <MeetingAttendanceScreen invitationId={meetingScreenTarget} />;
   }
 
   // 如果进入了镜头管理页面，单独渲染

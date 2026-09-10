@@ -169,6 +169,10 @@
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "会议访客登记" }
     },
     {
+      "path": "pages/public/meeting-check-in",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "会议现场签到" }
+    },
+    {
       "path": "pages/public/guard-visitor-register",
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "门卫访客登记" }
     }

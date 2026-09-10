@@ -192,7 +192,7 @@ final class VisitorLegacyReencryptionTool {
             }
         } else if (cell.spec().contentKind() == ContentKind.PHONE) {
             if (!plaintext.matches("^1[3-9]\\d{9}$")) {
-                throw new IllegalStateException("访客加密手机号格式不正确，迁移已阻断");
+                throw new IllegalStateException("访客加密手机号码格式不正确，迁移已阻断");
             }
         } else if (cell.spec().contentKind() == ContentKind.JSON_OBJECT) {
             try {

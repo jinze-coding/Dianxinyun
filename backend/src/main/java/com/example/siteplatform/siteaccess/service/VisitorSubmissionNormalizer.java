@@ -23,10 +23,10 @@ public final class VisitorSubmissionNormalizer {
     public static Submission normalize(String company, String contactName, String contactPhone,
                                        List<SiteVisitPersonRequest> companions,
                                        String travelMode, String vehiclePlate, String visitorRemark) {
-        String normalizedCompany = requiredText(company, 200, "外访单位");
-        String normalizedContactName = requiredText(contactName, 50, "主联系人姓名");
-        String normalizedPhone = requiredText(contactPhone, 11, "主联系人手机号");
-        if (!normalizedPhone.matches("^1[3-9]\\d{9}$")) throw new BusinessException("手机号格式不正确");
+        String normalizedCompany = requiredText(company, 200, "单位");
+        String normalizedContactName = requiredText(contactName, 50, "姓名");
+        String normalizedPhone = requiredText(contactPhone, 11, "手机号码");
+        if (!normalizedPhone.matches("^1[3-9]\\d{9}$")) throw new BusinessException("手机号码格式不正确");
         String normalizedTravelMode = requiredText(travelMode, 20, "出行方式").toUpperCase(Locale.ROOT);
         if (!Set.of(TRAVEL_DRIVING, TRAVEL_OTHER).contains(normalizedTravelMode)) {
             throw new BusinessException("出行方式不正确");
@@ -43,10 +43,10 @@ public final class VisitorSubmissionNormalizer {
             if (companion == null) throw new BusinessException("同行人员信息不能为空");
             String companionCompany = optionalText(companion.getPersonCompany(), 200, "同行人员单位");
             String companionName = optionalText(companion.getPersonName(), 50, "同行人员姓名");
-            String companionPhone = optionalText(companion.getPersonPhone(), 11, "同行人员手机号");
+            String companionPhone = optionalText(companion.getPersonPhone(), 11, "同行人员手机号码");
             if (companionCompany == null && companionName == null && companionPhone == null) continue;
             if (companionPhone != null && !companionPhone.matches("^1[3-9]\\d{9}$")) {
-                throw new BusinessException("同行人员手机号格式不正确");
+                throw new BusinessException("同行人员手机号码格式不正确");
             }
             people.add(new Person(PERSON_COMPANION, companionCompany, companionName, companionPhone));
         }

@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue';
-import { onBackPress, onLoad, onUnload } from '@dcloudio/uni-app';
+import { onBackPress, onLoad, onUnload, onShow, onHide } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
+import { useVisitorPersonalInfo } from '@/utils/visitorPersonalInfo';
 import {
   createPublicGuardVisitorSession,
+  refreshPublicGuardState,
+  getPublicGuardMeetings,
+  type PublicGuardMatchedPass,
+  type PublicGuardMeetingChoice,
+  type PublicGuardVisitorSession,
   disablePublicGuardVisitorProfile,
   downloadPublicGuardProjectProfileImage,
   getPublicGuardProjectProfile,
@@ -29,6 +35,20 @@ const projectName = ref('');
 const projectShortName = ref('');
 const visitorSessionToken = ref('');
 const pass = ref<PublicGuardVisitPass>();
+const matchedPasses = ref<PublicGuardMatchedPass[]>([]);
+const meetings = ref<PublicGuardMeetingChoice[]>([]);
+const selectedMeetings = ref<string[]>([]);
+const meetingsLoading = ref(false);
+const meetingsError = ref('');
+const stateError = ref('');
+const checkingState = ref(false);
+let stateTimer: ReturnType<typeof setInterval> | undefined;
+let pageVisible = true;
+let ready = false;
+let initializationId = 0;
+let refreshing = false;
+let meetingsRequestId = 0;
+
 const profiles = ref<SiteVisitorProfile[]>([]);
 const profilesLoading = ref(false);
 const profileNotice = ref('');
@@ -42,6 +62,8 @@ const contactPhone = ref('');
 const companions = ref<SiteVisitCompanionInput[]>([]);
 const travelMode = ref<'DRIVING' | 'OTHER'>('OTHER');
 const vehiclePlate = ref('');
+const { rememberInfo, personalInfoApplied, applyPersonalInfo, resetPersonalInfo, rememberChange } =
+  useVisitorPersonalInfo({ visitorCompany, contactName, contactPhone, travelMode, vehiclePlate });
 const visitorRemark = ref('');
 const privacyAgreed = ref(false);
 const currentTime = ref(Date.now());
@@ -96,11 +118,81 @@ onLoad(async (options) => {
   // #endif
   sceneToken.value = extractGuardVisitorToken(options as Record<string, unknown>);
   await initialize();
+  ready = true;
+  stateTimer = setInterval(() => { if (pageVisible) void refreshState(); }, 15000);
 });
+onShow(() => { pageVisible = true; if (ready) void refreshState(true); });
+onHide(() => { pageVisible = false; });
 
-async function initialize(keepForm = false) {
+function applyState(state: PublicGuardVisitorSession) {
+  const previouslyPassed = Boolean(pass.value || matchedPasses.value.length);
+  projectName.value = state.projectName;
+  projectShortName.value = state.projectShortName || '';
+  pass.value = state.registration;
+  matchedPasses.value = state.matchedPasses || [];
+  syncServerClock(state.serverTime || state.registration?.serverTime);
+  startClock();
+  stateError.value = '';
+  if (pass.value || matchedPasses.value.length) clearForm();
+  else {
+    applyPersonalInfo(state.personalInfo);
+    if (previouslyPassed) { void loadProfiles(); void loadMeetings(); }
+  }
+}
+
+function matchedPassActive(pass: PublicGuardMatchedPass) {
+  return currentTime.value >= new Date(pass.visitStartTime).getTime()
+    && currentTime.value < new Date(pass.validUntil).getTime();
+}
+
+async function refreshState(block = false) {
+  if (refreshing || loading.value || submitting.value || !visitorSessionToken.value) return;
+  refreshing = true;
+  checkingState.value = block;
+  const session = visitorSessionToken.value;
+  try {
+    const state = await refreshPublicGuardState(session);
+    if (session !== visitorSessionToken.value) return;
+    applyState(state);
+  } catch (error) {
+    if (session !== visitorSessionToken.value) return;
+    const code = Number((error as { code?: number; statusCode?: number })?.code || (error as { statusCode?: number })?.statusCode);
+    if (code === 401) await initialize();
+    else {
+      matchedPasses.value = []; pass.value = undefined;
+      stateError.value = error instanceof Error ? error.message : '暂时无法核验放行状态，请刷新后向门卫展示';
+    }
+  } finally { refreshing = false; checkingState.value = false; }
+}
+
+async function loadMeetings() {
+  const requestId = ++meetingsRequestId;
+  const session = visitorSessionToken.value;
+  if (!session) return;
+  meetingsLoading.value = true;
+  meetingsError.value = '';
+  selectedMeetings.value = [];
+  try {
+    const values = await getPublicGuardMeetings(session);
+    if (requestId === meetingsRequestId && session === visitorSessionToken.value) meetings.value = values;
+  } catch (error) {
+    if (requestId === meetingsRequestId) {
+      meetings.value = [];
+      meetingsError.value = error instanceof Error ? error.message : '会议列表加载失败，可刷新或按普通来访登记';
+    }
+  } finally { if (requestId === meetingsRequestId) meetingsLoading.value = false; }
+}
+
+function meetingsChange(event: { detail: { value: string[] } }) {
+  selectedMeetings.value = event.detail.value.filter((token) => meetings.value.some((item) => item.choiceToken === token && !item.registered));
+}
+
+
+async function initialize() {
+  const requestId = ++initializationId;
   loading.value = true;
   errorMessage.value = '';
+  stateError.value = '';
   if (!sceneToken.value) {
     errorMessage.value = '门卫访客登记码无效';
     loading.value = false;
@@ -108,24 +200,21 @@ async function initialize(keepForm = false) {
   }
   try {
     const session = await createPublicGuardVisitorSession(sceneToken.value, await getFreshWechatCode());
+    if (requestId !== initializationId) return;
     visitorSessionToken.value = session.visitorSessionToken;
-    projectName.value = session.projectName;
-    projectShortName.value = session.projectShortName || '';
-    pass.value = session.registration;
-    if (session.registration) {
-      syncServerClock(session.registration.serverTime);
-      startClock();
-      clearForm();
-    } else {
-      stopClock();
-      if (!keepForm) pass.value = undefined;
+    applyState(session);
+    if (session.pageState === 'FORM') {
       void loadProfiles();
+      void loadMeetings();
     }
+
   } catch (error) {
+    if (requestId !== initializationId) return;
     visitorSessionToken.value = '';
+    matchedPasses.value = []; pass.value = undefined;
     errorMessage.value = error instanceof Error ? error.message : '门卫访客登记入口加载失败';
   } finally {
-    loading.value = false;
+    if (requestId === initializationId) loading.value = false;
   }
 }
 
@@ -157,12 +246,9 @@ async function chooseProfile(profile: SiteVisitorProfile) {
     visitorCompany.value = detail.visitorCompany || '';
     contactName.value = detail.contactName || '';
     contactPhone.value = detail.contactPhone || '';
-    companions.value = (detail.people || []).filter((person) => person.personType === 'COMPANION').map((person) => ({
-      personCompany: person.personCompany || '', personName: person.personName || '', personPhone: person.personPhone || ''
-    }));
     travelMode.value = detail.travelMode || 'OTHER';
     vehiclePlate.value = detail.vehiclePlate || '';
-    showToast('已带入常用资料，请核对本次信息');
+    showToast('已带入本人信息，同行人员请按本次来访填写');
   } catch (error) {
     showToast(error instanceof Error ? error.message : '常用资料加载失败');
   } finally {
@@ -209,12 +295,14 @@ const passExpired = computed(() => {
 });
 
 function validate() {
-  if (!visitorCompany.value.trim()) return '请填写外访单位';
-  if (!contactName.value.trim()) return '请填写主联系人姓名';
-  if (!/^1[3-9]\d{9}$/.test(contactPhone.value.trim())) return '请填写正确的手机号';
+  if (!visitorSessionToken.value) return '请重新识别微信身份';
+  if (selectedMeetings.value.length > 50) return '一次最多选择50场会议';
+  if (!visitorCompany.value.trim()) return '请填写单位';
+  if (!contactName.value.trim()) return '请填写姓名';
+  if (!/^1[3-9]\d{9}$/.test(contactPhone.value.trim())) return '请填写正确的手机号码';
   for (let index = 0; index < companions.value.length; index += 1) {
     const phone = companions.value[index].personPhone.trim();
-    if (phone && !/^1[3-9]\d{9}$/.test(phone)) return `请填写第${index + 1}位同行人员的正确手机号`;
+    if (phone && !/^1[3-9]\d{9}$/.test(phone)) return `请填写第${index + 1}位同行人员的正确手机号码`;
   }
   if (travelMode.value === 'DRIVING' && !vehiclePlate.value.trim()) return '驾车来访请填写车牌号';
   if (!privacyAgreed.value) return '请阅读并同意隐私告知';
@@ -223,7 +311,7 @@ function validate() {
 }
 
 async function submit() {
-  if (submitting.value || pass.value) return;
+  if (submitting.value || pass.value || matchedPasses.value.length) return;
   const validation = validate();
   if (validation) return showToast(validation);
   submitting.value = true;
@@ -237,7 +325,9 @@ async function submit() {
     travelMode: travelMode.value,
     vehiclePlate: travelMode.value === 'DRIVING' ? vehiclePlate.value.trim().toUpperCase() : undefined,
     visitorRemark: visitorRemark.value.trim() || undefined,
+    meetingChoiceTokens: selectedMeetings.value,
     privacyAgreed: true,
+    rememberInfo: rememberInfo.value,
     profileAction: savingProfile.value ? (selectedProfile.value ? 'UPDATE' : 'CREATE') : 'NONE',
     profileCode: selectedProfile.value?.profileCode,
     profileName: savingProfile.value ? profileName.value.trim() || undefined : undefined,
@@ -251,16 +341,20 @@ async function submit() {
     clearForm();
     showToast('登记成功，请向门卫展示放行页');
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '门卫访客登记失败';
+    const failedMessage = error instanceof Error ? error.message : '门卫访客登记失败';
     // 响应丢失或短会话过期时，重新静默识别；若服务端已成功，会直接恢复放行页。
-    await initialize(true);
-    if (!pass.value) showToast(errorMessage.value || '登记失败，请重试');
+    await initialize();
+    if (!pass.value && !matchedPasses.value.length) { errorMessage.value = failedMessage; showToast(failedMessage); }
   } finally {
     submitting.value = false;
   }
 }
 
 function clearForm() {
+  meetingsRequestId += 1;
+  meetings.value = [];
+  selectedMeetings.value = [];
+  meetingsLoading.value = false;
   profileRequestId += 1;
   profiles.value = [];
   selectedProfile.value = undefined;
@@ -273,6 +367,7 @@ function clearForm() {
   vehiclePlate.value = '';
   visitorRemark.value = '';
   privacyAgreed.value = false;
+  resetPersonalInfo();
 }
 
 function syncServerClock(serverTime?: string) {
@@ -385,6 +480,14 @@ onBackPress(() => {
 });
 
 function cleanup() {
+  initializationId += 1;
+  visitorSessionToken.value = '';
+  profileRequestId += 1;
+  ready = false; pageVisible = false;
+  if (stateTimer) clearInterval(stateTimer);
+  stateTimer = undefined;
+  matchedPasses.value = [];
+  meetingsRequestId += 1;
   stopClock();
   projectProfileRequestId += 1;
   removePublicProjectProfileImages(projectImagePaths.value);
@@ -433,22 +536,33 @@ onBeforeUnmount(cleanup);
       </template>
     </view>
     <view v-else class="guard-content">
-      <view v-if="loading" class="guard-card state-card">正在安全识别微信身份...</view>
+      <view v-if="loading || checkingState" class="guard-card state-card">正在安全识别微信身份...</view>
       <view v-else-if="errorMessage && !visitorSessionToken" class="guard-card state-card error-state">
         <text>无法打开门卫登记入口</text><text>{{ errorMessage }}</text>
-        <button @tap="initialize(true)">重新加载</button>
+        <button @tap="initialize()">重新加载</button>
       </view>
 
-      <template v-else-if="pass">
-        <view class="pass-card" :class="{ expired: passExpired }">
+      <view v-else-if="stateError" class="guard-card state-card error-state"><text>{{ stateError }}</text><button @tap="initialize()">重新核验</button></view>
+      <template v-else-if="matchedPasses.length || pass">
+        <view v-for="matched in matchedPasses" :key="matched.sourceNo" class="pass-card" :class="{ expired: !matchedPassActive(matched) }">
+          <view class="pass-check">{{ matchedPassActive(matched) ? '✓' : '!' }}</view>
+          <text class="pass-label">{{ matchedPassActive(matched) ? '已填写，允许放行' : '本次预约已结束' }}</text>
+          <text class="pass-project">{{ projectShortName || projectName }}</text>
+          <view class="pass-current"><text>当前时间</text><text>{{ formatTime(currentTime, true) }}</text></view>
+          <view class="pass-grid"><text>登记来源</text><text>{{ matched.sourceType === 'MEETING' ? '会议预约' : '预约邀请' }}</text><text>主题</text><text>{{ matched.subject }}</text><text>登记编号</text><text>{{ matched.sourceNo }}</text><text>单位</text><text>{{ matched.visitorCompany }}</text><text>姓名</text><text>{{ matched.contactName }}</text><text>人数</text><text>{{ matched.visitorCount }} 人</text><text>有效时段</text><text>{{ formatTime(matched.visitStartTime) }} 至 {{ formatTime(matched.validUntil) }}</text><text>车辆</text><text>{{ matched.travelMode === 'DRIVING' ? matched.vehiclePlate : '非驾车' }}</text></view>
+          <view class="matched-people"><text v-for="(person, index) in matched.people" :key="index">{{ person.personName || '未填写姓名' }}{{ person.personCompany ? ' · ' + person.personCompany : '' }}</text></view>
+          <text class="pass-hint">{{ matched.sourceType === 'MEETING' ? '门卫核验后请到会场扫描签到码，逐人确认实际到场人员。' : '请将本页面出示给门卫核验。' }}</text>
+          <button class="project-info-button" @tap="openProjectProfile">项目信息</button>
+        </view>
+        <view v-if="pass" class="pass-card" :class="{ expired: passExpired }">
           <view class="pass-check">{{ passExpired ? '!' : '✓' }}</view>
           <text class="pass-label">{{ passExpired ? '登记已过期' : '已登记 · 门卫放行' }}</text>
           <text class="pass-project">{{ pass.projectShortName || pass.projectName }}</text>
           <view class="pass-current"><text>当前时间</text><text>{{ formatTime(currentTime, true) }}</text></view>
           <view class="pass-grid">
             <text>登记编号</text><text>{{ pass.registrationNo }}</text>
-            <text>外访单位</text><text>{{ pass.visitorCompany }}</text>
-            <text>联系人</text><text>{{ pass.contactName }}</text>
+            <text>单位</text><text>{{ pass.visitorCompany }}</text>
+            <text>姓名</text><text>{{ pass.contactName }}</text>
             <text>来访人数</text><text>{{ pass.visitorCount }} 人</text>
             <text>车辆</text><text>{{ pass.travelMode === 'DRIVING' ? (pass.vehiclePlate || '驾车') : '非驾车' }}</text>
             <text>登记时间</text><text>{{ formatTime(pass.registeredTime) }}</text>
@@ -456,7 +570,7 @@ onBeforeUnmount(cleanup);
           </view>
           <text class="pass-hint">{{ passExpired ? '本次放行已超过24小时，请重新登记后再向门卫展示。' : '请将本页面出示给门卫核验。登记自提交起 24 小时有效。' }}</text>
           <button class="project-info-button" @tap="openProjectProfile">项目信息</button>
-          <button v-if="passExpired" class="pass-reload" @tap="initialize(false)">重新登记</button>
+          <button v-if="passExpired" class="pass-reload" @tap="initialize()">重新登记</button>
         </view>
       </template>
 
@@ -485,20 +599,20 @@ onBeforeUnmount(cleanup);
         </view>
 
         <view class="guard-card form-card">
-          <text class="section-title">主联系人</text>
-          <label class="field"><text>外访单位 *</text><input v-model="visitorCompany" maxlength="200" placeholder="请输入单位全称" /></label>
-          <label class="field"><text>姓名 *</text><input v-model="contactName" maxlength="50" placeholder="请输入主联系人姓名" /></label>
-          <label class="field"><text>手机号 *</text><input v-model="contactPhone" type="number" maxlength="11" placeholder="仅校验格式，不发送验证码" /></label>
+          <text class="section-title">来访人员信息</text>
+          <label class="field"><text>单位 *</text><input v-model="visitorCompany" maxlength="200" placeholder="请输入单位全称" /></label>
+          <label class="field"><text>姓名 *</text><input v-model="contactName" maxlength="50" placeholder="请输入姓名" /></label>
+          <label class="field"><text>手机号码 *</text><input v-model="contactPhone" type="number" maxlength="11" placeholder="仅校验格式，不发送验证码" /></label>
         </view>
 
         <view class="guard-card form-card">
           <view class="section-head"><text class="section-title">同行人员（选填）</text><button :disabled="companions.length >= 49" @tap="addCompanion">添加</button></view>
-          <text v-if="!companions.length" class="empty-copy">没有同行人员可不添加，主联系人已计入总人数。</text>
+          <text v-if="!companions.length" class="empty-copy">没有同行人员可不添加，本人已计入总人数。</text>
           <view v-for="(person, index) in companions" :key="index" class="companion-card">
             <view class="section-head"><text>同行人员 {{ index + 1 }}</text><button @tap="companions.splice(index, 1)">移除</button></view>
             <label class="field"><text>单位（选填）</text><input v-model="person.personCompany" maxlength="200" placeholder="请输入同行人员单位" /></label>
             <label class="field"><text>姓名（选填）</text><input v-model="person.personName" maxlength="50" placeholder="请输入同行人员姓名" /></label>
-            <label class="field"><text>手机号（选填）</text><input v-model="person.personPhone" type="number" maxlength="11" placeholder="填写时校验手机号格式" /></label>
+            <label class="field"><text>手机号码（选填）</text><input v-model="person.personPhone" type="number" maxlength="11" placeholder="填写时校验手机号码格式" /></label>
           </view>
           <text class="empty-copy">本次已填写 {{ filledCompanionCount + 1 }} 人；空白同行卡片不会保存，最多50人。</text>
         </view>
@@ -510,9 +624,21 @@ onBeforeUnmount(cleanup);
           <label class="field"><text>外访备注</text><textarea v-model="visitorRemark" maxlength="500" placeholder="可填写门卫或项目人员需要了解的事项" /></label>
         </view>
 
+        <view class="guard-card meeting-choice-card">
+          <view class="section-head"><text class="section-title">近期会议（可多选）</text><button :disabled="meetingsLoading" @tap="loadMeetings">刷新</button></view>
+          <text class="empty-copy">今天及后6天的会议；不选择即按普通来访登记。所选会议共用本次人员信息，到各会场分别扫码签到。</text>
+          <text v-if="meetingsLoading" class="empty-copy">正在加载会议...</text>
+          <text v-else-if="meetingsError" class="notice-copy">{{ meetingsError }}</text>
+          <text v-else-if="!meetings.length" class="empty-copy">近期暂无可预约会议</text>
+          <checkbox-group @change="meetingsChange"><label v-for="meeting in meetings" :key="meeting.choiceToken" class="meeting-choice"><checkbox :value="meeting.choiceToken" :checked="meeting.registered || selectedMeetings.includes(meeting.choiceToken)" :disabled="meeting.registered" color="#315f86" /><view><text>{{ meeting.title }}{{ meeting.registered ? '（已预约）' : '' }}</text><text>{{ formatTime(meeting.visitStartTime) }} 至 {{ formatTime(meeting.visitEndTime) }}</text><text>{{ meeting.location }}</text></view></label></checkbox-group>
+          <text v-if="selectedMeetings.length" class="empty-copy">本次同时预约 {{ selectedMeetings.length }} 场会议</text>
+        </view>
+
         <view class="guard-card privacy-card">
+          <view class="personal-info-note" v-if="personalInfoApplied">已自动带入本人和车辆资料，请核对本次信息；同行人员另行填写。</view>
+          <checkbox-group class="remember-info-control" @change="rememberChange"><label><checkbox value="remember" :checked="rememberInfo" color="#315f86" /><text>记住本人和车辆信息，下次同项目扫码自动填写（提交后生效）</text></label></checkbox-group>
           <checkbox-group @change="privacyChange"><label class="privacy-check"><checkbox value="agreed" :checked="privacyAgreed" color="#315f86" /><text>我已阅读并同意隐私告知</text></label></checkbox-group>
-          <text class="privacy-copy">系统将收集单位、姓名、手机号和车辆信息，用于本项目门卫人工核验与外访登记。系统不采集身份证信息，也不会建立系统账号。</text>
+          <text class="privacy-copy">系统将收集单位、姓名、手机号码和车辆信息，用于本项目门卫人工核验与外访登记。系统不采集身份证信息，也不会建立系统账号。</text>
         </view>
 
         <view class="guard-card profile-save-card">
@@ -522,7 +648,7 @@ onBeforeUnmount(cleanup);
         </view>
 
         <view v-if="errorMessage" class="submit-error">{{ errorMessage }}</view>
-        <button class="submit-button" :disabled="submitting" @tap="submit">{{ submitting ? '正在登记...' : '确认登记并生成放行页' }}</button>
+        <button class="submit-button" :disabled="submitting" @tap="submit">{{ submitting ? '正在登记...' : (selectedMeetings.length ? '登记来访并预约所选会议' : '确认登记并生成放行页') }}</button>
         <text class="submit-hint">提交后立即登记成功，不进入审批流程；有效期内不能自行覆盖。</text>
       </template>
     </view>
@@ -532,4 +658,13 @@ onBeforeUnmount(cleanup);
 <style scoped>
 .guard-shell{min-height:100vh;background:var(--workspace-page);color:var(--workspace-text)}.guard-content{display:flex;flex-direction:column;gap:20rpx;padding:20rpx 24rpx calc(48rpx + env(safe-area-inset-bottom))}.guard-card,.pass-card{border:1rpx solid var(--workspace-divider);border-radius:22rpx;background:#fff;box-shadow:var(--workspace-shadow)}.state-card{display:flex;min-height:320rpx;align-items:center;justify-content:center;flex-direction:column;padding:40rpx;color:var(--workspace-text-muted);font-size:23rpx;text-align:center}.error-state text:first-child{color:var(--workspace-text);font-size:29rpx;font-weight:850}.error-state text:nth-child(2){margin-top:14rpx;line-height:1.6}.error-state button{min-height:66rpx;margin-top:24rpx;padding:0 36rpx;border-radius:14rpx;background:var(--workspace-accent-deep);color:#fff;font-size:22rpx}.intro-card{padding:28rpx;background:linear-gradient(145deg,#eaf3fa,#fff)}.intro-tag,.intro-title,.intro-copy{display:block}.intro-tag{color:var(--workspace-accent-deep);font-size:19rpx;font-weight:800}.intro-title{margin-top:12rpx;font-size:32rpx;font-weight:900}.intro-copy{margin-top:14rpx;color:var(--workspace-text-secondary);font-size:21rpx;line-height:1.7}.profile-card,.form-card,.privacy-card,.profile-save-card{padding:26rpx}.section-head{display:flex;align-items:center;justify-content:space-between}.section-head button{min-height:52rpx;padding:0 18rpx;border:1rpx solid var(--workspace-divider);border-radius:12rpx;background:#f7fafc;color:var(--workspace-accent-deep);font-size:20rpx}.section-title{font-size:28rpx;font-weight:850}.section-subtitle{display:block;margin-top:5rpx;color:var(--workspace-text-muted);font-size:19rpx}.empty-copy,.notice-copy{display:block;margin-top:18rpx;color:var(--workspace-text-muted);font-size:21rpx;line-height:1.6}.notice-copy{border-radius:14rpx;padding:14rpx;background:#fff8e9;color:#80602d}.profile-list{display:flex;flex-direction:column;gap:14rpx;margin-top:18rpx}.profile-item{display:flex;align-items:center;justify-content:space-between;gap:14rpx;padding:18rpx;border:1rpx solid var(--workspace-divider);border-radius:16rpx;background:#f9fbfc}.profile-item.selected{border-color:var(--workspace-accent-deep);background:#edf5fa}.profile-item>view{display:flex;min-width:0;flex:1;flex-direction:column;gap:6rpx}.profile-item>view text:first-child{font-size:23rpx;font-weight:800}.profile-item>view text:not(:first-child){color:var(--workspace-text-muted);font-size:19rpx}.profile-item>button{min-height:48rpx;padding:0 15rpx;border:1rpx solid #e8c7c4;border-radius:11rpx;background:#fff7f6;color:#a64d45;font-size:19rpx}.field{display:flex;flex-direction:column;gap:10rpx;margin-top:22rpx}.field>text{color:var(--workspace-text-secondary);font-size:22rpx;font-weight:650}.field input,.field textarea{width:100%;border:1rpx solid #d5e0e7;border-radius:14rpx;background:#f9fbfc;font-size:24rpx}.field input{height:78rpx;padding:0 20rpx}.field textarea{min-height:150rpx;padding:18rpx 20rpx}.companion-card{margin-top:18rpx;padding:18rpx;border:1rpx solid var(--workspace-divider);border-radius:16rpx;background:#f8fafb}.companion-card>.section-head>text{font-size:22rpx;font-weight:750}.travel-options{display:flex;gap:40rpx;margin-top:24rpx}.travel-options label{display:flex;align-items:center;gap:8rpx;font-size:23rpx}.privacy-card{background:#f8fbfd}.profile-save-card{background:#f7fbf8}.privacy-check{display:flex;align-items:center;gap:8rpx;font-size:23rpx;font-weight:750}.privacy-copy{display:block;margin-top:15rpx;color:var(--workspace-text-muted);font-size:20rpx;line-height:1.75}.submit-error{border:1rpx solid #edc8c5;border-radius:14rpx;padding:18rpx;background:#fff4f3;color:#a63f3f;font-size:21rpx}.submit-button{min-height:84rpx;border-radius:16rpx;background:var(--workspace-accent-deep);color:#fff;font-size:26rpx;font-weight:800}.submit-button[disabled]{opacity:.65}.submit-hint{color:var(--workspace-text-muted);font-size:20rpx;text-align:center}.pass-card{display:flex;align-items:center;flex-direction:column;padding:42rpx 30rpx;background:linear-gradient(155deg,#e9f8f0,#fff 56%);border-color:#aad7c3}.pass-check{display:flex;width:112rpx;height:112rpx;align-items:center;justify-content:center;border-radius:50%;background:#2f8065;color:#fff;font-size:62rpx;font-weight:900;box-shadow:0 12rpx 30rpx rgba(47,128,101,.22)}.pass-label{margin-top:22rpx;color:#247157;font-size:36rpx;font-weight:950}.pass-project{margin-top:10rpx;color:var(--workspace-text-secondary);font-size:23rpx;text-align:center}.pass-current{display:flex;width:100%;align-items:center;justify-content:space-between;margin-top:28rpx;border-radius:16rpx;padding:20rpx;background:#236e55;color:#fff}.pass-current text:first-child{font-size:20rpx}.pass-current text:last-child{font-size:27rpx;font-weight:900;font-variant-numeric:tabular-nums}.pass-grid{display:grid;width:100%;grid-template-columns:150rpx 1fr;gap:0;margin-top:24rpx;border-top:1rpx solid #cfe5db}.pass-grid text{padding:16rpx 0;border-bottom:1rpx solid #dcebe4;font-size:22rpx;line-height:1.5}.pass-grid text:nth-child(odd){color:var(--workspace-text-muted)}.pass-grid text:nth-child(even){overflow-wrap:anywhere;font-weight:650}.pass-hint{margin-top:24rpx;color:#44705f;font-size:20rpx;line-height:1.7;text-align:center}.pass-card.expired{border-color:#e7c5c1;background:linear-gradient(155deg,#fceeed,#fff 56%)}.pass-card.expired .pass-check,.pass-card.expired .pass-current{background:#b75353}.pass-card.expired .pass-label{color:#a44444}.pass-reload{min-height:70rpx;margin-top:22rpx;padding:0 34rpx;border-radius:14rpx;background:var(--workspace-accent-deep);color:#fff;font-size:23rpx;font-weight:800}
 .project-info-button{min-height:64rpx;margin-top:24rpx;border:1rpx solid #a8c4d7;border-radius:14rpx;background:#fff;color:var(--workspace-accent-deep);font-size:23rpx;font-weight:800}.project-profile-content{display:flex;flex-direction:column;gap:20rpx;padding:20rpx 24rpx calc(46rpx + env(safe-area-inset-bottom))}.public-project-hero,.public-project-card{border:1rpx solid var(--workspace-divider);border-radius:22rpx;background:#fff;box-shadow:var(--workspace-shadow)}.public-project-hero{padding:30rpx;background:linear-gradient(145deg,#eaf3fa,#fff)}.public-project-label,.public-project-title,.public-project-subtitle{display:block}.public-project-label{color:var(--workspace-accent-deep);font-size:18rpx;font-weight:850;letter-spacing:3rpx}.public-project-title{margin-top:12rpx;font-size:34rpx;font-weight:900;line-height:1.45}.public-project-subtitle{margin-top:10rpx;color:var(--workspace-text-muted);font-size:22rpx}.public-project-card{padding:24rpx}.public-project-section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18rpx;font-size:27rpx;font-weight:850}.public-project-section-head text:last-child:not(:first-child){color:var(--workspace-text-muted);font-size:20rpx;font-weight:500}.public-project-swiper{height:360rpx;overflow:hidden;border-radius:18rpx;background:#eef3f6}.public-project-swiper image{width:100%;height:100%}.public-project-empty-image{display:flex;height:190rpx;align-items:center;justify-content:center;border:1rpx dashed var(--workspace-divider);border-radius:18rpx;background:#f8fafb;color:var(--workspace-text-muted);font-size:22rpx}.public-project-image-error{display:block;margin-top:12rpx;color:#a64d45;font-size:20rpx}.public-project-fields{border-top:1rpx solid var(--workspace-divider)}.public-project-field{display:grid;grid-template-columns:180rpx 1fr;gap:20rpx;padding:18rpx 0;border-bottom:1rpx solid var(--workspace-divider);font-size:22rpx;line-height:1.65}.public-project-field:last-child{border-bottom:0}.public-project-field text:first-child{color:var(--workspace-text-muted)}.public-project-field text:last-child{overflow-wrap:anywhere;white-space:pre-wrap}.public-project-boundary{padding:8rpx 20rpx 20rpx;color:var(--workspace-text-muted);font-size:19rpx;line-height:1.7;text-align:center}
+</style>
+
+<style scoped>
+.personal-info-note{padding:20rpx;margin:12rpx 0;border-radius:12rpx;background:#eef6ff;color:#285b83;font-size:25rpx;line-height:1.6}
+.remember-info-control{display:block;margin:24rpx 0;font-size:25rpx;color:#385366;line-height:1.7}.remember-info-control label{display:flex;align-items:flex-start;gap:10rpx}.remember-info-control text{flex:1;min-width:0}
+</style>
+
+<style scoped>
+.meeting-choice{display:flex;align-items:flex-start;gap:14rpx;padding:22rpx 0;border-bottom:1rpx solid #e7edf3}.meeting-choice>view{display:flex;flex:1;min-width:0;flex-direction:column;gap:8rpx}.meeting-choice text:first-child{font-size:29rpx;font-weight:650;color:#203c52}.meeting-choice text{font-size:24rpx;color:#667989;line-height:1.5}.matched-people{display:flex;flex-direction:column;gap:12rpx;text-align:left;margin-top:24rpx;font-size:26rpx;color:#456253}
 </style>

@@ -21,6 +21,12 @@
       "postcss": true,
       "minified": true
     },
+    "permission": {
+      "scope.userLocation": {
+        "desc": "用于会议现场签到时计算与项目位置的距离；原始经纬度不会保存"
+      }
+    },
+    "requiredPrivateInfos": ["getLocation"],
     "usingComponents": true
   }
 }

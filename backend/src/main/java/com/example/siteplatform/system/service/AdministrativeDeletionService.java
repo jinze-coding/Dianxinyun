@@ -261,6 +261,9 @@ public class AdministrativeDeletionService {
                 + count("site_visit_person", "project_id", id)
                 + count("site_visit_audit_log", "project_id", id)
                 + count("site_visitor_profile", "project_id", id)
+                + count("site_visitor_personal_profile", "project_id", id)
+                + count("site_visitor_personal_profile_audit", "project_id", id)
+                + count("site_guard_meeting_registration", "project_id", id)
                 + count("site_visitor_profile_person", "project_id", id)
                 + count("site_visitor_profile_audit_log", "project_id", id)
                 + count("site_guard_visit_qr", "project_id", id)
@@ -269,6 +272,8 @@ public class AdministrativeDeletionService {
                 + count("site_guard_visit_audit_log", "project_id", id)
                 + count("site_meeting_visit_registration", "project_id", id)
                 + count("site_meeting_visit_person", "project_id", id)
+                + count("site_meeting_checkin_qr", "project_id", id)
+                + count("site_meeting_attendance", "project_id", id)
                 + count("site_meeting_visit_audit_log", "project_id", id);
         add(impact, "siteAccess", "外访邀请、常用资料、人员与审计", siteAccessCount);
         if (siteAccessCount > 0) {
@@ -482,9 +487,14 @@ public class AdministrativeDeletionService {
                         """, id));
         add(impact, "meetingAuditLogs", "会议登记业务审计记录",
                 count("site_meeting_visit_audit_log", "invitation_id", id));
+        add(impact, "guardMeetingLinks", "门卫与会议预约关联",
+                count("site_guard_meeting_registration", "invitation_id", id));
+        add(impact, "meetingAttendance", "会议签到码与逐人签到记录",
+                count("site_meeting_checkin_qr", "invitation_id", id)
+                        + count("site_meeting_attendance", "invitation_id", id));
         add(impact, "preservedOperationLogs", "保留的平台操作日志", countSql("""
                 SELECT COUNT(*) FROM sys_operation_log
-                WHERE business_type = 'SITE_ACCESS' AND business_id = ?
+                WHERE business_type IN ('SITE_ACCESS', 'SITE_ACCESS_MEETING_CHECKIN') AND business_id = ?
                 """, id));
     }
 
@@ -556,6 +566,9 @@ public class AdministrativeDeletionService {
                 + count("site_visit_person", "project_id", projectId)
                 + count("site_visit_audit_log", "project_id", projectId)
                 + count("site_visitor_profile", "project_id", projectId)
+                + count("site_visitor_personal_profile", "project_id", projectId)
+                + count("site_visitor_personal_profile_audit", "project_id", projectId)
+                + count("site_guard_meeting_registration", "project_id", projectId)
                 + count("site_visitor_profile_person", "project_id", projectId)
                 + count("site_visitor_profile_audit_log", "project_id", projectId)
                 + count("site_guard_visit_qr", "project_id", projectId)
@@ -564,6 +577,8 @@ public class AdministrativeDeletionService {
                 + count("site_guard_visit_audit_log", "project_id", projectId)
                 + count("site_meeting_visit_registration", "project_id", projectId)
                 + count("site_meeting_visit_person", "project_id", projectId)
+                + count("site_meeting_checkin_qr", "project_id", projectId)
+                + count("site_meeting_attendance", "project_id", projectId)
                 + count("site_meeting_visit_audit_log", "project_id", projectId);
         if (siteAccessCount > 0) {
             throw BusinessException.of(409, "项目存在需长期保留的外访数据，禁止物理删除；请停用项目并保留审计");
@@ -785,8 +800,11 @@ public class AdministrativeDeletionService {
         List<Long> meetingRegistrationIds = ids(
                 "SELECT id FROM site_meeting_visit_registration WHERE invitation_id = ? FOR UPDATE",
                 List.of(invitationId));
+        update("DELETE FROM site_guard_meeting_registration WHERE invitation_id = ?", invitationId);
+        update("DELETE FROM site_meeting_attendance WHERE invitation_id = ?", invitationId);
         deleteByIds("site_meeting_visit_person", "registration_id", meetingRegistrationIds);
         update("DELETE FROM site_meeting_visit_audit_log WHERE invitation_id = ?", invitationId);
+        update("DELETE FROM site_meeting_checkin_qr WHERE invitation_id = ?", invitationId);
         update("DELETE FROM site_meeting_visit_registration WHERE invitation_id = ?", invitationId);
         update("DELETE FROM site_visit_person WHERE invitation_id = ?", invitationId);
         update("DELETE FROM site_visit_audit_log WHERE invitation_id = ?", invitationId);

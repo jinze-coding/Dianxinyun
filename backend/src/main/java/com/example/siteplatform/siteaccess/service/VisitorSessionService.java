@@ -20,6 +20,7 @@ import java.util.Objects;
 public class VisitorSessionService {
     public static final String SOURCE_INVITATION = "INVITATION";
     public static final String SOURCE_MEETING_INVITATION = "MEETING_INVITATION";
+    public static final String SOURCE_MEETING_CHECKIN_QR = "MEETING_CHECKIN_QR";
     public static final String SOURCE_GUARD_QR = "GUARD_QR";
     private static final String PREFIX = "site-access:visitor-session:";
     private static final Duration TTL = Duration.ofMinutes(30);
@@ -56,6 +57,11 @@ public class VisitorSessionService {
     public PublicVisitorSessionVO issueMeeting(String wechatCode, Long invitationId, Long projectId) {
         return issue(wechatCode, SOURCE_MEETING_INVITATION, invitationId, projectId,
                 "public-site-meeting-session-identity");
+    }
+
+    public PublicVisitorSessionVO issueMeetingCheckin(String wechatCode, Long checkinQrId, Long projectId) {
+        return issue(wechatCode, SOURCE_MEETING_CHECKIN_QR, checkinQrId, projectId,
+                "public-site-meeting-checkin-session-identity");
     }
 
     private PublicVisitorSessionVO issue(String wechatCode, String sourceType, Long sourceId,
@@ -118,6 +124,16 @@ public class VisitorSessionService {
                 || !Objects.equals(context.effectiveSourceId(), invitationId)
                 || !Objects.equals(context.projectId(), projectId)) {
             throw BusinessException.of(403, "访客会话与当前会议邀请不匹配");
+        }
+        return context;
+    }
+
+    public VisitorSessionContext requireMeetingCheckin(String token, Long checkinQrId, Long projectId) {
+        VisitorSessionContext context = require(token);
+        if (!SOURCE_MEETING_CHECKIN_QR.equals(context.effectiveSourceType())
+                || !Objects.equals(context.effectiveSourceId(), checkinQrId)
+                || !Objects.equals(context.projectId(), projectId)) {
+            throw BusinessException.of(403, "访客会话与当前会议签到码不匹配");
         }
         return context;
     }

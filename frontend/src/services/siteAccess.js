@@ -65,6 +65,75 @@ export async function exportMeetingVisitRegistrations(params = {}) {
   }
 }
 
+export function getMeetingCheckinSettings(invitationId) {
+  return get(`/site-access/invitations/${invitationId}/meeting-check-in/settings`);
+}
+
+export function updateMeetingCheckinSettings(invitationId, data) {
+  return put(`/site-access/invitations/${invitationId}/meeting-check-in/settings`, data);
+}
+
+export function updateMeetingCheckinStatus(invitationId, data) {
+  return post(`/site-access/invitations/${invitationId}/meeting-check-in/status`, data);
+}
+
+export function rotateMeetingCheckinQr(invitationId, version) {
+  return post(`/site-access/invitations/${invitationId}/meeting-check-in/rotate`, { version });
+}
+
+export function getMeetingCheckinMiniCode(invitationId) {
+  return get(`/site-access/invitations/${invitationId}/meeting-check-in/mini-code`);
+}
+
+export function getMeetingAttendanceSummary(invitationId) {
+  return get(`/site-access/invitations/${invitationId}/meeting-attendance/summary`);
+}
+
+export function getMeetingAttendanceScreen(invitationId, pageNo = 1) {
+  return get(`/site-access/invitations/${invitationId}/meeting-attendance/screen`, { pageNo });
+}
+
+export function getMeetingAttendees(invitationId, params = {}) {
+  return get(`/site-access/invitations/${invitationId}/meeting-attendees`, params);
+}
+
+export function createMeetingWalkIn(invitationId, data) {
+  return post(`/site-access/invitations/${invitationId}/meeting-attendees/walk-ins`, data);
+}
+
+export function manualMeetingCheckIn(personId, data) {
+  return post(`/site-access/meeting-attendees/${personId}/manual-check-in`, data);
+}
+
+export function revokeMeetingCheckIn(personId, data) {
+  return post(`/site-access/meeting-attendees/${personId}/revoke`, data);
+}
+
+export function updateMeetingAttendee(personId, data) {
+  return put(`/site-access/meeting-attendees/${personId}`, data);
+}
+
+export async function exportMeetingAttendance(params = {}) {
+  try {
+    const blob = await apiClient.get('/site-access/meeting-attendance/export', {
+      params,
+      responseType: 'blob',
+    });
+    return ensureFileBlob(blob, '会议签到导出失败');
+  } catch (error) {
+    const errorBlob = error?.response?.data;
+    if (errorBlob instanceof Blob && String(errorBlob.type || '').toLowerCase().includes('json')) {
+      try {
+        const result = JSON.parse(await errorBlob.text());
+        throw new Error(result.message || '会议签到导出失败');
+      } catch (parseError) {
+        if (!(parseError instanceof SyntaxError)) throw parseError;
+      }
+    }
+    throw error;
+  }
+}
+
 export function getSiteVisitorProfiles(params = {}) {
   return get('/site-access/visitor-profiles', params);
 }

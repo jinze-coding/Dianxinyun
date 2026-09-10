@@ -171,11 +171,13 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
         if (matchesModule(normalizedPath, SITE_ACCESS)) {
             if (normalizedPath.equals(SITE_ACCESS + "/visitors/export")
                     || normalizedPath.equals(SITE_ACCESS + "/meeting-registrations/export")
+                    || normalizedPath.equals(SITE_ACCESS + "/meeting-attendance/export")
                     || normalizedPath.equals(SITE_ACCESS + "/guard/registrations/export")) {
                 return SystemPermissionCodes.SITE_ACCESS_EXPORT;
             }
             if (HttpMethod.GET.matches(method)
                     && (normalizedPath.matches(SITE_ACCESS + "/invitations/[^/]+/mini-code")
+                    || normalizedPath.matches(SITE_ACCESS + "/invitations/[^/]+/meeting-check-in/mini-code")
                     || normalizedPath.matches(SITE_ACCESS + "/guard/qr/[^/]+/mini-code"))) {
                 return SystemPermissionCodes.SITE_ACCESS_MANAGE;
             }

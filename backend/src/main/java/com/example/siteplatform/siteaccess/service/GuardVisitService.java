@@ -1,5 +1,10 @@
 package com.example.siteplatform.siteaccess.service;
 
+import com.example.siteplatform.siteaccess.entity.SiteGuardMeetingRegistration;
+import com.example.siteplatform.siteaccess.mapper.SiteGuardMeetingRegistrationMapper;
+import com.example.siteplatform.siteaccess.vo.PublicGuardMeetingChoiceVO;
+
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.siteplatform.auth.entity.SysUser;
@@ -93,6 +98,12 @@ public class GuardVisitService {
     private final VisitorDataCryptoService cryptoService;
     private final VisitorSessionService sessionService;
     private final VisitorProfileService profileService;
+    private final VisitorPersonalProfileService personalProfiles;
+    private final GuardVisitorMatchingService matching;
+    private final GuardMeetingChoiceService meetingChoices;
+    private final MeetingVisitService meetingVisits;
+    private final SiteGuardMeetingRegistrationMapper meetingLinks;
+
     private final WechatPlatformClient wechatPlatformClient;
     private final RedisRateLimitService rateLimitService;
     private final OperationLogMapper operationLogMapper;
@@ -111,6 +122,9 @@ public class GuardVisitService {
                              VisitorDataCryptoService cryptoService,
                              VisitorSessionService sessionService,
                              VisitorProfileService profileService,
+                             VisitorPersonalProfileService personalProfiles, GuardVisitorMatchingService matching,
+                             GuardMeetingChoiceService meetingChoices, MeetingVisitService meetingVisits,
+                             SiteGuardMeetingRegistrationMapper meetingLinks,
                              WechatPlatformClient wechatPlatformClient,
                              RedisRateLimitService rateLimitService,
                              OperationLogMapper operationLogMapper,
@@ -127,6 +141,11 @@ public class GuardVisitService {
         this.cryptoService = cryptoService;
         this.sessionService = sessionService;
         this.profileService = profileService;
+        this.personalProfiles = personalProfiles;
+        this.matching = matching;
+        this.meetingChoices = meetingChoices;
+        this.meetingVisits = meetingVisits;
+        this.meetingLinks = meetingLinks;
         this.wechatPlatformClient = wechatPlatformClient;
         this.rateLimitService = rateLimitService;
         this.operationLogMapper = operationLogMapper;
@@ -227,15 +246,38 @@ public class GuardVisitService {
         ProjectInfo project = requireUsableProject(qr.getProjectId());
         PublicVisitorSessionVO issued = sessionService.issueGuard(
                 request.getWechatCode(), qr.getId(), qr.getProjectId());
-        VisitorSessionService.VisitorSessionContext context = sessionService.require(issued.getVisitorSessionToken());
-        SiteGuardVisitRegistration active = findActive(context, LocalDateTime.now());
-        PublicGuardVisitorSessionVO vo = new PublicGuardVisitorSessionVO();
+        VisitorSessionService.VisitorSessionContext context = requireGuardContext(issued.getVisitorSessionToken());
+        PublicGuardVisitorSessionVO vo = publicState(context, project);
         vo.setVisitorSessionToken(issued.getVisitorSessionToken());
         vo.setExpiresInSeconds(issued.getExpiresInSeconds());
-        vo.setPageState(active == null ? PAGE_FORM : PAGE_REGISTERED);
+        return vo;
+    }
+
+    @Transactional(readOnly = true)
+    public PublicGuardVisitorSessionVO refreshPublicState(String visitorSessionToken) {
+        var context = requireGuardContext(visitorSessionToken);
+        rateLimitService.check("public-site-guard-state-identity", guardIdentityHash(context), 60, Duration.ofMinutes(10));
+        return publicState(context, requireUsableProject(context.projectId()));
+    }
+
+    public List<PublicGuardMeetingChoiceVO> publicMeetings(String visitorSessionToken) {
+        var context = requireGuardContext(visitorSessionToken);
+        rateLimitService.check("public-site-guard-meetings-identity", guardIdentityHash(context), 60, Duration.ofMinutes(10));
+        return meetingChoices.list(context, visitorSessionToken);
+    }
+
+    private PublicGuardVisitorSessionVO publicState(VisitorSessionService.VisitorSessionContext context, ProjectInfo project) {
+        LocalDateTime now = LocalDateTime.now(java.time.ZoneId.of("Asia/Shanghai"));
+        var active = findActive(context, now);
+        var matched = matching.find(context, now);
+        var vo = new PublicGuardVisitorSessionVO();
+        vo.setPageState(!matched.isEmpty() ? "MATCHED" : active != null ? PAGE_REGISTERED : PAGE_FORM);
         vo.setProjectName(project.getProjectName());
         vo.setProjectShortName(project.getShortName());
-        if (active != null) vo.setRegistration(toPass(active, project, LocalDateTime.now()));
+        vo.setServerTime(now);
+        vo.setMatchedPasses(matched);
+        if (active != null) vo.setRegistration(toPass(active, project, now));
+        if (PAGE_FORM.equals(vo.getPageState())) vo.setPersonalInfo(personalProfiles.read(context));
         return vo;
     }
 
@@ -270,7 +312,8 @@ public class GuardVisitService {
         LocalDateTime now = LocalDateTime.now();
         SiteGuardVisitRegistration existing = registrationMapper.selectActiveForUpdate(
                 context.projectId(), context.appId(), guardIdentityHash(context), now);
-        if (existing != null) return toPass(existing, project, now);
+        var choices = meetingChoices.resolve(request.getMeetingChoiceTokens(), context, visitorSessionToken);
+        if (existing != null && choices.isEmpty()) return toPass(existing, project, now);
 
         VisitorSubmissionNormalizer.Submission submission = VisitorSubmissionNormalizer.normalize(
                 request.getVisitorCompany(), request.getContactName(), request.getContactPhone(),
@@ -280,6 +323,11 @@ public class GuardVisitService {
         Long sourceProfileId = profileService.applyOnSubmission(
                 context, request.getProfileAction(), request.getProfileCode(), request.getProfileName(),
                 request.getProfileRetentionAgreed(), request.getProfileVersion(), toProfileSubmission(submission));
+        if (existing != null) {
+            registerMeetings(existing, context, choices, submission);
+            personalProfiles.saveOnSubmission(context, request.getRememberInfo(), submission);
+            return toPass(existing, project, now);
+        }
 
         SiteGuardVisitRegistration registration = new SiteGuardVisitRegistration();
         registration.setRegistrationNo(generateRegistrationNo(now));
@@ -303,8 +351,33 @@ public class GuardVisitService {
             throw stateConflict("门卫访客登记冲突，请重试");
         }
         replacePeople(registration, submission);
+        registerMeetings(registration, context, choices, submission);
+        personalProfiles.saveOnSubmission(context, request.getRememberInfo(), submission);
         writeAudit(registration, "REGISTER", null, null, snapshot(registration), "访客扫码完成免审批登记");
         return toPass(registration, project, now);
+    }
+
+    private void registerMeetings(SiteGuardVisitRegistration guard,
+            VisitorSessionService.VisitorSessionContext context, List<GuardMeetingChoiceService.Choice> choices,
+            VisitorSubmissionNormalizer.Submission submission) {
+        int added = 0;
+        for (var choice : choices) {
+            var registration = meetingVisits.registerFromGuard(context, choice, submission, guard.getSourceProfileId());
+            long count = meetingLinks.selectCount(new LambdaQueryWrapper<SiteGuardMeetingRegistration>()
+                    .eq(SiteGuardMeetingRegistration::getGuardRegistrationId, guard.getId())
+                    .eq(SiteGuardMeetingRegistration::getMeetingRegistrationId, registration.getId()));
+            if (count != 0) continue;
+            var link = new SiteGuardMeetingRegistration();
+            link.setProjectId(context.projectId());
+            link.setGuardRegistrationId(guard.getId());
+            link.setInvitationId(registration.getInvitationId());
+            link.setMeetingRegistrationId(registration.getId());
+            link.setCreateTime(LocalDateTime.now(java.time.ZoneId.of("Asia/Shanghai")));
+            requireSingle(meetingLinks.insert(link), "门卫会议预约关联");
+            added++;
+        }
+        if (added > 0) writeAudit(guard, "MEETING_RESERVATION", null, null, snapshot(guard),
+                "门卫登记关联" + added + "场会议预约；会场签到单独进行");
     }
 
     public List<SiteVisitorProfileVO> publicProfiles(String visitorSessionToken) {
@@ -674,7 +747,7 @@ public class GuardVisitService {
 
     private byte[] buildWorkbook(ProjectInfo project, List<SiteGuardVisitRegistration> registrations,
                                  Map<Long, List<SiteGuardVisitPerson>> peopleByRegistration) {
-        String[] headers = {"项目", "登记编号", "单位", "人员类型", "姓名", "手机号", "出行方式", "车牌号",
+        String[] headers = {"项目", "登记编号", "单位", "人员类型", "姓名", "手机号码", "出行方式", "车牌号",
                 "登记时间", "有效截止时间", "状态"};
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet("门卫访客登记");
@@ -699,7 +772,7 @@ public class GuardVisitService {
                     List<String> values = List.of(
                             nullToEmpty(project.getProjectName()), nullToEmpty(registration.getRegistrationNo()),
                             nullToEmpty(person.getPersonCompany()),
-                            VisitorSubmissionNormalizer.PERSON_CONTACT.equals(person.getPersonType()) ? "主联系人" : "同行人员",
+                            VisitorSubmissionNormalizer.PERSON_CONTACT.equals(person.getPersonType()) ? "本人" : "同行人员",
                             nullToEmpty(person.getPersonName()), nullToEmpty(cryptoService.decrypt(person.getPhoneEncrypted())),
                             VisitorSubmissionNormalizer.TRAVEL_DRIVING.equals(registration.getTravelMode()) ? "驾车" : "非驾车",
                             nullToEmpty(registration.getVehiclePlate()), formatDateTime(registration.getRegisteredTime()),

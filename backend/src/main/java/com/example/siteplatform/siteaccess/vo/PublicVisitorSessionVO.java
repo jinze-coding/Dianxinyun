@@ -10,4 +10,10 @@ import lombok.NoArgsConstructor;
 public class PublicVisitorSessionVO {
     private String visitorSessionToken;
     private long expiresInSeconds;
+    private VisitorPersonalInfoVO personalInfo;
+
+    public PublicVisitorSessionVO(String token, long expires) {
+        this.visitorSessionToken = token;
+        this.expiresInSeconds = expires;
+    }
 }

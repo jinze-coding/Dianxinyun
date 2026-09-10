@@ -14,6 +14,7 @@ import java.util.List;
 
 @Data
 public class PublicSiteVisitSubmitRequest {
+    private Boolean rememberInfo;
     @NotBlank
     @Size(max = 64)
     private String inviteToken;
@@ -24,7 +25,7 @@ public class PublicSiteVisitSubmitRequest {
     @Size(max = 50)
     private String contactName;
     @NotBlank
-    @Pattern(regexp = "^1[3-9]\\d{9}$", message = "手机号格式不正确")
+    @Pattern(regexp = "^1[3-9]\\d{9}$", message = "手机号码格式不正确")
     private String contactPhone;
     @Valid
     @Size(max = 49)

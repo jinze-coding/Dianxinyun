@@ -36,6 +36,6 @@ class VisitorSubmissionNormalizerTest {
                 "主单位", "张三", "13800138000", List.of(companion),
                 "OTHER", null, null))
                 .isInstanceOf(BusinessException.class)
-                .hasMessage("同行人员手机号格式不正确");
+                .hasMessage("同行人员手机号码格式不正确");
     }
 }

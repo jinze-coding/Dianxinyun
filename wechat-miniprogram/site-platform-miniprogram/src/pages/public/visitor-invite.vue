@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { onBackPress, onLoad, onUnload } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
+import { useVisitorPersonalInfo } from '@/utils/visitorPersonalInfo';
 import ProjectLocationCard from '@/components/ProjectLocationCard.vue';
 import {
   createPublicVisitorSession,
@@ -24,9 +25,7 @@ import {
 import { extractVisitorInviteToken } from '@/utils/visitorInviteScene';
 import {
   LatestProfileSelectionGuard,
-  isVisitorSessionAuthorizationError,
-  loadOptionalVisitorProfiles,
-  submitWithVisitorSessionFallback
+  isVisitorSessionAuthorizationError
 } from '@/utils/visitorProfileFlow';
 import { showToast } from '@/utils/navigation';
 import { getFreshWechatCode } from '@/utils/wechat';
@@ -42,6 +41,8 @@ const contactPhone = ref('');
 const companions = ref<SiteVisitCompanionInput[]>([]);
 const travelMode = ref<'DRIVING' | 'OTHER'>('OTHER');
 const vehiclePlate = ref('');
+const { rememberInfo, personalInfoApplied, applyPersonalInfo, resetPersonalInfo, rememberChange } =
+  useVisitorPersonalInfo({ visitorCompany, contactName, contactPhone, travelMode, vehiclePlate });
 const visitorRemark = ref('');
 const privacyAgreed = ref(false);
 const visitorSessionToken = ref('');
@@ -159,21 +160,23 @@ async function loadProfilesSilently() {
   const requestId = ++profileBootstrapRequestId;
   profilesLoading.value = true;
   profileNotice.value = '';
-  const result = await loadOptionalVisitorProfiles(
-    async () => {
-      const wechatCode = await getFreshWechatCode();
-      return createPublicVisitorSession(token.value, wechatCode);
-    },
-    getPublicVisitorProfiles
-  );
-  if (requestId !== profileBootstrapRequestId) return;
-  profilesLoading.value = false;
-  if (!result.available) {
-    resetVisitorProfileContext('暂未读取到历史常用资料，仍可手工填写并正常提交。', false);
-    return;
+  try {
+    const session = await createPublicVisitorSession(token.value, await getFreshWechatCode());
+    if (requestId !== profileBootstrapRequestId) return;
+    visitorSessionToken.value = session.visitorSessionToken;
+    applyPersonalInfo(session.personalInfo);
+    try {
+      const result = await getPublicVisitorProfiles(session.visitorSessionToken);
+      if (requestId === profileBootstrapRequestId) profiles.value = result;
+    } catch {
+      if (requestId === profileBootstrapRequestId) profileNotice.value = '历史常用资料暂不可用，可核对当前信息后提交。';
+    }
+  } catch (error) {
+    if (requestId !== profileBootstrapRequestId) return;
+    resetVisitorProfileContext('微信身份识别失败，已保留填写内容，请重新识别后提交。', false);
+  } finally {
+    if (requestId === profileBootstrapRequestId) profilesLoading.value = false;
   }
-  visitorSessionToken.value = result.session.visitorSessionToken;
-  profiles.value = result.profiles;
 }
 
 async function chooseProfile(profile: SiteVisitorProfile) {
@@ -190,20 +193,14 @@ async function chooseProfile(profile: SiteVisitorProfile) {
     visitorCompany.value = detail.visitorCompany || '';
     contactName.value = detail.contactName || '';
     contactPhone.value = detail.contactPhone || '';
-    const people = detail.people || [];
-    companions.value = people.filter((person) => person.personType === 'COMPANION').map((person) => ({
-      personCompany: person.personCompany || '',
-      personName: person.personName || '',
-      personPhone: person.personPhone || ''
-    }));
     travelMode.value = detail.travelMode || 'OTHER';
     vehiclePlate.value = detail.vehiclePlate || '';
-    showToast('已带入常用资料，请核对本次信息');
+    showToast('已带入本人信息，同行人员请按本次来访填写');
   } catch (error) {
     if (!profileSelectionGuard.isCurrent(ticket)) return;
     if (isVisitorSessionAuthorizationError(error)) {
-      resetVisitorProfileContext('微信身份会话已失效，当前已填写内容仍保留，请按手工信息提交。');
-      showToast('常用资料会话已失效，已切换为手工填写');
+      resetVisitorProfileContext('微信身份会话已失效，当前已填写内容仍保留，请重新识别微信身份后提交。');
+      showToast('微信身份会话已失效，请重新识别');
       return;
     }
     showToast(error instanceof Error ? error.message : '常用资料加载失败');
@@ -260,8 +257,8 @@ async function disableProfile(profile: SiteVisitorProfile) {
     showToast('常用资料已停用');
   } catch (error) {
     if (isVisitorSessionAuthorizationError(error)) {
-      resetVisitorProfileContext('微信身份会话已失效，当前已填写内容仍保留，请按手工信息提交。');
-      showToast('常用资料会话已失效，已切换为手工填写');
+      resetVisitorProfileContext('微信身份会话已失效，当前已填写内容仍保留，请重新识别微信身份后提交。');
+      showToast('微信身份会话已失效，请重新识别');
       return;
     }
     showToast(error instanceof Error ? error.message : '停用失败');
@@ -311,12 +308,13 @@ function hasCompanionContent(item: SiteVisitCompanionInput) {
 const filledCompanionCount = computed(() => companions.value.filter(hasCompanionContent).length);
 
 function validate() {
-  if (!visitorCompany.value.trim()) return '请填写外访单位';
-  if (!contactName.value.trim()) return '请填写主联系人姓名';
-  if (!/^1[3-9]\d{9}$/.test(contactPhone.value.trim())) return '请填写正确的手机号';
+  if (!visitorSessionToken.value) return '请先重新识别微信身份';
+  if (!visitorCompany.value.trim()) return '请填写单位';
+  if (!contactName.value.trim()) return '请填写姓名';
+  if (!/^1[3-9]\d{9}$/.test(contactPhone.value.trim())) return '请填写正确的手机号码';
   for (let index = 0; index < companions.value.length; index += 1) {
     const phone = companions.value[index].personPhone.trim();
-    if (phone && !/^1[3-9]\d{9}$/.test(phone)) return `请填写第${index + 1}位同行人员的正确手机号`;
+    if (phone && !/^1[3-9]\d{9}$/.test(phone)) return `请填写第${index + 1}位同行人员的正确手机号码`;
   }
   if (travelMode.value === 'DRIVING' && !vehiclePlate.value.trim()) return '驾车来访请填写车牌号';
   if (!privacyAgreed.value) return '请阅读并同意隐私告知';
@@ -351,55 +349,29 @@ async function submit() {
       vehiclePlate: travelMode.value === 'DRIVING' ? vehiclePlate.value.trim().toUpperCase() : undefined,
       visitorRemark: visitorRemark.value.trim() || undefined,
       privacyAgreed: true,
+      rememberInfo: rememberInfo.value,
       profileAction,
       profileCode: selectedProfile.value?.profileCode,
       profileName: savingProfile.value ? profileName.value.trim() || undefined : undefined,
       profileRetentionAgreed: savingProfile.value || undefined,
       profileVersion: selectedProfile.value?.version
     };
-    const result = await submitWithVisitorSessionFallback({
-      payload,
-      visitorSessionToken: visitorSessionToken.value || undefined,
-      submit: submitPublicSiteVisit,
-      confirmManualFallback,
-      onSessionExpired: () => resetVisitorProfileContext(
-        '微信身份会话已失效，当前已填写内容仍保留；本次可按手工信息继续提交。'
-      )
-    });
-    if (result.status === 'cancelled') {
-      errorMessage.value = '常用资料会话已失效，已保留当前填写内容，请核对后重新提交。';
-      showToast('已保留当前填写内容');
-      return;
-    }
-    invitation.value = result.data;
+    const data = await submitPublicSiteVisit(payload, visitorSessionToken.value);
+    invitation.value = data;
     // ref 会把对象转换成响应式代理；后续异步结果必须以 ref 中的当前值为准，
     // 否则拿原始响应对象做身份比较会把有效路线图误判成迟到响应并立即删除。
     void loadProjectRouteImage(invitation.value);
-    syncServerClock(result.data.serverTime);
+    syncServerClock(data.serverTime);
     startClock();
     clearSensitiveForm();
-    showToast(result.status === 'submitted-manually'
-      ? '会话已失效，已按本次手工信息提交'
-      : '外访信息提交成功');
+    showToast('外访信息提交成功');
   } catch (error) {
+    if (isVisitorSessionAuthorizationError(error)) resetVisitorProfileContext('微信身份已过期，请重新识别后提交；已填写内容仍保留。');
     errorMessage.value = error instanceof Error ? error.message : '外访信息提交失败';
     showToast(errorMessage.value);
   } finally {
     submitting.value = false;
   }
-}
-
-function confirmManualFallback() {
-  return new Promise<boolean>((resolve) => {
-    uni.showModal({
-      title: '常用资料会话已失效',
-      content: '你已填写的信息仍会保留。本次将不再使用、保存或更新常用资料，是否按当前手工信息继续提交？',
-      confirmText: '继续提交',
-      cancelText: '返回核对',
-      success: (result) => resolve(result.confirm),
-      fail: () => resolve(false)
-    });
-  });
 }
 
 function clearSensitiveForm() {
@@ -418,6 +390,7 @@ function clearSensitiveForm() {
   savingProfile.value = false;
   profileName.value = '';
   profileNotice.value = '';
+  resetPersonalInfo();
 }
 
 function privacyChange(event: { detail: { value: string[] } }) {
@@ -647,8 +620,8 @@ function goBack() {
             <view class="pass-current"><text>当前时间</text><text>{{ formatTime(currentTime, true) }}</text></view>
             <view class="pass-grid">
               <text>邀请编号</text><text>{{ invitation.inviteNo }}</text>
-              <text>外访单位</text><text>{{ invitation.visitorCompany || '-' }}</text>
-              <text>联系人</text><text>{{ invitation.contactName || '-' }}</text>
+              <text>单位</text><text>{{ invitation.visitorCompany || '-' }}</text>
+              <text>姓名</text><text>{{ invitation.contactName || '-' }}</text>
               <text>来访人数</text><text>{{ invitation.visitorCount || 0 }} 人</text>
               <text>车辆</text><text>{{ invitation.travelMode === 'DRIVING' ? (invitation.vehiclePlate || '驾车') : '非驾车' }}</text>
               <text>登记时间</text><text>{{ formatTime(invitation.submittedTime) }}</text>
@@ -681,6 +654,7 @@ function goBack() {
               <view><text class="section-title">常用来访资料</text><text class="profile-subtitle">同一项目下可复用</text></view>
               <button v-if="selectedProfile" @tap="clearProfileSelection">改为手工填写</button>
             </view>
+            <button v-if="!visitorSessionToken" :disabled="profilesLoading" @tap="loadProfilesSilently">{{ profilesLoading ? '识别中...' : '重新识别微信身份' }}</button>
             <text v-if="profilesLoading" class="empty-copy">正在安全读取历史常用资料...</text>
             <text v-else-if="profileNotice" class="profile-notice">{{ profileNotice }}</text>
             <text v-else-if="!profiles.length" class="empty-copy">暂无常用资料。本次填写时可自愿保存，下一次扫码直接选择。</text>
@@ -710,20 +684,20 @@ function goBack() {
           </view>
 
           <view class="visitor-card form-card">
-            <text class="section-title">主联系人</text>
-            <label class="visitor-field"><text>外访单位 *</text><input v-model="visitorCompany" maxlength="200" placeholder="请输入单位全称" /></label>
-            <label class="visitor-field"><text>姓名 *</text><input v-model="contactName" maxlength="50" placeholder="请输入主联系人姓名" /></label>
-            <label class="visitor-field"><text>手机号 *</text><input v-model="contactPhone" type="number" maxlength="11" placeholder="仅校验格式，不发送验证码" /></label>
+            <text class="section-title">来访人员信息</text>
+            <label class="visitor-field"><text>单位 *</text><input v-model="visitorCompany" maxlength="200" placeholder="请输入单位全称" /></label>
+            <label class="visitor-field"><text>姓名 *</text><input v-model="contactName" maxlength="50" placeholder="请输入姓名" /></label>
+            <label class="visitor-field"><text>手机号码 *</text><input v-model="contactPhone" type="number" maxlength="11" placeholder="仅校验格式，不发送验证码" /></label>
           </view>
 
           <view class="visitor-card form-card">
             <view class="section-head"><text class="section-title">同行人员（选填）</text><button :disabled="companions.length >= 49" @tap="addCompanion">添加</button></view>
-            <text v-if="!companions.length" class="empty-copy">没有同行人员可不添加，主联系人已计入总人数。</text>
+            <text v-if="!companions.length" class="empty-copy">没有同行人员可不添加，本人已计入总人数。</text>
             <view v-for="(person, index) in companions" :key="index" class="companion-card">
               <view class="companion-title"><text>同行人员 {{ index + 1 }}</text><button @tap="removeCompanion(index)">移除</button></view>
               <label class="visitor-field companion-field"><text>单位（选填）</text><input v-model="person.personCompany" maxlength="200" placeholder="请输入同行人员单位" /></label>
               <label class="visitor-field companion-field"><text>姓名（选填）</text><input v-model="person.personName" maxlength="50" placeholder="请输入同行人员姓名" /></label>
-              <label class="visitor-field companion-field"><text>手机号（选填）</text><input v-model="person.personPhone" type="number" maxlength="11" placeholder="填写时校验手机号格式" /></label>
+              <label class="visitor-field companion-field"><text>手机号码（选填）</text><input v-model="person.personPhone" type="number" maxlength="11" placeholder="填写时校验手机号码格式" /></label>
             </view>
             <text class="limit-copy">本次已填写 {{ filledCompanionCount + 1 }} 人，最多登记50人；空白同行卡片不会保存。</text>
           </view>
@@ -739,10 +713,12 @@ function goBack() {
           </view>
 
           <view class="visitor-card privacy-card">
-            <checkbox-group @change="privacyChange">
+            <view class="personal-info-note" v-if="personalInfoApplied">已自动带入本人和车辆资料，请核对本次信息；同行人员另行填写。</view>
+          <checkbox-group class="remember-info-control" @change="rememberChange"><label><checkbox value="remember" :checked="rememberInfo" color="#315f86" /><text>记住本人和车辆信息，下次同项目扫码自动填写（提交后生效）</text></label></checkbox-group>
+          <checkbox-group @change="privacyChange">
               <label class="privacy-check"><checkbox value="agreed" :checked="privacyAgreed" color="#315f86" /><text>我已阅读并同意隐私告知</text></label>
             </checkbox-group>
-            <text class="privacy-copy">为完成项目现场外访报备及后续接待，系统将收集姓名、手机号、单位和车牌信息，仅授权项目人员可查看。系统不采集身份证信息，提交后访客不能自行修改。</text>
+            <text class="privacy-copy">为完成项目现场外访报备及后续接待，系统将收集姓名、手机号码、单位和车牌信息，仅授权项目人员可查看。系统不采集身份证信息，提交后访客不能自行修改。</text>
           </view>
 
           <view v-if="visitorSessionToken" class="visitor-card profile-save-card">
@@ -756,11 +732,11 @@ function goBack() {
               <text>常用资料名称</text>
               <input v-model="profileName" maxlength="100" placeholder="例如：张三项目会议资料" />
             </label>
-            <text class="privacy-copy">此项为单独、自愿的长期保存同意。保存内容仅限当前项目的单位、人员姓名、手机号和车辆信息，不包含身份证、本次来访时间、事由、地点及备注；以后可停用。</text>
+            <text class="privacy-copy">此项为单独、自愿的长期保存同意。保存内容仅限当前项目的单位、人员姓名、手机号码和车辆信息，不包含身份证、本次来访时间、事由、地点及备注；以后可停用。</text>
           </view>
 
           <view v-if="errorMessage" class="submit-error">{{ errorMessage }}</view>
-          <button class="submit-button" :disabled="submitting" @tap="submit">{{ submitting ? '正在提交...' : '确认提交外访信息' }}</button>
+          <button class="submit-button" :disabled="submitting || profilesLoading || !visitorSessionToken" @tap="submit">{{ submitting ? '正在提交...' : '确认提交外访信息' }}</button>
           <text class="submit-hint">请确认所有入场人员信息准确，提交后将立即锁定。</text>
         </template>
       </template>
@@ -779,4 +755,9 @@ function goBack() {
   font-size: 21rpx;
   line-height: 1.7;
 }
+</style>
+
+<style scoped>
+.personal-info-note{padding:20rpx;margin:12rpx 0;border-radius:12rpx;background:#eef6ff;color:#285b83;font-size:25rpx;line-height:1.6}
+.remember-info-control{display:block;margin:24rpx 0;font-size:25rpx;color:#385366;line-height:1.7}.remember-info-control label{display:flex;align-items:flex-start;gap:10rpx}.remember-info-control text{flex:1;min-width:0}
 </style>

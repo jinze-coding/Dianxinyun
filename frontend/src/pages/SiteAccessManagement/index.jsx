@@ -7,6 +7,7 @@ import {
   getSiteVisitInvitation,
   getSiteVisitInvitations,
   getSiteVisitMiniCode,
+  getMeetingCheckinMiniCode,
   getSiteVisitorProfile,
   getSiteVisitorProfiles,
   disableSiteVisitorProfile,
@@ -31,6 +32,7 @@ import {
   siteAccessProfileBelongsToProject,
 } from '../../utils/siteAccessProfileRequests';
 import GuardVisitPanel from './GuardVisitPanel';
+import { meetingQrImage, meetingScreenUrl } from './meetingScreenModel';
 import MeetingRegistrationPanel from './MeetingRegistrationPanel';
 import {
   createSiteAccessRequestGuard,
@@ -90,7 +92,7 @@ const PersonContactFields = ({ person }) => (
   <div className="site-access-person-contact-fields">
     <b>单位：{person.personCompany || '-'}</b>
     <b>姓名：{person.personName || '-'}</b>
-    <b>手机号：{person.personPhone || '-'}</b>
+    <b>手机号码：{person.personPhone || '-'}</b>
   </div>
 );
 const defaultTimes = () => {
@@ -225,7 +227,7 @@ function HostCombobox({ hosts, value, onChange }) {
         aria-activedescendant={open && activeIndex >= 0 ? `site-access-host-option-${matchedHosts[activeIndex]?.userId}` : undefined}
         autoComplete="off"
         value={keyword}
-        placeholder="输入姓名或手机号搜索"
+        placeholder="输入姓名或手机号码搜索"
         onFocus={(event) => {
           setOpen(true);
           setActiveIndex(-1);
@@ -260,7 +262,7 @@ function HostCombobox({ hosts, value, onChange }) {
           onClick={() => chooseHost(host)}
         >
           <span>{host.realName || '未命名成员'}</span>
-          <small>{host.phone || '未填写手机号'}</small>
+          <small>{host.phone || '未填写手机号码'}</small>
           {String(host.userId) === String(value) && <b>已选择</b>}
         </button>)}
         {!matchedHosts.length && <div className="site-access-host-empty">没有匹配的项目成员</div>}
@@ -521,7 +523,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
         const invalidPhoneIndex = companions.findIndex((item) => item.personPhone
           && !/^1[3-9]\d{9}$/.test(item.personPhone));
         if (submitted && invalidPhoneIndex >= 0) {
-          throw new Error(`请填写第${invalidPhoneIndex + 1}位同行人员的正确手机号`);
+          throw new Error(`请填写第${invalidPhoneIndex + 1}位同行人员的正确手机号码`);
         }
         saved = responseData(await updateSiteVisitInvitation(editing.value.id, {
           ...payload,
@@ -553,14 +555,15 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
     }
   };
 
-  const showQr = async (id) => {
+  const showQr = async (id, checkin = false) => {
     const requestProjectId = projectId;
     const requestTicket = invitationQrRequestGuardRef.current.begin(requestProjectId);
     setError('');
     try {
-      const response = await getSiteVisitMiniCode(id);
+      const response = await (checkin ? getMeetingCheckinMiniCode(id) : getSiteVisitMiniCode(id));
       if (!invitationQrRequestGuardRef.current.isCurrent(requestTicket, activeProjectIdRef.current)) return;
-      setQrCode(responseData(response, '小程序码生成失败'));
+      const data = responseData(response, '小程序码生成失败');
+      setQrCode(checkin ? { ...data, imageContent: meetingQrImage(data), displayTitle: '会场签到码' } : data);
     } catch (qrError) {
       if (invitationQrRequestGuardRef.current.isCurrent(requestTicket, activeProjectIdRef.current)) {
         setError(qrError.message || '小程序码生成失败');
@@ -599,7 +602,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
     if (!qrCode?.imageContent) return;
     const link = document.createElement('a');
     link.href = qrCode.imageContent;
-    link.download = `外访邀请_${qrCode.inviteNo}.png`;
+    link.download = `${qrCode.displayTitle || '外访邀请'}_${qrCode.inviteNo}.png`;
     link.click();
   };
 
@@ -809,7 +812,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
         <div className="site-access-keyword">
           <input value={keywordInput} onChange={(event) => setKeywordInput(event.target.value)} onKeyDown={(event) => {
             if (event.key === 'Enter') setKeyword(keywordInput.trim());
-          }} placeholder="邀请编号、单位、联系人、车牌、接待人" />
+          }} placeholder="邀请主题/来访事由、邀请编号、单位、姓名、车牌、接待人" />
           <button type="button" onClick={() => setKeyword(keywordInput.trim())}>查询</button>
         </div>
         <div className="site-access-range-label">{range.startDate} 至 {range.endDate}</div>
@@ -821,27 +824,32 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
       <section className="site-access-table-card">
         <div className="site-access-table-wrap">
           <table>
-            <thead><tr><th>邀请编号 / 类型</th><th>计划来访时间</th><th>登记概况</th><th>人数</th><th>出行</th><th>接待人</th><th>状态</th><th>创建 / 提交</th><th>操作</th></tr></thead>
+            <thead><tr><th className="site-access-invitation-topic-column">邀请主题 / 类型</th><th>计划来访时间</th><th>登记概况</th><th>人数</th><th>出行</th><th>接待人</th><th>状态</th><th>创建 / 提交</th><th>操作</th></tr></thead>
             <tbody>
-              {!loading && records.map((item) => (
-                <tr key={item.id}>
-                  <td><button className="link" type="button" onClick={() => openDetail(item.id)}>{item.inviteNo}</button><small><span className={`site-access-invite-type ${String(item.inviteType || 'SINGLE').toLowerCase()}`}>{item.inviteType === 'MEETING' ? '会议邀请' : '单次预约'}</span></small></td>
-                  <td>{formatDateTime(item.visitStartTime)}<small>至 {formatDateTime(item.visitEndTime)}</small></td>
-                  <td>{item.inviteType === 'MEETING' ? `${item.registrationGroupCount || 0} 组已登记` : (item.visitorCompany || '等待访客填写')}<small>{item.inviteType === 'MEETING' ? `${item.registeredPersonCount || 0} 人` : (item.contactName || '-')}</small></td>
-                  <td>{item.inviteType === 'MEETING' ? (item.registeredPersonCount || 0) : (item.visitorCount || 0)}</td>
-                  <td>{item.inviteType === 'MEETING' ? '各登记组独立填写' : (item.travelMode === 'DRIVING' ? `驾车 · ${item.vehiclePlate || '-'}` : item.travelMode ? '非驾车' : '-')}</td>
-                  <td>{item.hostName || '-'}</td>
-                  <td><span className={`site-access-status ${String(effectiveInvitationStatus(item, clockNow) || '').toLowerCase()}`}>{STATUS_LABELS[effectiveInvitationStatus(item, clockNow)] || effectiveInvitationStatus(item, clockNow)}</span></td>
-                  <td>{formatDateTime(item.createTime)}<small>{item.inviteType === 'MEETING' ? '持续开放至截止' : (item.submittedTime ? `提交 ${formatDateTime(item.submittedTime)}` : '尚未提交')}</small></td>
-                  <td><div className="site-access-row-actions">
-                    <button type="button" onClick={() => openDetail(item.id)}>详情</button>
-                    {canManage && isInvitationActive(item, clockNow) && <button type="button" onClick={() => showQr(item.id)}>小程序码</button>}
-                    {canManage && isInvitationActive(item, clockNow) && <button type="button" onClick={() => openEdit(item.id)}>修改</button>}
-                    {canManage && isInvitationActive(item, clockNow) && <button className="danger" type="button" onClick={() => voidInvitation(item)}>作废</button>}
-                    {isPlatformAdmin(currentUser) && <button className="danger" type="button" onClick={() => deleteInvitation(item)}>删除</button>}
-                  </div></td>
-                </tr>
-              ))}
+              {!loading && records.map((item) => {
+                const invitationTopic = String(item.purpose || '').trim() || '未填写主题';
+                return (
+                  <tr key={item.id}>
+                    <td className="site-access-invitation-topic-column"><button className="link site-access-invitation-topic" type="button" title={invitationTopic} onClick={() => openDetail(item.id)}>{invitationTopic}</button><small><span className={`site-access-invite-type ${String(item.inviteType || 'SINGLE').toLowerCase()}`}>{item.inviteType === 'MEETING' ? '会议邀请' : '单次预约'}</span></small></td>
+                    <td>{formatDateTime(item.visitStartTime)}<small>至 {formatDateTime(item.visitEndTime)}</small></td>
+                    <td>{item.inviteType === 'MEETING' ? `${item.registrationGroupCount || 0} 组已登记` : (item.visitorCompany || '等待访客填写')}<small>{item.inviteType === 'MEETING' ? `${item.registeredPersonCount || 0} 人` : (item.contactName || '-')}</small></td>
+                    <td>{item.inviteType === 'MEETING' ? (item.registeredPersonCount || 0) : (item.visitorCount || 0)}</td>
+                    <td>{item.inviteType === 'MEETING' ? '各登记组独立填写' : (item.travelMode === 'DRIVING' ? `驾车 · ${item.vehiclePlate || '-'}` : item.travelMode ? '非驾车' : '-')}</td>
+                    <td>{item.hostName || '-'}</td>
+                    <td><span className={`site-access-status ${String(effectiveInvitationStatus(item, clockNow) || '').toLowerCase()}`}>{STATUS_LABELS[effectiveInvitationStatus(item, clockNow)] || effectiveInvitationStatus(item, clockNow)}</span></td>
+                    <td>{formatDateTime(item.createTime)}<small>{item.inviteType === 'MEETING' ? '持续开放至截止' : (item.submittedTime ? `提交 ${formatDateTime(item.submittedTime)}` : '尚未提交')}</small></td>
+                    <td><div className="site-access-row-actions">
+                      <button type="button" onClick={() => openDetail(item.id)}>详情</button>
+                      {canManage && isInvitationActive(item, clockNow) && <button type="button" onClick={() => showQr(item.id)}>预约码</button>}
+                      {item.inviteType === 'MEETING' && canManage && isInvitationActive(item, clockNow) && <button type="button" onClick={() => showQr(item.id, true)}>签到码</button>}
+                      {item.inviteType === 'MEETING' && <a href={meetingScreenUrl(item.id)} target="_blank" rel="noopener noreferrer">签到大屏</a>}
+                      {canManage && isInvitationActive(item, clockNow) && <button type="button" onClick={() => openEdit(item.id)}>修改</button>}
+                      {canManage && isInvitationActive(item, clockNow) && <button className="danger" type="button" onClick={() => voidInvitation(item)}>作废</button>}
+                      {isPlatformAdmin(currentUser) && <button className="danger" type="button" onClick={() => deleteInvitation(item)}>删除</button>}
+                    </div></td>
+                  </tr>
+                );
+              })}
               {!loading && !records.length && <tr><td colSpan="9" className="site-access-empty">当前日期范围没有外访邀请</td></tr>}
               {loading && <tr><td colSpan="9" className="site-access-empty">正在加载...</td></tr>}
             </tbody>
@@ -891,7 +899,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
             </select>
           </FormField>}
           <FormField label="关键词">
-            <input value={exportFilters.keyword} onChange={(event) => setExportFilters({ ...exportFilters, keyword: event.target.value })} placeholder={exportFilters.inviteType === 'MEETING' ? '登记编号、单位、联系人、车牌' : '单位、联系人、车牌、接待人'} />
+            <input value={exportFilters.keyword} onChange={(event) => setExportFilters({ ...exportFilters, keyword: event.target.value })} placeholder={exportFilters.inviteType === 'MEETING' ? '登记编号、单位、姓名、车牌' : '单位、姓名、车牌、接待人'} />
           </FormField>
           <div className="site-access-export-summary full">
             <strong>{PERIOD_LABELS[exportFilters.periodMode]}</strong>
@@ -907,12 +915,12 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
           <select value={profilePanel.status || ''} onChange={(event) => loadProfiles(1, { ...profilePanel, status: event.target.value })}>
             <option value="">全部状态</option><option value="ACTIVE">使用中</option><option value="DISABLED">已停用</option>
           </select>
-          <input value={profilePanel.keyword || ''} onChange={(event) => setProfilePanel({ ...profilePanel, keyword: event.target.value })} onKeyDown={(event) => event.key === 'Enter' && loadProfiles(1)} placeholder="资料名称、单位、联系人、车牌" />
+          <input value={profilePanel.keyword || ''} onChange={(event) => setProfilePanel({ ...profilePanel, keyword: event.target.value })} onKeyDown={(event) => event.key === 'Enter' && loadProfiles(1)} placeholder="资料名称、单位、姓名、车牌" />
           <button type="button" onClick={() => loadProfiles(1)}>查询</button>
           <span>资料仅在同一项目、同一微信身份下复用；历史邀请保持独立快照。</span>
         </div>
         <div className="site-access-profile-table">
-          <table><thead><tr><th>资料名称</th><th>单位 / 联系人</th><th>人数</th><th>出行</th><th>最近使用</th><th>状态</th><th>操作</th></tr></thead>
+          <table><thead><tr><th>资料名称</th><th>单位 / 姓名</th><th>人数</th><th>出行</th><th>最近使用</th><th>状态</th><th>操作</th></tr></thead>
             <tbody>
               {!profileLoading && (profilePanel.records || []).map((profile) => <tr key={profile.id}>
                 <td><button className="link" type="button" onClick={() => openProfileDetail(profile)}>{profile.profileName}</button><small>{profile.profileCode}</small></td>
@@ -936,10 +944,10 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
 
       {siteAccessProfileBelongsToProject(profileDetail, projectId) && <Modal title={`常用资料 · ${profileDetail.profileName}`} onClose={closeProfileDetail} width={720}>
         <div className="site-access-detail-grid">
-          {[['状态', profileDetail.status === 'ACTIVE' ? '使用中' : '已停用'], ['外访单位', profileDetail.visitorCompany], ['主联系人', `${profileDetail.contactName} ${profileDetail.contactPhone || ''}`], ['出行方式', profileDetail.travelMode === 'DRIVING' ? `驾车 · ${profileDetail.vehiclePlate || '-'}` : '非驾车'], ['最近使用', formatDateTime(profileDetail.lastUsedTime)], ['更新时间', formatDateTime(profileDetail.updateTime)]].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}
+          {[['状态', profileDetail.status === 'ACTIVE' ? '使用中' : '已停用'], ['单位', profileDetail.visitorCompany], ['姓名', `${profileDetail.contactName} ${profileDetail.contactPhone || ''}`], ['出行方式', profileDetail.travelMode === 'DRIVING' ? `驾车 · ${profileDetail.vehiclePlate || '-'}` : '非驾车'], ['最近使用', formatDateTime(profileDetail.lastUsedTime)], ['更新时间', formatDateTime(profileDetail.updateTime)]].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}
         </div>
         <h3 className="site-access-profile-people-title">保存的入场人员（{profileDetail.people?.length || 0}）</h3>
-        <div className="site-access-person-list">{(profileDetail.people || []).map((person, index) => <div key={`${person.personType}-${index}`}><span>{person.personType === 'CONTACT' ? '主联系人' : '同行人员'}</span><PersonContactFields person={person} /></div>)}</div>
+        <div className="site-access-person-list">{(profileDetail.people || []).map((person, index) => <div key={`${person.personType}-${index}`}><span>{person.personType === 'CONTACT' ? '本人' : '同行人员'}</span><PersonContactFields person={person} /></div>)}</div>
         <div className="site-access-modal-actions"><button type="button" onClick={closeProfileDetail}>关闭</button>{canManage && profileDetail.status === 'ACTIVE' && <button className="danger" type="button" onClick={() => disableProfile(profileDetail)}>停用资料</button>}</div>
       </Modal>}
 
@@ -955,15 +963,15 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
 
           {editing.value?.status === 'SUBMITTED' && <>
             <div className="site-access-form-section full">访客已登记信息（修改会写入加密审计）</div>
-            <FormField label="外访单位" required full><input value={form.visitorCompany} onChange={(event) => setForm({ ...form, visitorCompany: event.target.value })} /></FormField>
-            <FormField label="主联系人" required><input value={form.contactName} onChange={(event) => setForm({ ...form, contactName: event.target.value })} /></FormField>
-            <FormField label="手机号" required><input value={form.contactPhone} maxLength="11" onChange={(event) => setForm({ ...form, contactPhone: event.target.value })} /></FormField>
+            <FormField label="单位" required full><input value={form.visitorCompany} onChange={(event) => setForm({ ...form, visitorCompany: event.target.value })} /></FormField>
+            <FormField label="姓名" required><input value={form.contactName} onChange={(event) => setForm({ ...form, contactName: event.target.value })} /></FormField>
+            <FormField label="手机号码" required><input value={form.contactPhone} maxLength="11" onChange={(event) => setForm({ ...form, contactPhone: event.target.value })} /></FormField>
             <div className="site-access-companions full">
-              <div className="site-access-companion-head"><strong>同行人员（单位、姓名、手机号均选填）</strong><button type="button" disabled={form.companions.length >= 49} onClick={() => setForm({ ...form, companions: [...form.companions, { personCompany: '', personName: '', personPhone: '' }] })}>添加同行人</button></div>
+              <div className="site-access-companion-head"><strong>同行人员（单位、姓名、手机号码均选填）</strong><button type="button" disabled={form.companions.length >= 49} onClick={() => setForm({ ...form, companions: [...form.companions, { personCompany: '', personName: '', personPhone: '' }] })}>添加同行人</button></div>
               {form.companions.map((item, index) => <div className="site-access-companion-row" key={`companion-${index}`}>
                 <input placeholder="单位（选填）" maxLength="200" value={item.personCompany} onChange={(event) => updateCompanion(index, 'personCompany', event.target.value)} />
                 <input placeholder="姓名（选填）" maxLength="50" value={item.personName} onChange={(event) => updateCompanion(index, 'personName', event.target.value)} />
-                <input placeholder="手机号（选填）" maxLength="11" value={item.personPhone} onChange={(event) => updateCompanion(index, 'personPhone', event.target.value)} />
+                <input placeholder="手机号码（选填）" maxLength="11" value={item.personPhone} onChange={(event) => updateCompanion(index, 'personPhone', event.target.value)} />
                 <button type="button" className="danger" onClick={() => setForm({ ...form, companions: form.companions.filter((_, itemIndex) => itemIndex !== index) })}>移除</button>
               </div>)}
             </div>
@@ -982,15 +990,15 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
             ['项目', detail.projectName], ['会议时间', `${formatDateTime(detail.visitStartTime)} 至 ${formatDateTime(detail.visitEndTime)}`],
             ['会议主题', detail.purpose], ['会议地点', detail.visitLocation], ['接待人', `${detail.hostName || '-'} ${detail.hostPhone || ''}`],
             ['登记组数', detail.registrationGroupCount || 0], ['登记人数', detail.registeredPersonCount || 0], ['内部备注', detail.internalRemark || '-'],
-          ] : [['项目', detail.projectName], ['计划时间', `${formatDateTime(detail.visitStartTime)} 至 ${formatDateTime(detail.visitEndTime)}`], ['来访事由', detail.purpose], ['到访地点', detail.visitLocation], ['接待人', `${detail.hostName || '-'} ${detail.hostPhone || ''}`], ['外访单位', detail.visitorCompany || '-'], ['联系人', `${detail.contactName || '-'} ${detail.contactPhone || ''}`], ['出行方式', detail.travelMode === 'DRIVING' ? `驾车 · ${detail.vehiclePlate || '-'}` : detail.travelMode ? '非驾车' : '-'], ['资料来源', detail.sourceProfileId ? `常用资料 · ${detail.sourceProfileName || detail.sourceProfileId}` : '本次手工填写'], ['内部备注', detail.internalRemark || '-'], ['外访备注', detail.visitorRemark || '-']]).map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}
+          ] : [['项目', detail.projectName], ['计划时间', `${formatDateTime(detail.visitStartTime)} 至 ${formatDateTime(detail.visitEndTime)}`], ['来访事由', detail.purpose], ['到访地点', detail.visitLocation], ['接待人', `${detail.hostName || '-'} ${detail.hostPhone || ''}`], ['单位', detail.visitorCompany || '-'], ['姓名', `${detail.contactName || '-'} ${detail.contactPhone || ''}`], ['出行方式', detail.travelMode === 'DRIVING' ? `驾车 · ${detail.vehiclePlate || '-'}` : detail.travelMode ? '非驾车' : '-'], ['资料来源', detail.sourceProfileId ? `常用资料 · ${detail.sourceProfileName || detail.sourceProfileId}` : '本次手工填写'], ['内部备注', detail.internalRemark || '-'], ['外访备注', detail.visitorRemark || '-']]).map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}
         </div>
-        {detail.inviteType === 'MEETING' ? <MeetingRegistrationPanel invitation={detail} projectId={projectId} canManage={canManage} canExport={canExport} currentTime={clockNow} onChanged={async () => { await load(pageNo); await openDetail(detail.id); }} /> : <><h3>入场人员（{detail.visitors?.length || 0}）</h3><div className="site-access-person-list">{(detail.visitors || []).map((person) => <div key={person.id}><span>{person.personType === 'CONTACT' ? '主联系人' : '同行人员'}</span><PersonContactFields person={person} /></div>)}{!detail.visitors?.length && <p>等待访客填写</p>}</div></>}
+        {detail.inviteType === 'MEETING' ? <MeetingRegistrationPanel invitation={detail} projectId={projectId} canManage={canManage} canExport={canExport} currentTime={clockNow} onChanged={async () => { await load(pageNo); await openDetail(detail.id); }} /> : <><h3>入场人员（{detail.visitors?.length || 0}）</h3><div className="site-access-person-list">{(detail.visitors || []).map((person) => <div key={person.id}><span>{person.personType === 'CONTACT' ? '本人' : '同行人员'}</span><PersonContactFields person={person} /></div>)}{!detail.visitors?.length && <p>等待访客填写</p>}</div></>}
         <h3>操作记录</h3>
         <div className="site-access-audit-list">{(detail.auditLogs || []).map((log) => <div key={log.id}><b>{AUDIT_LABELS[log.actionType] || log.actionType}</b><span>{log.operatorName} · {formatDateTime(log.createTime)}</span><p>{log.comment || '-'}</p></div>)}</div>
         {detail.voidReason && <div className="site-access-void-reason">作废原因：{detail.voidReason}</div>}
       </aside></div>}
 
-      {qrCode && <Modal title={`${qrCode.inviteType === 'MEETING' ? '共享会议码' : '专属小程序码'} · ${qrCode.inviteNo}`} onClose={() => setQrCode(null)} width={430}>
+      {qrCode && <Modal title={`${qrCode.displayTitle || (qrCode.inviteType === 'MEETING' ? '会议预约码' : '专属小程序码')} · ${qrCode.inviteNo}`} onClose={() => setQrCode(null)} width={430}>
         <div className="site-access-qr">
           {qrCode.imageContent ? <img src={qrCode.imageContent} alt="外访邀请小程序码" /> : <div className="site-access-scene"><span>开发调试 scene</span><code>{qrCode.sceneCode}</code></div>}
           <p>{qrCode.hint}</p>

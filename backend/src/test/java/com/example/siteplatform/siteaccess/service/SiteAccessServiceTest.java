@@ -1,6 +1,10 @@
 package com.example.siteplatform.siteaccess.service;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.siteplatform.auth.entity.SysUser;
 import com.example.siteplatform.auth.mapper.SysUserMapper;
 import com.example.siteplatform.auth.service.WechatPlatformClient;
@@ -10,10 +14,12 @@ import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.dto.PublicProjectProfileVO;
 import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectMapper;
+import com.example.siteplatform.project.entity.SysUserProject;
 import com.example.siteplatform.project.service.ProjectPermissionService;
 import com.example.siteplatform.project.service.ProjectProfileService;
 import com.example.siteplatform.project.service.ProjectRouteImageService;
 import com.example.siteplatform.siteaccess.dto.PublicSiteVisitSubmitRequest;
+import com.example.siteplatform.siteaccess.dto.SiteVisitInvitationCreateRequest;
 import com.example.siteplatform.siteaccess.dto.SiteVisitPersonRequest;
 import com.example.siteplatform.siteaccess.entity.SiteVisitAuditLog;
 import com.example.siteplatform.siteaccess.entity.SiteVisitInvitation;
@@ -24,6 +30,7 @@ import com.example.siteplatform.siteaccess.mapper.SiteVisitPersonMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteMeetingVisitRegistrationMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -45,6 +52,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -71,6 +79,8 @@ class SiteAccessServiceTest {
     @Mock private WechatPlatformClient wechatPlatformClient;
     @Mock private VisitorSessionService visitorSessionService;
     @Mock private VisitorProfileService visitorProfileService;
+    @Mock private VisitorPersonalProfileService personalProfileService;
+    @Mock private MeetingCheckinQrProvisioner meetingCheckinQrProvisioner;
     @Mock private OperationLogMapper operationLogMapper;
 
     private VisitorDataCryptoService crypto;
@@ -78,13 +88,17 @@ class SiteAccessServiceTest {
 
     @BeforeEach
     void setUp() {
+        TableInfoHelper.initTableInfo(
+                new MapperBuilderAssistant(new MybatisConfiguration(), SiteVisitInvitationMapper.class.getName()),
+                SiteVisitInvitation.class);
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles("test");
         crypto = new VisitorDataCryptoService("", environment);
         service = new SiteAccessService(invitationMapper, personMapper, auditLogMapper, meetingRegistrationMapper,
                 projectInfoMapper, userMapper, userProjectMapper, projectPermissionService,
                 projectProfileService, projectRouteImageService,
-                crypto, wechatPlatformClient, visitorSessionService, visitorProfileService, operationLogMapper,
+                crypto, wechatPlatformClient, visitorSessionService, visitorProfileService, personalProfileService,
+                meetingCheckinQrProvisioner, operationLogMapper,
                 new ObjectMapper().findAndRegisterModules(), "pages/public/visitor-invite",
                 "pages/public/meeting-invite", "release");
     }
@@ -111,9 +125,80 @@ class SiteAccessServiceTest {
     }
 
     @Test
-    void publicSubmissionStoresNoIdentityAndLocksInvitationAsSubmitted() {
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void invitationPageKeywordMatchesTopicAndKeepsExistingFields() {
+        when(invitationMapper.selectPage(any(Page.class), any(Wrapper.class))).thenAnswer(invocation -> {
+            Page<SiteVisitInvitation> page = invocation.getArgument(0);
+            page.setTotal(0);
+            page.setRecords(List.of());
+            return page;
+        });
+        when(projectInfoMapper.selectById(10L)).thenReturn(project());
+        SysUser currentUser = new SysUser();
+        currentUser.setId(7L);
+
+        service.page(10L, null, null, "  安全交底会  ", null, null, 1, 20, currentUser);
+
+        ArgumentCaptor<Wrapper<SiteVisitInvitation>> captor =
+                (ArgumentCaptor) ArgumentCaptor.forClass(Wrapper.class);
+        verify(invitationMapper).selectPage(any(Page.class), captor.capture());
+        LambdaQueryWrapper<SiteVisitInvitation> wrapper =
+                (LambdaQueryWrapper<SiteVisitInvitation>) captor.getValue();
+        assertThat(wrapper.getSqlSegment())
+                .contains("invite_no", "purpose", "visitor_company", "contact_name", "vehicle_plate", "host_name");
+        assertThat(wrapper.getParamNameValuePairs().values()).contains("%安全交底会%");
+    }
+
+    @Test
+    void creatingMeetingInvitationAlsoCreatesIndependentVenueCheckinQr() {
+        SiteVisitInvitationCreateRequest request = new SiteVisitInvitationCreateRequest();
+        request.setInviteType(SiteAccessService.INVITE_TYPE_MEETING);
+        request.setProjectId(10L);
+        request.setVisitStartTime(LocalDateTime.now().plusHours(2));
+        request.setVisitEndTime(LocalDateTime.now().plusHours(4));
+        request.setPurpose("安全交底会");
+        request.setVisitLocation("项目会议室");
+        request.setHostUserId(8L);
+        SysUser operator = new SysUser();
+        operator.setId(7L);
+        operator.setUsername("manager");
+        SysUser host = new SysUser();
+        host.setId(8L);
+        host.setUsername("host");
+        host.setRealName("接待人");
+        host.setPhone(HOST_PHONE);
+        host.setStatus(1);
+        host.setDeleted(0);
+        SysUserProject membership = new SysUserProject();
+        membership.setProjectId(10L);
+        membership.setUserId(8L);
+        membership.setStatus("ACTIVE");
+        when(projectInfoMapper.selectByIdForUpdate(10L)).thenReturn(project());
+        when(userMapper.selectById(8L)).thenReturn(host);
+        when(userProjectMapper.selectOne(any(Wrapper.class))).thenReturn(membership);
+        when(invitationMapper.insert(any())).thenAnswer(invocation -> {
+            SiteVisitInvitation value = invocation.getArgument(0);
+            value.setId(11L);
+            return 1;
+        });
+        when(auditLogMapper.insert(any())).thenReturn(1);
+        when(operationLogMapper.insert(any())).thenReturn(1);
+        when(personMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(auditLogMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+
+        var created = service.create(request, operator);
+
+        assertThat(created.getInviteType()).isEqualTo(SiteAccessService.INVITE_TYPE_MEETING);
+        assertThat(created.getStatus()).isEqualTo(SiteAccessService.STATUS_OPEN);
+        ArgumentCaptor<SiteVisitInvitation> invitation = ArgumentCaptor.forClass(SiteVisitInvitation.class);
+        verify(meetingCheckinQrProvisioner).provision(invitation.capture(), eq(operator));
+        assertThat(invitation.getValue().getId()).isEqualTo(11L);
+    }
+
+    @Test
+    void publicSubmissionBindsWechatIdentityWithoutCollectingIdCard() {
         SiteVisitInvitation invitation = pendingInvitation();
-        when(invitationMapper.selectForUpdateByTokenHash(anyString())).thenReturn(invitation);
+        stubPublicSubmission(invitation);
         when(invitationMapper.selectOne(any(Wrapper.class))).thenReturn(invitation);
         when(projectInfoMapper.selectById(10L)).thenReturn(project());
         when(personMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
@@ -121,21 +206,24 @@ class SiteAccessServiceTest {
         when(invitationMapper.updateById(invitation)).thenReturn(1);
         when(auditLogMapper.insert(any(SiteVisitAuditLog.class))).thenReturn(1);
 
-        var result = service.submitPublic(validSubmission());
+        var result = service.submitPublic(validSubmission(), "visitor-session");
 
         assertThat(result.getStatus()).isEqualTo(SiteAccessService.STATUS_SUBMITTED);
-        assertThat(result.getVisitorCompany()).isEqualTo("外访单位");
+        assertThat(result.getVisitorCompany()).isEqualTo("单位");
         assertThat(result.getContactName()).isEqualTo("外访联系人");
         assertThat(result.getVisitorCount()).isEqualTo(1);
         assertThat(result.getSubmittedTime()).isNotNull();
         assertThat(result.getServerTime()).isNotNull();
         assertThat(invitation.getVisitorCount()).isEqualTo(1);
+        assertThat(invitation.getWechatAppId()).isEqualTo("wx-app");
+        assertThat(invitation.getVisitorIdentityHash()).hasSize(64).doesNotContain("openid");
+        verify(personalProfileService).saveOnSubmission(any(), any(), any());
         assertThat(invitation.getContactPhoneEncrypted()).startsWith("v1:").doesNotContain(TEST_PHONE);
         assertThat(crypto.decrypt(invitation.getContactPhoneEncrypted())).isEqualTo(TEST_PHONE);
         ArgumentCaptor<SiteVisitPerson> personCaptor = ArgumentCaptor.forClass(SiteVisitPerson.class);
         verify(personMapper).insert(personCaptor.capture());
         SiteVisitPerson saved = personCaptor.getValue();
-        assertThat(saved.getPersonCompany()).isEqualTo("外访单位");
+        assertThat(saved.getPersonCompany()).isEqualTo("单位");
         assertThat(saved.getPersonName()).isEqualTo("外访联系人");
         assertThat(crypto.decrypt(saved.getPhoneEncrypted())).isEqualTo(TEST_PHONE);
         assertThat(saved.getIdCardEncrypted()).isNull();
@@ -151,7 +239,7 @@ class SiteAccessServiceTest {
     @Test
     void reusableProfileSourceIsBoundToTheSubmittedInvitationSnapshot() {
         SiteVisitInvitation invitation = pendingInvitation();
-        when(invitationMapper.selectForUpdateByTokenHash(anyString())).thenReturn(invitation);
+        stubPublicSubmission(invitation);
         when(invitationMapper.selectOne(any(Wrapper.class))).thenReturn(invitation);
         when(projectInfoMapper.selectById(10L)).thenReturn(project());
         when(personMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
@@ -227,7 +315,7 @@ class SiteAccessServiceTest {
     void submittedInvitationResolvesAsGatePassUntilPlannedDeparture() {
         SiteVisitInvitation invitation = pendingInvitation();
         invitation.setStatus(SiteAccessService.STATUS_SUBMITTED);
-        invitation.setVisitorCompany("外访单位");
+        invitation.setVisitorCompany("单位");
         invitation.setContactName("外访联系人");
         invitation.setVisitorCount(2);
         invitation.setTravelMode(SiteAccessService.TRAVEL_DRIVING);
@@ -240,7 +328,7 @@ class SiteAccessServiceTest {
         var pass = service.resolvePublic(TOKEN);
 
         assertThat(pass.getStatus()).isEqualTo(SiteAccessService.STATUS_SUBMITTED);
-        assertThat(pass.getVisitorCompany()).isEqualTo("外访单位");
+        assertThat(pass.getVisitorCompany()).isEqualTo("单位");
         assertThat(pass.getContactName()).isEqualTo("外访联系人");
         assertThat(pass.getVisitorCount()).isEqualTo(2);
         assertThat(pass.getTravelMode()).isEqualTo(SiteAccessService.TRAVEL_DRIVING);
@@ -319,9 +407,9 @@ class SiteAccessServiceTest {
     }
 
     @Test
-    void publicSubmissionAcceptsCompanionsWithoutIdentity() {
+    void publicSubmissionAcceptsCompanionsWithoutIdCard() {
         SiteVisitInvitation invitation = pendingInvitation();
-        when(invitationMapper.selectForUpdateByTokenHash(anyString())).thenReturn(invitation);
+        stubPublicSubmission(invitation);
         when(invitationMapper.selectOne(any(Wrapper.class))).thenReturn(invitation);
         when(projectInfoMapper.selectById(10L)).thenReturn(project());
         when(personMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
@@ -335,7 +423,7 @@ class SiteAccessServiceTest {
         companion.setPersonPhone(COMPANION_PHONE);
         request.setCompanions(List.of(companion));
 
-        service.submitPublic(request);
+        service.submitPublic(request, "visitor-session");
 
         ArgumentCaptor<SiteVisitPerson> people = ArgumentCaptor.forClass(SiteVisitPerson.class);
         verify(personMapper, org.mockito.Mockito.times(2)).insert(people.capture());
@@ -353,7 +441,7 @@ class SiteAccessServiceTest {
     @Test
     void blankCompanionIsIgnoredAndPartialOptionalCompanionIsStored() {
         SiteVisitInvitation invitation = pendingInvitation();
-        when(invitationMapper.selectForUpdateByTokenHash(anyString())).thenReturn(invitation);
+        stubPublicSubmission(invitation);
         when(invitationMapper.selectOne(any(Wrapper.class))).thenReturn(invitation);
         when(projectInfoMapper.selectById(10L)).thenReturn(project());
         when(personMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
@@ -368,7 +456,7 @@ class SiteAccessServiceTest {
         PublicSiteVisitSubmitRequest request = validSubmission();
         request.setCompanions(List.of(blank, companyOnly));
 
-        service.submitPublic(request);
+        service.submitPublic(request, "visitor-session");
 
         assertThat(invitation.getVisitorCount()).isEqualTo(2);
         ArgumentCaptor<SiteVisitPerson> people = ArgumentCaptor.forClass(SiteVisitPerson.class);
@@ -382,16 +470,16 @@ class SiteAccessServiceTest {
     @Test
     void optionalCompanionPhoneIsValidatedWhenProvided() {
         SiteVisitInvitation invitation = pendingInvitation();
-        when(invitationMapper.selectForUpdateByTokenHash(anyString())).thenReturn(invitation);
+        stubPublicSubmission(invitation);
         PublicSiteVisitSubmitRequest request = validSubmission();
         SiteVisitPersonRequest companion = new SiteVisitPersonRequest();
         companion.setPersonPhone("12345");
         request.setCompanions(List.of(companion));
 
         BusinessException exception = assertThrows(BusinessException.class,
-                () -> service.submitPublic(request));
+                () -> service.submitPublic(request, "visitor-session"));
 
-        assertThat(exception.getMessage()).contains("同行人员手机号格式不正确");
+        assertThat(exception.getMessage()).contains("同行人员手机号码格式不正确");
         verify(personMapper, never()).insert(any());
         verify(invitationMapper, never()).updateById(any());
     }
@@ -400,17 +488,17 @@ class SiteAccessServiceTest {
     void submittedOrExpiredInvitationCannotBeSubmittedAgain() {
         SiteVisitInvitation invitation = pendingInvitation();
         invitation.setStatus(SiteAccessService.STATUS_SUBMITTED);
-        when(invitationMapper.selectForUpdateByTokenHash(anyString())).thenReturn(invitation);
+        stubPublicSubmission(invitation);
 
         BusinessException submitted = assertThrows(BusinessException.class,
-                () -> service.submitPublic(validSubmission()));
+                () -> service.submitPublic(validSubmission(), "visitor-session"));
         assertThat(submitted.getCode()).isEqualTo(409);
         assertThat(submitted.getMessage()).contains("已经提交");
 
         invitation.setStatus(SiteAccessService.STATUS_PENDING);
         invitation.setVisitEndTime(LocalDateTime.now().minusMinutes(1));
         BusinessException expired = assertThrows(BusinessException.class,
-                () -> service.submitPublic(validSubmission()));
+                () -> service.submitPublic(validSubmission(), "visitor-session"));
         assertThat(expired.getCode()).isEqualTo(409);
         assertThat(expired.getMessage()).contains("已过期");
         verify(personMapper, never()).insert(any());
@@ -421,16 +509,16 @@ class SiteAccessServiceTest {
         PublicSiteVisitSubmitRequest invalidToken = validSubmission();
         invalidToken.setInviteToken("too-short");
         BusinessException tokenError = assertThrows(BusinessException.class,
-                () -> service.submitPublic(invalidToken));
+                () -> service.submitPublic(invalidToken, "visitor-session"));
         assertThat(tokenError.getCode()).isEqualTo(404);
         verify(invitationMapper, never()).selectForUpdateByTokenHash(anyString());
 
         SiteVisitInvitation invitation = pendingInvitation();
-        when(invitationMapper.selectForUpdateByTokenHash(anyString())).thenReturn(invitation);
+        stubPublicSubmission(invitation);
         PublicSiteVisitSubmitRequest noPlate = validSubmission();
         noPlate.setTravelMode(SiteAccessService.TRAVEL_DRIVING);
         BusinessException plateError = assertThrows(BusinessException.class,
-                () -> service.submitPublic(noPlate));
+                () -> service.submitPublic(noPlate, "visitor-session"));
         assertThat(plateError.getMessage()).contains("必须填写车牌号");
         verify(personMapper, never()).insert(any());
         verify(invitationMapper, never()).updateById(any());
@@ -439,7 +527,7 @@ class SiteAccessServiceTest {
     @Test
     void moreThanFiftyVisitorsAreRejectedBeforeWriting() {
         SiteVisitInvitation invitation = pendingInvitation();
-        when(invitationMapper.selectForUpdateByTokenHash(anyString())).thenReturn(invitation);
+        stubPublicSubmission(invitation);
         PublicSiteVisitSubmitRequest request = validSubmission();
         request.setCompanions(IntStream.rangeClosed(2, 51).mapToObj(sequence -> {
             SiteVisitPersonRequest companion = new SiteVisitPersonRequest();
@@ -448,7 +536,7 @@ class SiteAccessServiceTest {
         }).toList());
 
         BusinessException exception = assertThrows(BusinessException.class,
-                () -> service.submitPublic(request));
+                () -> service.submitPublic(request, "visitor-session"));
 
         assertThat(exception.getMessage()).contains("最多登记50名人员");
         verify(personMapper, never()).insert(any());
@@ -489,10 +577,34 @@ class SiteAccessServiceTest {
             assertThat(sheet.getLastRowNum()).isEqualTo(1);
             assertThat(sheet.getRow(1).getCell(6).getStringCellValue()).startsWith("'=");
             assertThat(sheet.getRow(1).getCell(8).getStringCellValue()).isEqualTo("'+危险前缀");
-            assertThat(sheet.getRow(0).getCell(9).getStringCellValue()).isEqualTo("手机号");
+            assertThat(sheet.getRow(0).getCell(9).getStringCellValue()).isEqualTo("手机号码");
             assertThat(sheet.getRow(1).getCell(9).getStringCellValue()).isEqualTo(TEST_PHONE);
             assertThat(sheet.getRow(1).getLastCellNum()).isEqualTo((short) 16);
         }
+    }
+
+    private void stubPublicSubmission(SiteVisitInvitation invitation) {
+        when(invitationMapper.selectForUpdateByTokenHash(anyString())).thenReturn(invitation);
+        org.mockito.Mockito.lenient().when(invitationMapper.selectOne(any(Wrapper.class))).thenReturn(invitation);
+        when(projectInfoMapper.selectByIdForUpdate(10L)).thenReturn(project());
+        var context = new VisitorSessionService.VisitorSessionContext(
+                invitation.getId(), invitation.getProjectId(), "wx-app", "profile-hash", crypto.encrypt("openid"));
+        org.mockito.Mockito.lenient().when(visitorSessionService.require("visitor-session", invitation)).thenReturn(context);
+        org.mockito.Mockito.lenient().when(visitorSessionService.decryptOpenid(any())).thenReturn("openid");
+    }
+
+    @Test
+    void failedWechatSessionCannotSubmitOrRememberPersonalInformation() {
+        SiteVisitInvitation invitation = pendingInvitation();
+        stubPublicSubmission(invitation);
+        when(visitorSessionService.require("visitor-session", invitation))
+                .thenThrow(BusinessException.of(401, "请重新获取微信身份后提交"));
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.submitPublic(validSubmission(), "visitor-session"));
+        assertThat(error.getCode()).isEqualTo(401);
+        verify(personMapper, never()).insert(any());
+        verify(invitationMapper, never()).updateById(any());
+        verify(personalProfileService, never()).saveOnSubmission(any(), any(), any());
     }
 
     private SiteVisitInvitation pendingInvitation() {
@@ -521,7 +633,7 @@ class SiteAccessServiceTest {
     private PublicSiteVisitSubmitRequest validSubmission() {
         PublicSiteVisitSubmitRequest request = new PublicSiteVisitSubmitRequest();
         request.setInviteToken(TOKEN);
-        request.setVisitorCompany("外访单位");
+        request.setVisitorCompany("单位");
         request.setContactName("外访联系人");
         request.setContactPhone(TEST_PHONE);
         request.setCompanions(List.of());

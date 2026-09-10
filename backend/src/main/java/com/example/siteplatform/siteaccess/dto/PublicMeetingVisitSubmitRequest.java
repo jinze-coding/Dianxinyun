@@ -14,11 +14,12 @@ import java.util.List;
 
 @Data
 public class PublicMeetingVisitSubmitRequest {
+    private Boolean rememberInfo;
     @NotBlank @Size(max = 200)
     private String visitorCompany;
     @NotBlank @Size(max = 50)
     private String contactName;
-    @NotBlank @Pattern(regexp = "^1[3-9]\\d{9}$", message = "手机号格式不正确")
+    @NotBlank @Pattern(regexp = "^1[3-9]\\d{9}$", message = "手机号码格式不正确")
     private String contactPhone;
     @Valid @Size(max = 49)
     private List<SiteVisitPersonRequest> companions = new ArrayList<>();

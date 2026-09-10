@@ -7,6 +7,7 @@ import com.example.siteplatform.siteaccess.security.PublicSiteAccessRequestGuard
 import com.example.siteplatform.siteaccess.service.SiteAccessService;
 import com.example.siteplatform.siteaccess.service.GuardVisitService;
 import com.example.siteplatform.siteaccess.service.MeetingVisitService;
+import com.example.siteplatform.siteaccess.service.MeetingCheckinService;
 import com.example.siteplatform.project.service.ProjectProfileService;
 import com.example.siteplatform.project.service.ProjectRouteImageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,6 +28,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.time.Duration;
 
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doThrow;
@@ -47,6 +49,7 @@ class PublicSiteAccessControllerRateLimitTest {
     @Mock private SiteAccessService service;
     @Mock private GuardVisitService guardVisitService;
     @Mock private MeetingVisitService meetingVisitService;
+    @Mock private MeetingCheckinService meetingCheckinService;
     @Mock private RedisRateLimitService rateLimitService;
 
     private MockMvc mockMvc;
@@ -55,13 +58,29 @@ class PublicSiteAccessControllerRateLimitTest {
     @BeforeEach
     void setUp() {
         PublicSiteAccessController controller = new PublicSiteAccessController(
-                service, guardVisitService, meetingVisitService);
+                service, guardVisitService, meetingVisitService, meetingCheckinService);
         filter = new PublicSiteAccessRequestGuardFilter(
                 rateLimitService, new ObjectMapper().findAndRegisterModules());
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .addFilters(filter)
                 .build();
+    }
+
+    @Test
+    void guardStateAndMeetingChoicesAreLimitedBeforeBusinessReads() throws Exception {
+        for (String path : java.util.List.of("/guard/state", "/guard/meetings")) {
+            mockMvc.perform(withClient(post(BASE + path).header("X-Visitor-Session", "short-session")
+                    .contentType(MediaType.APPLICATION_JSON).content("{}"))).andExpect(status().isOk());
+        }
+        verify(rateLimitService).check("public-site-guard-state", CLIENT_IP, 600, Duration.ofMinutes(10));
+        verify(rateLimitService).check("public-site-guard-meetings", CLIENT_IP, 120, Duration.ofMinutes(10));
+        org.mockito.Mockito.reset(guardVisitService);
+        org.mockito.Mockito.doThrow(com.example.siteplatform.common.BusinessException.of(429, "请稍后重试"))
+                .when(rateLimitService).check(anyString(), anyString(), anyInt(), any(Duration.class));
+        mockMvc.perform(withClient(post(BASE + "/guard/state").header("X-Visitor-Session", "short-session")))
+                .andExpect(status().isTooManyRequests());
+        verifyNoInteractions(guardVisitService);
     }
 
     @Test
@@ -127,6 +146,31 @@ class PublicSiteAccessControllerRateLimitTest {
                         .header("X-Visitor-Session", "session-token")
                         .contentType(MediaType.APPLICATION_JSON).content("{}")))
                 .andExpect(status().isBadRequest());
+        mockMvc.perform(withClient(post(BASE + "/meeting-check-in/session")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sceneToken\":\"AbCdEfGhIjKlMnOpQrStUv\",\"wechatCode\":\"wechat-code\"}")))
+                .andExpect(status().isOk());
+        mockMvc.perform(withClient(post(BASE + "/meeting-check-in/confirm")
+                        .header("X-Visitor-Session", "session-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"attendees\":[{\"personId\":1}],\"location\":{\"locationAvailable\":false}}")))
+                .andExpect(status().isOk());
+        mockMvc.perform(withClient(post(BASE + "/meeting-check-in/walk-in")
+                        .header("X-Visitor-Session", "session-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"visitorCompany\":\"测试单位\",\"contactName\":\"张三\",\"contactPhone\":\"13800138000\",\"companions\":[],\"travelMode\":\"OTHER\",\"privacyAgreed\":true,\"location\":{\"locationAvailable\":false}}")))
+                .andExpect(status().isOk());
+        mockMvc.perform(withClient(post(BASE + "/meeting-check-in/profiles/list")
+                        .header("X-Visitor-Session", "session-token")))
+                .andExpect(status().isOk());
+        mockMvc.perform(withClient(post(BASE + "/meeting-check-in/profiles/detail")
+                        .header("X-Visitor-Session", "session-token")
+                        .contentType(MediaType.APPLICATION_JSON).content("{}")))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(withClient(post(BASE + "/meeting-check-in/profiles/disable")
+                        .header("X-Visitor-Session", "session-token")
+                        .contentType(MediaType.APPLICATION_JSON).content("{}")))
+                .andExpect(status().isBadRequest());
         mockMvc.perform(withClient(post(BASE + "/guard/session")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"sceneToken\":\"development-guard-token\",\"wechatCode\":\"wechat-code\"}")))
@@ -182,6 +226,18 @@ class PublicSiteAccessControllerRateLimitTest {
         verify(rateLimitService).check("public-site-meeting-profile-detail", CLIENT_IP,
                 60, Duration.ofMinutes(10));
         verify(rateLimitService).check("public-site-meeting-profile-disable", CLIENT_IP,
+                10, Duration.ofMinutes(30));
+        verify(rateLimitService).check("public-site-meeting-checkin-session", CLIENT_IP,
+                20, Duration.ofMinutes(10));
+        verify(rateLimitService).check("public-site-meeting-checkin-confirm", CLIENT_IP,
+                10, Duration.ofMinutes(30));
+        verify(rateLimitService).check("public-site-meeting-checkin-walkin", CLIENT_IP,
+                10, Duration.ofMinutes(30));
+        verify(rateLimitService).check("public-site-meeting-checkin-profile-list", CLIENT_IP,
+                60, Duration.ofMinutes(10));
+        verify(rateLimitService).check("public-site-meeting-checkin-profile-detail", CLIENT_IP,
+                60, Duration.ofMinutes(10));
+        verify(rateLimitService).check("public-site-meeting-checkin-profile-disable", CLIENT_IP,
                 10, Duration.ofMinutes(30));
         verify(rateLimitService).check("public-site-guard-session", CLIENT_IP,
                 20, Duration.ofMinutes(10));

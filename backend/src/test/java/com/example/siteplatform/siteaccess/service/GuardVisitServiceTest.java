@@ -49,6 +49,11 @@ class GuardVisitServiceTest {
     @Mock private ProjectProfileService projectProfileService;
     @Mock private VisitorSessionService sessionService;
     @Mock private VisitorProfileService profileService;
+    @Mock private VisitorPersonalProfileService personalProfiles;
+    @Mock private GuardVisitorMatchingService matching;
+    @Mock private GuardMeetingChoiceService meetingChoices;
+    @Mock private MeetingVisitService meetingVisits;
+    @Mock private com.example.siteplatform.siteaccess.mapper.SiteGuardMeetingRegistrationMapper meetingLinks;
     @Mock private WechatPlatformClient wechatPlatformClient;
     @Mock private RedisRateLimitService rateLimitService;
     @Mock private OperationLogMapper operationLogMapper;
@@ -62,7 +67,7 @@ class GuardVisitServiceTest {
         environment.setActiveProfiles("test");
         crypto = new VisitorDataCryptoService("", environment);
         service = new GuardVisitService(qrMapper, registrationMapper, personMapper, auditMapper,
-                projectMapper, permissionService, projectProfileService, crypto, sessionService, profileService,
+                projectMapper, permissionService, projectProfileService, crypto, sessionService, profileService, personalProfiles, matching, meetingChoices, meetingVisits, meetingLinks,
                 wechatPlatformClient, rateLimitService, operationLogMapper,
                 new ObjectMapper().findAndRegisterModules(), "pages/public/guard-visitor-register", "develop");
     }
@@ -114,6 +119,8 @@ class GuardVisitServiceTest {
                 null, 7L, "wx-app", "profile-owner-hash", "encrypted-openid",
                 VisitorSessionService.SOURCE_GUARD_QR, 11L);
         when(qrMapper.selectOne(any())).thenReturn(qr);
+        org.mockito.Mockito.lenient().when(qrMapper.selectById(11L)).thenReturn(qr);
+        org.mockito.Mockito.lenient().when(sessionService.requireGuard("visitor-session", 11L, 7L)).thenAnswer(call -> sessionService.require("visitor-session"));
         when(projectMapper.selectById(7L)).thenReturn(project);
         when(sessionService.issueGuard("wechat-code", 11L, 7L))
                 .thenReturn(new PublicVisitorSessionVO("visitor-session", 1800));
@@ -137,6 +144,8 @@ class GuardVisitServiceTest {
         PublicProjectProfileVO profile = new PublicProjectProfileVO();
         profile.setProjectName("测试项目");
         when(qrMapper.selectOne(any())).thenReturn(qr);
+        org.mockito.Mockito.lenient().when(qrMapper.selectById(11L)).thenReturn(qr);
+        org.mockito.Mockito.lenient().when(sessionService.requireGuard("visitor-session", 11L, 7L)).thenAnswer(call -> sessionService.require("visitor-session"));
         when(projectMapper.selectById(7L)).thenReturn(project);
         when(projectProfileService.getPublicProfile(7L)).thenReturn(profile);
 

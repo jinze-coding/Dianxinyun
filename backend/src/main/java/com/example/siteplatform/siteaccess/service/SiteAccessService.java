@@ -108,6 +108,8 @@ public class SiteAccessService {
     private final WechatPlatformClient wechatPlatformClient;
     private final VisitorSessionService visitorSessionService;
     private final VisitorProfileService visitorProfileService;
+    private final VisitorPersonalProfileService personalProfileService;
+    private final MeetingCheckinQrProvisioner meetingCheckinQrProvisioner;
     private final OperationLogMapper operationLogMapper;
     private final ObjectMapper objectMapper;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -130,6 +132,8 @@ public class SiteAccessService {
             WechatPlatformClient wechatPlatformClient,
             VisitorSessionService visitorSessionService,
             VisitorProfileService visitorProfileService,
+            VisitorPersonalProfileService personalProfileService,
+            MeetingCheckinQrProvisioner meetingCheckinQrProvisioner,
             OperationLogMapper operationLogMapper,
             ObjectMapper objectMapper,
             @Value("${wechat.mini-program.visitor-page:pages/public/visitor-invite}") String miniProgramPage,
@@ -149,6 +153,8 @@ public class SiteAccessService {
         this.wechatPlatformClient = wechatPlatformClient;
         this.visitorSessionService = visitorSessionService;
         this.visitorProfileService = visitorProfileService;
+        this.personalProfileService = personalProfileService;
+        this.meetingCheckinQrProvisioner = meetingCheckinQrProvisioner;
         this.operationLogMapper = operationLogMapper;
         this.objectMapper = objectMapper;
         this.miniProgramPage = miniProgramPage;
@@ -229,6 +235,9 @@ public class SiteAccessService {
         }
         writeAudit(invitation, "CREATE", currentUser, null, snapshot(invitation),
                 INVITE_TYPE_MEETING.equals(inviteType) ? "创建共享会议邀请" : "创建单次外访邀请");
+        if (INVITE_TYPE_MEETING.equals(inviteType)) {
+            meetingCheckinQrProvisioner.provision(invitation, currentUser);
+        }
         recordOperation(currentUser, "CREATE_SITE_VISIT", invitation, "创建外访邀请 " + invitation.getInviteNo());
         return toVO(invitation, project, true, null);
     }
@@ -247,8 +256,11 @@ public class SiteAccessService {
                 STATUS_PENDING.equals(invitation.getStatus()) || STATUS_OPEN.equals(invitation.getStatus()));
         SysUser host = requireHost(invitation.getProjectId(), request.getHostUserId(), currentUser);
         Map<String, Object> before = snapshot(invitation);
-        if (!Objects.equals(invitation.getVisitStartTime(), request.getVisitStartTime())
-                || !Objects.equals(invitation.getVisitEndTime(), request.getVisitEndTime())) {
+        LocalDateTime previousStartTime = invitation.getVisitStartTime();
+        LocalDateTime previousEndTime = invitation.getVisitEndTime();
+        boolean meetingTimeChanged = !Objects.equals(previousStartTime, request.getVisitStartTime())
+                || !Objects.equals(previousEndTime, request.getVisitEndTime());
+        if (meetingTimeChanged) {
             invitation.setInviteNo(rebuildInviteNo(
                     request.getVisitStartTime(), request.getVisitEndTime(), invitation.getInviteNo()));
         }
@@ -268,6 +280,10 @@ public class SiteAccessService {
             requireSingleWrite(invitationMapper.updateById(invitation), "邀请修改");
         } catch (DuplicateKeyException duplicate) {
             throw BusinessException.of(409, "邀请编号生成冲突，请重试");
+        }
+        if (isMeeting(invitation) && meetingTimeChanged) {
+            meetingCheckinQrProvisioner.reconcileMeetingTimeChange(
+                    invitation, previousStartTime, previousEndTime, currentUser);
         }
         Map<String, Object> after = snapshot(invitation);
         writeAudit(invitation, "UPDATE", currentUser, before, after, "修改外访邀请或来访信息");
@@ -337,7 +353,7 @@ public class SiteAccessService {
         } else {
             hint = STATUS_SUBMITTED.equals(status)
                     ? "本次来访已登记，再次扫码可展示门卫放行凭证"
-                    : "专属单次外访小程序码，可转发给本次来访联系人";
+                    : "专属单次外访小程序码，可转发给本次来访人员";
         }
         vo.setHint(hint);
         return vo;
@@ -377,7 +393,10 @@ public class SiteAccessService {
         if (!STATUS_PENDING.equals(effectiveStatus(invitation))) {
             throw stateConflict("当前邀请不能获取常用资料");
         }
-        return visitorSessionService.issue(request.getWechatCode(), invitation);
+        PublicVisitorSessionVO issued = visitorSessionService.issue(request.getWechatCode(), invitation);
+        issued.setPersonalInfo(personalProfileService.read(
+                visitorSessionService.require(issued.getVisitorSessionToken(), invitation)));
+        return issued;
     }
 
     public PublicProjectProfileVO publicProjectProfile(String inviteToken) {
@@ -434,6 +453,8 @@ public class SiteAccessService {
                                                      String visitorSessionToken) {
         if (request == null) throw new BusinessException("外访登记参数不能为空");
         String normalizedToken = normalizeToken(request.getInviteToken());
+        SiteVisitInvitation resolved = findByToken(normalizedToken, false);
+        if (projectInfoMapper.selectByIdForUpdate(resolved.getProjectId()) == null) throw BusinessException.notFound("项目不存在");
         SiteVisitInvitation invitation = invitationMapper.selectForUpdateByTokenHash(cryptoService.digest(normalizedToken));
         if (invitation == null) throw BusinessException.notFound("邀请不存在或已失效");
         if (!isSingle(invitation)) throw BusinessException.of(403, "会议邀请不能使用单次预约提交接口");
@@ -447,10 +468,7 @@ public class SiteAccessService {
                 request.getVehiclePlate(), request.getVisitorRemark());
         if (!Boolean.TRUE.equals(request.getPrivacyAgreed())) throw new BusinessException("请阅读并同意隐私告知");
         Map<String, Object> before = snapshot(invitation);
-        VisitorSessionService.VisitorSessionContext context = null;
-        if (requiresVisitorProfile(request)) {
-            context = visitorSessionService.require(visitorSessionToken, invitation);
-        }
+        VisitorSessionService.VisitorSessionContext context = visitorSessionService.require(visitorSessionToken, invitation);
         Long sourceProfileId = visitorProfileService.applyOnSubmission(
                 context, request.getProfileAction(), request.getProfileCode(), request.getProfileName(),
                 request.getProfileRetentionAgreed(), request.getProfileVersion(),
@@ -458,13 +476,16 @@ public class SiteAccessService {
         applySubmissionFields(invitation, submission, true);
         replacePersons(invitation, submission);
         invitation.setSourceProfileId(sourceProfileId);
+        invitation.setWechatAppId(context.appId());
+        invitation.setVisitorIdentityHash(VisitorIdentitySupport.hash("single-registration", context, cryptoService, visitorSessionService));
+        personalProfileService.saveOnSubmission(context, request.getRememberInfo(), submission);
         invitation.setStatus(STATUS_SUBMITTED);
         invitation.setSubmittedTime(LocalDateTime.now());
         invitation.setPrivacyAgreedTime(LocalDateTime.now());
         invitation.setVersion(versionOf(invitation) + 1);
         invitation.setUpdateTime(LocalDateTime.now());
         requireSingleWrite(invitationMapper.updateById(invitation), "外访登记提交");
-        writeAudit(invitation, "SUBMIT", null, before, snapshot(invitation), "外访联系人提交登记");
+        writeAudit(invitation, "SUBMIT", null, before, snapshot(invitation), "访客提交登记");
         return resolvePublic(normalizedToken);
     }
 
@@ -528,6 +549,7 @@ public class SiteAccessService {
             String value = keyword.trim();
             if (value.length() > 100) throw new BusinessException("查询关键词不能超过100个字符");
             wrapper.and(item -> item.like(SiteVisitInvitation::getInviteNo, value)
+                    .or().like(SiteVisitInvitation::getPurpose, value)
                     .or().like(SiteVisitInvitation::getVisitorCompany, value)
                     .or().like(SiteVisitInvitation::getContactName, value)
                     .or().like(SiteVisitInvitation::getVehiclePlate, value)
@@ -622,12 +644,6 @@ public class SiteAccessService {
             throw stateConflict("当前邀请不能继续管理常用资料");
         }
         return context;
-    }
-
-    private boolean requiresVisitorProfile(PublicSiteVisitSubmitRequest request) {
-        String action = trimToNull(request.getProfileAction());
-        return StringUtils.hasText(request.getProfileCode())
-                || (action != null && !VisitorProfileService.ACTION_NONE.equalsIgnoreCase(action));
     }
 
     private VisitorProfileService.SubmissionData toProfileSubmission(VisitorSubmissionNormalizer.Submission submission) {
@@ -859,8 +875,8 @@ public class SiteAccessService {
     private byte[] buildWorkbook(ProjectInfo project, List<SiteVisitInvitation> invitations,
                                  Map<Long, List<SiteVisitPerson>> peopleByInvitation) {
         String[] headers = {"项目", "邀请编号", "计划到场", "计划离场", "来访事由", "到访地点",
-                "单位", "人员类型", "姓名", "手机号", "出行方式", "车牌号",
-                "接待人", "接待人手机号", "状态", "提交时间"};
+                "单位", "人员类型", "姓名", "手机号码", "出行方式", "车牌号",
+                "接待人", "接待人手机号码", "状态", "提交时间"};
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet("外访人员");
             sheet.createFreezePane(0, 1);
@@ -891,7 +907,7 @@ public class SiteAccessService {
                             nullToEmpty(PERSON_CONTACT.equals(person.getPersonType())
                                     ? preferredOrFallback(person.getPersonCompany(), invitation.getVisitorCompany())
                                     : person.getPersonCompany()),
-                            PERSON_CONTACT.equals(person.getPersonType()) ? "主联系人" : "同行人员",
+                            PERSON_CONTACT.equals(person.getPersonType()) ? "本人" : "同行人员",
                             nullToEmpty(person.getPersonName()),
                             nullToEmpty(PERSON_CONTACT.equals(person.getPersonType())
                                     ? preferredOrFallback(cryptoService.decrypt(person.getPhoneEncrypted()),

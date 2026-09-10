@@ -81,7 +81,7 @@ class VisitorProfileServiceTest {
         assertThat(profile.getContactPhoneEncrypted()).startsWith("v1:").doesNotContain("13800000000");
         ArgumentCaptor<SiteVisitorProfilePerson> personCaptor = ArgumentCaptor.forClass(SiteVisitorProfilePerson.class);
         verify(personMapper).insert(personCaptor.capture());
-        assertThat(personCaptor.getValue().getPersonCompany()).isEqualTo("外访单位");
+        assertThat(personCaptor.getValue().getPersonCompany()).isEqualTo("单位");
         assertThat(crypto.decrypt(personCaptor.getValue().getPhoneEncrypted())).isEqualTo("13800000000");
         assertThat(personCaptor.getValue().getIdCardEncrypted()).isNull();
         assertThat(personCaptor.getValue().getIdCardHash()).isNull();
@@ -184,8 +184,8 @@ class VisitorProfileServiceTest {
 
     private VisitorProfileService.SubmissionData submission() {
         return new VisitorProfileService.SubmissionData(
-                "外访单位", "外访联系人", "13800000000", "OTHER", null,
+                "单位", "外访联系人", "13800000000", "OTHER", null,
                 List.of(new VisitorProfileService.PersonData(
-                        "CONTACT", "外访单位", "外访联系人", "13800000000")));
+                        "CONTACT", "单位", "外访联系人", "13800000000")));
     }
 }

@@ -14,6 +14,9 @@ import java.util.List;
 
 @Data
 public class PublicGuardVisitSubmitRequest {
+    private Boolean rememberInfo;
+    @Size(max = 50)
+    private List<@NotBlank @Size(max = 64) String> meetingChoiceTokens = new ArrayList<>();
     @NotBlank
     @Size(max = 200)
     private String visitorCompany;
@@ -21,7 +24,7 @@ public class PublicGuardVisitSubmitRequest {
     @Size(max = 50)
     private String contactName;
     @NotBlank
-    @Pattern(regexp = "^1[3-9]\\d{9}$", message = "手机号格式不正确")
+    @Pattern(regexp = "^1[3-9]\\d{9}$", message = "手机号码格式不正确")
     private String contactPhone;
     @Valid
     @Size(max = 49)

@@ -21,6 +21,7 @@ import com.example.siteplatform.siteaccess.entity.SiteMeetingVisitPerson;
 import com.example.siteplatform.siteaccess.entity.SiteMeetingVisitRegistration;
 import com.example.siteplatform.siteaccess.entity.SiteVisitInvitation;
 import com.example.siteplatform.siteaccess.mapper.SiteMeetingVisitAuditLogMapper;
+import com.example.siteplatform.siteaccess.mapper.SiteMeetingAttendanceMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteMeetingVisitPersonMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteMeetingVisitRegistrationMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteVisitInvitationMapper;
@@ -79,6 +80,7 @@ public class MeetingVisitService {
     private final SiteMeetingVisitRegistrationMapper registrationMapper;
     private final SiteMeetingVisitPersonMapper personMapper;
     private final SiteMeetingVisitAuditLogMapper auditMapper;
+    private final SiteMeetingAttendanceMapper attendanceMapper;
     private final SiteVisitInvitationMapper invitationMapper;
     private final ProjectInfoMapper projectMapper;
     private final ProjectPermissionService permissionService;
@@ -86,6 +88,7 @@ public class MeetingVisitService {
     private final VisitorDataCryptoService cryptoService;
     private final VisitorSessionService sessionService;
     private final VisitorProfileService profileService;
+    private final VisitorPersonalProfileService personalProfileService;
     private final SiteAccessService siteAccessService;
     private final RedisRateLimitService rateLimitService;
     private final OperationLogMapper operationLogMapper;
@@ -95,6 +98,7 @@ public class MeetingVisitService {
     public MeetingVisitService(SiteMeetingVisitRegistrationMapper registrationMapper,
                                SiteMeetingVisitPersonMapper personMapper,
                                SiteMeetingVisitAuditLogMapper auditMapper,
+                               SiteMeetingAttendanceMapper attendanceMapper,
                                SiteVisitInvitationMapper invitationMapper,
                                ProjectInfoMapper projectMapper,
                                ProjectPermissionService permissionService,
@@ -102,6 +106,7 @@ public class MeetingVisitService {
                                VisitorDataCryptoService cryptoService,
                                VisitorSessionService sessionService,
                                VisitorProfileService profileService,
+                               VisitorPersonalProfileService personalProfileService,
                                SiteAccessService siteAccessService,
                                RedisRateLimitService rateLimitService,
                                OperationLogMapper operationLogMapper,
@@ -110,6 +115,7 @@ public class MeetingVisitService {
         this.registrationMapper = registrationMapper;
         this.personMapper = personMapper;
         this.auditMapper = auditMapper;
+        this.attendanceMapper = attendanceMapper;
         this.invitationMapper = invitationMapper;
         this.projectMapper = projectMapper;
         this.permissionService = permissionService;
@@ -117,6 +123,7 @@ public class MeetingVisitService {
         this.cryptoService = cryptoService;
         this.sessionService = sessionService;
         this.profileService = profileService;
+        this.personalProfileService = personalProfileService;
         this.siteAccessService = siteAccessService;
         this.rateLimitService = rateLimitService;
         this.operationLogMapper = operationLogMapper;
@@ -156,6 +163,7 @@ public class MeetingVisitService {
         vo.setPageState(active == null ? PAGE_FORM : PAGE_REGISTERED);
         vo.setInvitation(publicInvitation);
         if (active != null) vo.setRegistration(toPass(active, invitation, project, LocalDateTime.now()));
+        else vo.setPersonalInfo(personalProfileService.read(context));
         // The WeChat exchange and pass assembly can take measurable time. Check the
         // latest deadline again while the invitation row is still locked so an event
         // that expired during this request never returns a stale pass or navigation.
@@ -194,6 +202,15 @@ public class MeetingVisitService {
                 context, request.getProfileAction(), request.getProfileCode(), request.getProfileName(),
                 request.getProfileRetentionAgreed(), request.getProfileVersion(), toProfileSubmission(submission));
 
+        personalProfileService.saveOnSubmission(context, request.getRememberInfo(), submission);
+        SiteMeetingVisitRegistration registration = createRegistration(invitation, context, submission, sourceProfileId, now);
+        return toPass(registration, invitation, project, now);
+    }
+
+    private SiteMeetingVisitRegistration createRegistration(SiteVisitInvitation invitation,
+            VisitorSessionService.VisitorSessionContext context, VisitorSubmissionNormalizer.Submission submission,
+            Long sourceProfileId, LocalDateTime now) {
+        String identityHash = meetingIdentityHash(context);
         SiteMeetingVisitRegistration registration = new SiteMeetingVisitRegistration();
         registration.setRegistrationNo(generateRegistrationNo(now));
         registration.setInvitationId(invitation.getId());
@@ -201,6 +218,7 @@ public class MeetingVisitService {
         registration.setWechatAppId(context.appId());
         registration.setVisitorIdentityHash(identityHash);
         registration.setStatus(STATUS_REGISTERED);
+        registration.setRegistrationSource(MeetingCheckinService.SOURCE_INVITATION);
         applySubmission(registration, submission);
         registration.setSourceProfileId(sourceProfileId);
         registration.setPrivacyAgreedTime(now);
@@ -214,12 +232,30 @@ public class MeetingVisitService {
         } catch (DuplicateKeyException duplicate) {
             SiteMeetingVisitRegistration raced = registrationMapper.selectActiveForUpdate(
                     invitation.getId(), context.appId(), identityHash);
-            if (raced != null) return toPass(raced, invitation, project, now);
+            if (raced != null) return raced;
             throw stateConflict("会议访客登记冲突，请重试");
         }
         replacePeople(registration, submission);
         writeAudit(registration, "REGISTER", null, null, snapshot(registration), "访客扫码完成会议登记");
-        return toPass(registration, invitation, project, now);
+        return registration;
+    }
+
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public SiteMeetingVisitRegistration registerFromGuard(VisitorSessionService.VisitorSessionContext context,
+            GuardMeetingChoiceService.Choice choice, VisitorSubmissionNormalizer.Submission submission, Long sourceProfileId) {
+        if (!VisitorSessionService.SOURCE_GUARD_QR.equals(context.effectiveSourceType()))
+            throw BusinessException.of(403, "当前会话不能进行门卫会议预约");
+        SiteVisitInvitation invitation = invitationMapper.selectForUpdate(choice.invitationId());
+        validateOpen(invitation);
+        LocalDateTime now = LocalDateTime.now(java.time.ZoneId.of("Asia/Shanghai"));
+        if (!Objects.equals(invitation.getProjectId(), context.projectId())) throw BusinessException.of(403, "会议不属于当前项目");
+        if (!Objects.equals(invitation.getVersion(), choice.version())
+                || !invitation.getVisitStartTime().isBefore(now.toLocalDate().plusDays(7).atStartOfDay()))
+            throw BusinessException.of(409, "会议已调整，请刷新列表后重新选择");
+        SiteMeetingVisitRegistration existing = registrationMapper.selectActiveForUpdate(
+                invitation.getId(), context.appId(), meetingIdentityHash(context));
+        if (existing != null) return existing;
+        return createRegistration(invitation, context, submission, sourceProfileId, now);
     }
 
     public List<SiteVisitorProfileVO> publicProfiles(String token) {
@@ -273,6 +309,7 @@ public class MeetingVisitService {
         SiteVisitInvitation invitation = requireMeetingInvitation(registration.getInvitationId(), true);
         validateOpen(invitation);
         if (!STATUS_REGISTERED.equals(registration.getStatus())) throw stateConflict("已作废登记不能纠错");
+        ensureNoActiveAttendance(registration.getId());
         requireVersion(registration, request.getVersion());
         VisitorSubmissionNormalizer.Submission submission = VisitorSubmissionNormalizer.normalize(
                 request.getVisitorCompany(), request.getContactName(), request.getContactPhone(),
@@ -298,6 +335,7 @@ public class MeetingVisitService {
         SiteVisitInvitation invitation = requireMeetingInvitation(registration.getInvitationId(), true);
         validateOpen(invitation);
         if (STATUS_VOIDED.equals(registration.getStatus())) throw stateConflict("会议访客登记已经作废");
+        ensureNoActiveAttendance(registration.getId());
         requireVersion(registration, expectedVersion);
         String normalizedReason = VisitorSubmissionNormalizer.requiredText(reason, 300, "作废原因");
         Map<String, Object> before = snapshot(registration);
@@ -617,7 +655,7 @@ public class MeetingVisitService {
                                  Map<Long, List<SiteMeetingVisitPerson>> people,
                                  Map<Long, SiteVisitInvitation> invitations) {
         String[] headers = {"项目", "会议邀请编号", "会议主题", "会议开始", "会议截止", "登记编号",
-                "单位", "人员类型", "姓名", "手机号", "出行方式", "车牌号", "接待人", "登记时间", "状态"};
+                "单位", "人员类型", "姓名", "手机号码", "出行方式", "车牌号", "接待人", "登记时间", "状态"};
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet("会议访客登记");
             sheet.createFreezePane(0, 1);
@@ -644,7 +682,7 @@ public class MeetingVisitService {
                             text(project.getProjectName()), text(invitation.getInviteNo()), text(invitation.getPurpose()),
                             format(invitation.getVisitStartTime()), format(invitation.getVisitEndTime()),
                             text(registration.getRegistrationNo()), text(person.getPersonCompany()),
-                            VisitorSubmissionNormalizer.PERSON_CONTACT.equals(person.getPersonType()) ? "主联系人" : "同行人员",
+                            VisitorSubmissionNormalizer.PERSON_CONTACT.equals(person.getPersonType()) ? "本人" : "同行人员",
                             text(person.getPersonName()), text(cryptoService.decrypt(person.getPhoneEncrypted())),
                             VisitorSubmissionNormalizer.TRAVEL_DRIVING.equals(registration.getTravelMode()) ? "驾车" : "非驾车",
                             text(registration.getVehiclePlate()), text(invitation.getHostName()),
@@ -788,6 +826,12 @@ public class MeetingVisitService {
     private void requireVersion(SiteMeetingVisitRegistration registration, Integer expectedVersion) {
         if (expectedVersion == null || !Objects.equals(versionOf(registration), expectedVersion)) {
             throw stateConflict("会议访客登记已更新，请刷新后重试");
+        }
+    }
+
+    private void ensureNoActiveAttendance(Long registrationId) {
+        if (attendanceMapper.countCheckedInByRegistration(registrationId) > 0) {
+            throw stateConflict("该登记组已有有效签到，请先逐人撤销签到后再纠错或作废");
         }
     }
 

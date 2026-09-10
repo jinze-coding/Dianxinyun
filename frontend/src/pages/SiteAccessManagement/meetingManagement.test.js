@@ -11,6 +11,8 @@ import {
 
 const pageSource = readFileSync(new URL('./index.jsx', import.meta.url), 'utf8');
 const panelSource = readFileSync(new URL('./MeetingRegistrationPanel.jsx', import.meta.url), 'utf8');
+const checkinSource = readFileSync(new URL('./MeetingCheckinPanel.jsx', import.meta.url), 'utf8');
+const siteAccessServiceSource = readFileSync(new URL('../../services/siteAccess.js', import.meta.url), 'utf8');
 const guardSource = readFileSync(new URL('./GuardVisitPanel.jsx', import.meta.url), 'utf8');
 const baseStyles = readFileSync(new URL('./index.css', import.meta.url), 'utf8');
 const meetingStyles = readFileSync(new URL('./meetingVisits.css', import.meta.url), 'utf8');
@@ -82,4 +84,59 @@ test('visitor detail views share a wide readable layout across invitations and g
   assert.match(meetingStyles, /min-width:\s*980px/);
   assert.match(meetingStyles, /white-space:\s*normal/);
   assert.match(meetingStyles, /font-size:\s*14px/);
+});
+
+test('meeting detail explains the complete reservation and venue check-in loop', () => {
+  assert.match(panelSource, /创建会议/);
+  assert.match(panelSource, /分享邀请/);
+  assert.match(panelSource, /预约登记/);
+  assert.match(panelSource, /会场签到/);
+  assert.match(panelSource, /导出名单/);
+  assert.match(panelSource, /预约登记管理/);
+  assert.match(panelSource, /会场签到管理/);
+  assert.match(meetingStyles, /\.meeting-closed-loop/);
+  assert.match(meetingStyles, /\.meeting-workbench-tabs/);
+});
+
+test('venue workbench exposes settings statistics evidence and controlled staff actions', () => {
+  assert.match(checkinSource, /loadRequestGuardRef/);
+  assert.match(checkinSource, /mutationRequestGuardRef/);
+  assert.match(checkinSource, /exportRequestGuardRef/);
+  assert.match(checkinSource, /meetingRequestContext\(projectId, invitation\.id\)/);
+  assert.match(checkinSource, /会场签到工作台/);
+  assert.match(checkinSource, /预约人数/);
+  assert.match(checkinSource, /预约已签到/);
+  assert.match(checkinSource, /预约未签到/);
+  assert.match(checkinSource, /现场补录/);
+  assert.match(checkinSource, /预约签到率/);
+  assert.match(checkinSource, /定位异常仅标识，不阻断签到/);
+  assert.match(checkinSource, /人工补签/);
+  assert.match(checkinSource, /撤销签到/);
+  assert.match(checkinSource, /更正参会人员/);
+  assert.match(checkinSource, /导出签到名单/);
+});
+
+test('Web service routes keep invitation qr and attendance export distinct', () => {
+  assert.match(siteAccessServiceSource, /meeting-check-in\/settings/);
+  assert.match(siteAccessServiceSource, /meeting-check-in\/mini-code/);
+  assert.match(siteAccessServiceSource, /meeting-attendees\/walk-ins/);
+  assert.match(siteAccessServiceSource, /meeting-attendance\/export/);
+});
+
+test('invitation list leads with the topic while keeping reference numbers outside the list', () => {
+  const invitationTableSource = pageSource.slice(
+    pageSource.indexOf('<section className="site-access-table-card">'),
+    pageSource.indexOf('<div className="site-access-pagination">'),
+  );
+
+  assert.match(pageSource, /placeholder="邀请主题\/来访事由、邀请编号、单位、姓名、车牌、接待人"/);
+  assert.match(invitationTableSource, /邀请主题 \/ 类型/);
+  assert.match(invitationTableSource, /const invitationTopic = String\(item\.purpose \|\| ''\)\.trim\(\) \|\| '未填写主题'/);
+  assert.match(invitationTableSource, /className="link site-access-invitation-topic"/);
+  assert.match(invitationTableSource, /title=\{invitationTopic\}/);
+  assert.match(invitationTableSource, />\{invitationTopic\}<\/button>/);
+  assert.doesNotMatch(invitationTableSource, /\{item\.inviteNo\}/);
+  assert.match(pageSource, /<strong>\{detail\.inviteNo\}<\/strong>/);
+  assert.match(baseStyles, /\.site-access-page button\.site-access-invitation-topic\s*\{[^}]*-webkit-line-clamp:\s*2/s);
+  assert.match(baseStyles, /\.site-access-page button\.site-access-invitation-topic\s*\{[^}]*overflow-wrap:\s*anywhere/s);
 });

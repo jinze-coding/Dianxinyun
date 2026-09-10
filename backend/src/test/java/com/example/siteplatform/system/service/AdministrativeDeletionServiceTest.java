@@ -241,9 +241,12 @@ class AdministrativeDeletionServiceTest {
         when(jdbc.query(org.mockito.ArgumentMatchers.argThat(
                         sql -> sql != null && sql.contains("SELECT id FROM site_meeting_visit_registration")),
                 any(RowMapper.class), any(Object[].class))).thenReturn(List.of(501L));
+        when(jdbc.update("DELETE FROM site_guard_meeting_registration WHERE invitation_id = ?", 92L)).thenReturn(1);
+        when(jdbc.update("DELETE FROM site_meeting_attendance WHERE invitation_id = ?", 92L)).thenReturn(2);
         when(jdbc.update("DELETE FROM `site_meeting_visit_person` WHERE `registration_id` IN (?)", 501L))
                 .thenReturn(2);
         when(jdbc.update("DELETE FROM site_meeting_visit_audit_log WHERE invitation_id = ?", 92L)).thenReturn(0);
+        when(jdbc.update("DELETE FROM site_meeting_checkin_qr WHERE invitation_id = ?", 92L)).thenReturn(1);
         when(jdbc.update("DELETE FROM site_meeting_visit_registration WHERE invitation_id = ?", 92L)).thenReturn(0);
         when(jdbc.update("DELETE FROM site_visit_person WHERE invitation_id = ?", 92L)).thenReturn(2);
         when(jdbc.update("DELETE FROM site_visit_audit_log WHERE invitation_id = ?", 92L)).thenReturn(3);
@@ -261,8 +264,11 @@ class AdministrativeDeletionServiceTest {
         service.execute(execute, operator);
 
         InOrder order = inOrder(jdbc);
+        order.verify(jdbc).update("DELETE FROM site_guard_meeting_registration WHERE invitation_id = ?", 92L);
+        order.verify(jdbc).update("DELETE FROM site_meeting_attendance WHERE invitation_id = ?", 92L);
         order.verify(jdbc).update("DELETE FROM `site_meeting_visit_person` WHERE `registration_id` IN (?)", 501L);
         order.verify(jdbc).update("DELETE FROM site_meeting_visit_audit_log WHERE invitation_id = ?", 92L);
+        order.verify(jdbc).update("DELETE FROM site_meeting_checkin_qr WHERE invitation_id = ?", 92L);
         order.verify(jdbc).update("DELETE FROM site_meeting_visit_registration WHERE invitation_id = ?", 92L);
         order.verify(jdbc).update("DELETE FROM site_visit_person WHERE invitation_id = ?", 92L);
         order.verify(jdbc).update("DELETE FROM site_visit_audit_log WHERE invitation_id = ?", 92L);

@@ -40,6 +40,7 @@ export interface SiteVisitCompanionInput {
 }
 
 export interface PublicSiteVisitSubmitPayload {
+  rememberInfo?: boolean;
   inviteToken: string;
   visitorCompany: string;
   contactName: string;
@@ -56,7 +57,18 @@ export interface PublicSiteVisitSubmitPayload {
   profileVersion?: number;
 }
 
+export interface VisitorPersonalInfo {
+  rememberInfo: boolean;
+  available: boolean;
+  visitorCompany?: string;
+  contactName?: string;
+  contactPhone?: string;
+  travelMode?: 'DRIVING' | 'OTHER';
+  vehiclePlate?: string;
+}
+
 export interface PublicVisitorSession {
+  personalInfo?: VisitorPersonalInfo;
   visitorSessionToken: string;
   expiresInSeconds: number;
 }
@@ -76,14 +88,39 @@ export interface PublicGuardVisitPass {
   serverTime: string;
 }
 
+export interface PublicGuardMatchedPass {
+  sourceType: 'SINGLE' | 'MEETING';
+  sourceNo: string;
+  subject: string;
+  visitorCompany: string;
+  contactName: string;
+  visitorCount: number;
+  travelMode: 'DRIVING' | 'OTHER';
+  vehiclePlate?: string;
+  visitStartTime: string;
+  validUntil: string;
+  people: Array<{ personType: string; personCompany?: string; personName?: string }>;
+}
+
+export interface PublicGuardMeetingChoice {
+  choiceToken: string;
+  title: string;
+  visitStartTime: string;
+  visitEndTime: string;
+  location: string;
+  registered: boolean;
+}
+
 export interface PublicGuardVisitorSession extends PublicVisitorSession {
-  pageState: 'FORM' | 'REGISTERED';
+  pageState: 'FORM' | 'REGISTERED' | 'MATCHED';
+  matchedPasses: PublicGuardMatchedPass[];
+  serverTime: string;
   projectName: string;
   projectShortName?: string;
   registration?: PublicGuardVisitPass;
 }
 
-export type PublicGuardVisitSubmitPayload = Omit<PublicSiteVisitSubmitPayload, 'inviteToken'>;
+export type PublicGuardVisitSubmitPayload = Omit<PublicSiteVisitSubmitPayload, 'inviteToken'> & { meetingChoiceTokens?: string[] };
 
 export interface PublicMeetingVisitPass {
   registrationNo: string;
@@ -114,6 +151,71 @@ export interface PublicMeetingVisitorSession extends PublicVisitorSession {
 }
 
 export type PublicMeetingVisitSubmitPayload = Omit<PublicSiteVisitSubmitPayload, 'inviteToken'>;
+
+export interface PublicMeetingCheckinMeeting {
+  inviteNo: string;
+  projectName: string;
+  projectShortName?: string;
+  purpose: string;
+  visitLocation: string;
+  hostName: string;
+  visitStartTime: string;
+  visitEndTime: string;
+  checkinStartTime: string;
+  checkinEndTime: string;
+  locationRadiusMeters: number;
+  projectLocationAvailable: boolean;
+  serverTime: string;
+}
+
+export interface PublicMeetingCheckinAttendee {
+  personId: number;
+  personType: 'CONTACT' | 'COMPANION';
+  personCompany?: string;
+  personName?: string;
+  sortOrder: number;
+  attendanceStatus: 'PENDING' | 'CHECKED_IN' | 'REVOKED';
+  checkinTime?: string;
+}
+
+export interface PublicMeetingCheckinSession extends PublicVisitorSession {
+  pageState: 'WALK_IN_FORM' | 'RESERVED_PENDING' | 'RESERVED_PARTIAL' | 'COMPLETED';
+  meeting: PublicMeetingCheckinMeeting;
+  registrationNo?: string;
+  registrationSource?: 'INVITATION' | 'WALK_IN';
+  attendees: PublicMeetingCheckinAttendee[];
+}
+
+export interface MeetingCheckinLocationPayload {
+  locationAvailable: boolean;
+  latitude?: number;
+  longitude?: number;
+  accuracyMeters?: number;
+}
+
+export interface PublicMeetingCheckinReceipt {
+  registrationNo: string;
+  registrationSource: 'INVITATION' | 'WALK_IN';
+  checkedInCount: number;
+  pendingCount: number;
+  locationResult: 'IN_RANGE' | 'OUT_OF_RANGE' | 'UNAVAILABLE' | 'NO_REFERENCE' | 'MANUAL';
+  distanceMeters?: number;
+  accuracyMeters?: number;
+  serverTime: string;
+  attendees: PublicMeetingCheckinAttendee[];
+}
+
+export interface PublicMeetingCheckinWalkInPayload {
+  visitorCompany: string;
+  contactName: string;
+  contactPhone: string;
+  companions: SiteVisitCompanionInput[];
+  travelMode: 'DRIVING' | 'OTHER';
+  vehiclePlate?: string;
+  visitorRemark?: string;
+  privacyAgreed: boolean;
+  location: MeetingCheckinLocationPayload;
+}
 
 export interface SiteVisitorProfilePerson {
   personType: 'CONTACT' | 'COMPANION';
@@ -406,6 +508,18 @@ export function createPublicGuardVisitorSession(sceneToken: string, wechatCode: 
   });
 }
 
+export function refreshPublicGuardState(visitorSessionToken: string) {
+  return request<PublicGuardVisitorSession>('/public/site-access/guard/state', {
+    method: 'POST', data: {}, header: visitorSessionHeader(visitorSessionToken), skipAuthRedirect: true
+  });
+}
+
+export function getPublicGuardMeetings(visitorSessionToken: string) {
+  return request<PublicGuardMeetingChoice[]>('/public/site-access/guard/meetings', {
+    method: 'POST', data: {}, header: visitorSessionHeader(visitorSessionToken), skipAuthRedirect: true
+  });
+}
+
 export function createPublicMeetingVisitorSession(inviteToken: string, wechatCode: string) {
   return request<PublicMeetingVisitorSession>('/public/site-access/meeting/session', {
     method: 'POST', data: { inviteToken, wechatCode }, skipAuthRedirect: true
@@ -433,6 +547,51 @@ export function getPublicMeetingVisitorProfile(visitorSessionToken: string, prof
 
 export function disablePublicMeetingVisitorProfile(visitorSessionToken: string, profileCode: string) {
   return request<void>('/public/site-access/meeting/profiles/disable', {
+    method: 'POST', data: { profileCode }, header: visitorSessionHeader(visitorSessionToken), skipAuthRedirect: true
+  });
+}
+
+export function createPublicMeetingCheckinSession(sceneToken: string, wechatCode: string) {
+  return request<PublicMeetingCheckinSession>('/public/site-access/meeting-check-in/session', {
+    method: 'POST', data: { sceneToken, wechatCode }, skipAuthRedirect: true
+  });
+}
+
+export function confirmPublicMeetingCheckin(
+  attendees: Array<{ personId: number; completedName?: string }>,
+  location: MeetingCheckinLocationPayload,
+  visitorSessionToken: string
+) {
+  return request<PublicMeetingCheckinReceipt>('/public/site-access/meeting-check-in/confirm', {
+    method: 'POST', data: { attendees, location }, header: visitorSessionHeader(visitorSessionToken),
+    skipAuthRedirect: true, timeout: 30000
+  });
+}
+
+export function submitPublicMeetingCheckinWalkIn(
+  payload: PublicMeetingCheckinWalkInPayload,
+  visitorSessionToken: string
+) {
+  return request<PublicMeetingCheckinReceipt>('/public/site-access/meeting-check-in/walk-in', {
+    method: 'POST', data: payload, header: visitorSessionHeader(visitorSessionToken),
+    skipAuthRedirect: true, timeout: 30000
+  });
+}
+
+export function getPublicMeetingCheckinProfiles(visitorSessionToken: string) {
+  return request<SiteVisitorProfile[]>('/public/site-access/meeting-check-in/profiles/list', {
+    method: 'POST', data: {}, header: visitorSessionHeader(visitorSessionToken), skipAuthRedirect: true
+  });
+}
+
+export function getPublicMeetingCheckinProfile(visitorSessionToken: string, profileCode: string) {
+  return request<SiteVisitorProfile>('/public/site-access/meeting-check-in/profiles/detail', {
+    method: 'POST', data: { profileCode }, header: visitorSessionHeader(visitorSessionToken), skipAuthRedirect: true
+  });
+}
+
+export function disablePublicMeetingCheckinProfile(visitorSessionToken: string, profileCode: string) {
+  return request<void>('/public/site-access/meeting-check-in/profiles/disable', {
     method: 'POST', data: { profileCode }, header: visitorSessionHeader(visitorSessionToken), skipAuthRedirect: true
   });
 }

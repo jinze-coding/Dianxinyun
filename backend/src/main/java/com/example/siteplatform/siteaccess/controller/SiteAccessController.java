@@ -12,13 +12,24 @@ import com.example.siteplatform.siteaccess.dto.SiteGuardVisitQrStatusRequest;
 import com.example.siteplatform.siteaccess.dto.SiteGuardVisitRegistrationUpdateRequest;
 import com.example.siteplatform.siteaccess.dto.SiteMeetingVisitRegistrationUpdateRequest;
 import com.example.siteplatform.siteaccess.dto.SiteMeetingVisitRegistrationVoidRequest;
+import com.example.siteplatform.siteaccess.dto.SiteMeetingAttendanceActionRequest;
+import com.example.siteplatform.siteaccess.dto.SiteMeetingAttendeeUpdateRequest;
+import com.example.siteplatform.siteaccess.dto.SiteMeetingCheckinRotateRequest;
+import com.example.siteplatform.siteaccess.dto.SiteMeetingCheckinSettingsUpdateRequest;
+import com.example.siteplatform.siteaccess.dto.SiteMeetingCheckinStatusRequest;
+import com.example.siteplatform.siteaccess.dto.SiteMeetingWalkInCreateRequest;
 import com.example.siteplatform.siteaccess.service.GuardVisitService;
 import com.example.siteplatform.siteaccess.service.MeetingVisitService;
+import com.example.siteplatform.siteaccess.service.MeetingCheckinService;
 import com.example.siteplatform.siteaccess.service.SiteAccessService;
 import com.example.siteplatform.siteaccess.vo.SiteGuardVisitMiniCodeVO;
 import com.example.siteplatform.siteaccess.vo.SiteGuardVisitQrVO;
 import com.example.siteplatform.siteaccess.vo.SiteGuardVisitRegistrationVO;
 import com.example.siteplatform.siteaccess.vo.SiteMeetingVisitRegistrationVO;
+import com.example.siteplatform.siteaccess.vo.SiteMeetingAttendanceSummaryVO;
+import com.example.siteplatform.siteaccess.vo.SiteMeetingAttendeeVO;
+import com.example.siteplatform.siteaccess.vo.SiteMeetingCheckinMiniCodeVO;
+import com.example.siteplatform.siteaccess.vo.SiteMeetingCheckinSettingsVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitHostOptionVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitInvitationVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitMiniCodeVO;
@@ -49,13 +60,17 @@ public class SiteAccessController {
     private final SiteAccessService service;
     private final GuardVisitService guardVisitService;
     private final MeetingVisitService meetingVisitService;
+    private final MeetingCheckinService meetingCheckinService;
     private final AuthService authService;
 
     public SiteAccessController(SiteAccessService service, GuardVisitService guardVisitService,
-                                MeetingVisitService meetingVisitService, AuthService authService) {
+                                MeetingVisitService meetingVisitService,
+                                MeetingCheckinService meetingCheckinService,
+                                AuthService authService) {
         this.service = service;
         this.guardVisitService = guardVisitService;
         this.meetingVisitService = meetingVisitService;
+        this.meetingCheckinService = meetingCheckinService;
         this.authService = authService;
     }
 
@@ -211,6 +226,120 @@ public class SiteAccessController {
             @RequestHeader(value = "Authorization", required = false) String token) {
         MeetingVisitService.ExportFile file = meetingVisitService.export(projectId, invitationId, status,
                 meetingStatus, keyword, startDate, endDate, authService.getCurrentUser(token));
+        String fileName = URLEncoder.encode(file.fileName(), StandardCharsets.UTF_8).replace("+", "%20");
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + fileName)
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(file.content());
+    }
+
+    @GetMapping("/invitations/{id}/meeting-check-in/settings")
+    public Result<SiteMeetingCheckinSettingsVO> meetingCheckinSettings(
+            @PathVariable Long id,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(meetingCheckinService.settings(id, authService.getCurrentUser(token)));
+    }
+
+    @PutMapping("/invitations/{id}/meeting-check-in/settings")
+    public Result<SiteMeetingCheckinSettingsVO> updateMeetingCheckinSettings(
+            @PathVariable Long id,
+            @Valid @RequestBody SiteMeetingCheckinSettingsUpdateRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(meetingCheckinService.updateSettings(id, request, authService.getCurrentUser(token)));
+    }
+
+    @PostMapping("/invitations/{id}/meeting-check-in/status")
+    public Result<SiteMeetingCheckinSettingsVO> changeMeetingCheckinStatus(
+            @PathVariable Long id,
+            @Valid @RequestBody SiteMeetingCheckinStatusRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(meetingCheckinService.changeStatus(
+                id, request.getEnabled(), request.getVersion(), authService.getCurrentUser(token)));
+    }
+
+    @PostMapping("/invitations/{id}/meeting-check-in/rotate")
+    public Result<SiteMeetingCheckinSettingsVO> rotateMeetingCheckinQr(
+            @PathVariable Long id,
+            @Valid @RequestBody SiteMeetingCheckinRotateRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(meetingCheckinService.rotate(id, request.getVersion(), authService.getCurrentUser(token)));
+    }
+
+    @GetMapping("/invitations/{id}/meeting-check-in/mini-code")
+    public Result<SiteMeetingCheckinMiniCodeVO> meetingCheckinMiniCode(
+            @PathVariable Long id,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(meetingCheckinService.miniCode(id, authService.getCurrentUser(token)));
+    }
+
+    @GetMapping("/invitations/{id}/meeting-attendance/screen")
+    public Result<com.example.siteplatform.siteaccess.vo.MeetingAttendanceScreenVO> meetingScreen(
+            @PathVariable Long id, @RequestParam(defaultValue = "1") Integer pageNo,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(meetingCheckinService.screen(id, pageNo, authService.getCurrentUser(token)));
+    }
+
+    @GetMapping("/invitations/{id}/meeting-attendance/summary")
+    public Result<SiteMeetingAttendanceSummaryVO> meetingAttendanceSummary(
+            @PathVariable Long id,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(meetingCheckinService.summary(id, authService.getCurrentUser(token)));
+    }
+
+    @GetMapping("/invitations/{id}/meeting-attendees")
+    public Result<PageResult<SiteMeetingAttendeeVO>> meetingAttendees(
+            @PathVariable Long id,
+            @RequestParam(required = false) String registrationSource,
+            @RequestParam(required = false) String attendanceStatus,
+            @RequestParam(required = false) String locationResult,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "1") Integer pageNo,
+            @RequestParam(defaultValue = "20") Integer pageSize,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(meetingCheckinService.attendees(id, registrationSource, attendanceStatus,
+                locationResult, keyword, pageNo, pageSize, authService.getCurrentUser(token)));
+    }
+
+    @PostMapping("/invitations/{id}/meeting-attendees/walk-ins")
+    public Result<SiteMeetingAttendeeVO> createMeetingWalkIn(
+            @PathVariable Long id,
+            @Valid @RequestBody SiteMeetingWalkInCreateRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(meetingCheckinService.createManualWalkIn(id, request, authService.getCurrentUser(token)));
+    }
+
+    @PostMapping("/meeting-attendees/{personId}/manual-check-in")
+    public Result<SiteMeetingAttendeeVO> manualMeetingCheckIn(
+            @PathVariable Long personId,
+            @Valid @RequestBody SiteMeetingAttendanceActionRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(meetingCheckinService.manualCheckIn(personId, request, authService.getCurrentUser(token)));
+    }
+
+    @PostMapping("/meeting-attendees/{personId}/revoke")
+    public Result<SiteMeetingAttendeeVO> revokeMeetingCheckIn(
+            @PathVariable Long personId,
+            @Valid @RequestBody SiteMeetingAttendanceActionRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(meetingCheckinService.revoke(personId, request, authService.getCurrentUser(token)));
+    }
+
+    @PutMapping("/meeting-attendees/{personId}")
+    public Result<SiteMeetingAttendeeVO> updateMeetingAttendee(
+            @PathVariable Long personId,
+            @Valid @RequestBody SiteMeetingAttendeeUpdateRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(meetingCheckinService.updateAttendee(personId, request, authService.getCurrentUser(token)));
+    }
+
+    @GetMapping("/meeting-attendance/export")
+    public ResponseEntity<byte[]> exportMeetingAttendance(
+            @RequestParam Long projectId,
+            @RequestParam Long invitationId,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        MeetingCheckinService.ExportFile file = meetingCheckinService.export(
+                projectId, invitationId, authService.getCurrentUser(token));
         String fileName = URLEncoder.encode(file.fileName(), StandardCharsets.UTF_8).replace("+", "%20");
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + fileName)

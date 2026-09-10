@@ -10,4 +10,7 @@ public class PublicGuardVisitorSessionVO {
     private String projectName;
     private String projectShortName;
     private PublicGuardVisitPassVO registration;
+    private java.time.LocalDateTime serverTime;
+    private java.util.List<PublicGuardMatchedPassVO> matchedPasses = java.util.List.of();
+    private VisitorPersonalInfoVO personalInfo;
 }

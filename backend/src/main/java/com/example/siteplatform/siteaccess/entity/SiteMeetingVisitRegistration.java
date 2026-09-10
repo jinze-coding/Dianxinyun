@@ -19,6 +19,7 @@ public class SiteMeetingVisitRegistration {
     private String wechatAppId;
     private String visitorIdentityHash;
     private String status;
+    private String registrationSource;
     private String visitorCompany;
     private String contactName;
     private String contactPhoneEncrypted;

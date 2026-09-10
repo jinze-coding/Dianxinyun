@@ -107,9 +107,11 @@ class BusinessModulePermissionInterceptorTest {
                 Arguments.of("POST", "/api/v1/site-access/invitations", SystemPermissionCodes.SITE_ACCESS_MANAGE),
                 Arguments.of("PUT", "/api/v1/site-access/invitations/8", SystemPermissionCodes.SITE_ACCESS_MANAGE),
                 Arguments.of("GET", "/api/v1/site-access/invitations/8/mini-code", SystemPermissionCodes.SITE_ACCESS_MANAGE),
+                Arguments.of("GET", "/api/v1/site-access/invitations/8/meeting-check-in/mini-code", SystemPermissionCodes.SITE_ACCESS_MANAGE),
                 Arguments.of("GET", "/api/v1/site-access/guard/qr/8/mini-code", SystemPermissionCodes.SITE_ACCESS_MANAGE),
                 Arguments.of("GET", "/api/v1/site-access/visitors/export", SystemPermissionCodes.SITE_ACCESS_EXPORT),
                 Arguments.of("GET", "/api/v1/site-access/meeting-registrations/export", SystemPermissionCodes.SITE_ACCESS_EXPORT),
+                Arguments.of("GET", "/api/v1/site-access/meeting-attendance/export", SystemPermissionCodes.SITE_ACCESS_EXPORT),
                 Arguments.of("GET", "/api/v1/site-access/guard/registrations/export", SystemPermissionCodes.SITE_ACCESS_EXPORT)
         );
     }

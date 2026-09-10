@@ -4,6 +4,7 @@ import lombok.Data;
 
 @Data
 public class PublicMeetingVisitorSessionVO {
+    private VisitorPersonalInfoVO personalInfo;
     private String visitorSessionToken;
     private long expiresInSeconds;
     private String pageState;

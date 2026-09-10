@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref } from 'vue';
 import { onLoad, onShow, onUnload } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
+import { useVisitorPersonalInfo } from '@/utils/visitorPersonalInfo';
 import ProjectLocationCard from '@/components/ProjectLocationCard.vue';
 import {
   createPublicMeetingVisitorSession,
@@ -37,6 +38,8 @@ const contactPhone = ref('');
 const companions = ref<SiteVisitCompanionInput[]>([]);
 const travelMode = ref<'DRIVING' | 'OTHER'>('OTHER');
 const vehiclePlate = ref('');
+const { rememberInfo, personalInfoApplied, applyPersonalInfo, resetPersonalInfo, rememberChange } =
+  useVisitorPersonalInfo({ visitorCompany, contactName, contactPhone, travelMode, vehiclePlate });
 const visitorRemark = ref('');
 const privacyAgreed = ref(false);
 const profiles = ref<SiteVisitorProfile[]>([]);
@@ -102,6 +105,7 @@ async function performInitialize(keepForm: boolean) {
     }
     const session = await createPublicMeetingVisitorSession(token.value, await getFreshWechatCode());
     visitorSessionToken.value = session.visitorSessionToken;
+    applyPersonalInfo(session.personalInfo);
     invitation.value = session.invitation;
     pass.value = session.registration;
     syncClock(session.registration?.serverTime || session.invitation.serverTime);
@@ -148,12 +152,9 @@ async function chooseProfile(profile: SiteVisitorProfile) {
     visitorCompany.value = detail.visitorCompany || '';
     contactName.value = detail.contactName || '';
     contactPhone.value = detail.contactPhone || '';
-    companions.value = (detail.people || []).filter((person) => person.personType === 'COMPANION').map((person) => ({
-      personCompany: person.personCompany || '', personName: person.personName || '', personPhone: person.personPhone || ''
-    }));
     travelMode.value = detail.travelMode || 'OTHER';
     vehiclePlate.value = detail.vehiclePlate || '';
-    showToast('已带入常用资料，请核对本次信息');
+    showToast('已带入本人信息，同行人员请按本次来访填写');
   } catch (error) {
     showToast(error instanceof Error ? error.message : '常用资料加载失败');
   }
@@ -187,12 +188,12 @@ function hasCompanionContent(item: SiteVisitCompanionInput) {
 function validate() {
   if (expired.value) return '会议邀请已过期';
   if (!visitorSessionToken.value) return '微信身份会话已失效，请重新识别';
-  if (!visitorCompany.value.trim()) return '请填写外访单位';
-  if (!contactName.value.trim()) return '请填写主联系人姓名';
-  if (!/^1[3-9]\d{9}$/.test(contactPhone.value.trim())) return '请填写正确的手机号';
+  if (!visitorCompany.value.trim()) return '请填写单位';
+  if (!contactName.value.trim()) return '请填写姓名';
+  if (!/^1[3-9]\d{9}$/.test(contactPhone.value.trim())) return '请填写正确的手机号码';
   for (let index = 0; index < companions.value.length; index += 1) {
     const phone = companions.value[index].personPhone.trim();
-    if (phone && !/^1[3-9]\d{9}$/.test(phone)) return `请填写第${index + 1}位同行人员的正确手机号`;
+    if (phone && !/^1[3-9]\d{9}$/.test(phone)) return `请填写第${index + 1}位同行人员的正确手机号码`;
   }
   if (travelMode.value === 'DRIVING' && !vehiclePlate.value.trim()) return '驾车来访请填写车牌号';
   if (!privacyAgreed.value) return '请阅读并同意隐私告知';
@@ -215,6 +216,7 @@ async function submit() {
     vehiclePlate: travelMode.value === 'DRIVING' ? vehiclePlate.value.trim().toUpperCase() : undefined,
     visitorRemark: visitorRemark.value.trim() || undefined,
     privacyAgreed: true,
+    rememberInfo: rememberInfo.value,
     profileAction: savingProfile.value ? (selectedProfile.value ? 'UPDATE' : 'CREATE') : 'NONE',
     profileCode: selectedProfile.value?.profileCode,
     profileName: savingProfile.value ? profileName.value.trim() || undefined : undefined,
@@ -225,7 +227,7 @@ async function submit() {
     pass.value = await submitPublicMeetingVisit(payload, visitorSessionToken.value);
     syncClock(pass.value.serverTime);
     clearForm();
-    showToast('登记成功，请向门卫展示放行页');
+    showToast('预约登记成功，到场后请扫描会场签到码');
   } catch (error) {
     const submitErrorMessage = error instanceof Error ? error.message : '会议登记失败';
     await initialize(true);
@@ -281,6 +283,7 @@ function clearForm() {
   vehiclePlate.value = '';
   visitorRemark.value = '';
   privacyAgreed.value = false;
+  resetPersonalInfo();
 }
 
 function syncClock(serverTime?: string) {
@@ -349,7 +352,7 @@ onBeforeUnmount(cleanup);
         </view>
       </view>
 
-      <view v-if="pass" class="meeting-card pass-card"><text class="pass-check">✓</text><text class="pass-label">已登记 · 门卫放行</text><text class="pass-project">{{ pass.projectShortName || pass.projectName }}</text><view class="pass-current"><text>当前时间</text><text>{{ formatTime(currentTime, true) }}</text></view><view class="invite-grid"><text>登记编号</text><text>{{ pass.registrationNo }}</text><text>外访单位</text><text>{{ pass.visitorCompany }}</text><text>联系人</text><text>{{ pass.contactName }}</text><text>来访人数</text><text>{{ pass.visitorCount }} 人</text><text>车辆</text><text>{{ pass.travelMode === 'DRIVING' ? (pass.vehiclePlate || '驾车') : '非驾车' }}</text><text>登记时间</text><text>{{ formatTime(pass.registeredTime) }}</text><text>有效截止</text><text>{{ formatTime(pass.validUntil) }}</text></view><view class="pass-people"><text class="pass-people-title">本次登记人员</text><view v-for="(person, index) in pass.visitors" :key="`${person.personType}-${index}`" class="pass-person"><text>{{ person.personType === 'CONTACT' ? '主联系人' : `同行${index}` }}</text><text>{{ person.personName || '未填写姓名' }}{{ person.personCompany ? ` · ${person.personCompany}` : '' }}</text></view></view><text class="pass-hint">本凭证仅属于当前微信用户登记组；请向门卫出示本页。</text></view>
+      <view v-if="pass" class="meeting-card pass-card"><text class="pass-check">✓</text><text class="pass-label">已完成预约登记</text><text class="pass-project">{{ pass.projectShortName || pass.projectName }}</text><view class="pass-current"><text>当前时间</text><text>{{ formatTime(currentTime, true) }}</text></view><view class="invite-grid"><text>登记编号</text><text>{{ pass.registrationNo }}</text><text>单位</text><text>{{ pass.visitorCompany }}</text><text>姓名</text><text>{{ pass.contactName }}</text><text>来访人数</text><text>{{ pass.visitorCount }} 人</text><text>车辆</text><text>{{ pass.travelMode === 'DRIVING' ? (pass.vehiclePlate || '驾车') : '非驾车' }}</text><text>登记时间</text><text>{{ formatTime(pass.registeredTime) }}</text><text>有效截止</text><text>{{ formatTime(pass.validUntil) }}</text></view><view class="pass-people"><text class="pass-people-title">本次登记人员</text><view v-for="(person, index) in pass.visitors" :key="`${person.personType}-${index}`" class="pass-person"><text>{{ person.personType === 'CONTACT' ? '本人' : `同行${index}` }}</text><text>{{ person.personName || '未填写姓名' }}{{ person.personCompany ? ` · ${person.personCompany}` : '' }}</text></view></view><text class="pass-hint">已完成预约，到场后请扫描会场签到码，并逐人确认实际到场人员。</text></view>
 
       <template v-else>
         <view class="meeting-card profile-card">
@@ -369,17 +372,17 @@ onBeforeUnmount(cleanup);
         </view>
         <view class="meeting-card form-card">
           <view class="section-head"><text>登记信息</text><text>本人及同行人</text></view>
-          <label class="meeting-field"><text>外访单位 *</text><input v-model="visitorCompany" maxlength="200" placeholder="请输入单位名称" /></label>
-          <label class="meeting-field"><text>主联系人 *</text><input v-model="contactName" maxlength="50" placeholder="请输入姓名" /></label>
-          <label class="meeting-field"><text>手机号 *</text><input v-model="contactPhone" type="number" maxlength="11" placeholder="请输入手机号" /></label>
+          <label class="meeting-field"><text>单位 *</text><input v-model="visitorCompany" maxlength="200" placeholder="请输入单位名称" /></label>
+          <label class="meeting-field"><text>姓名 *</text><input v-model="contactName" maxlength="50" placeholder="请输入姓名" /></label>
+          <label class="meeting-field"><text>手机号码 *</text><input v-model="contactPhone" type="number" maxlength="11" placeholder="请输入手机号码" /></label>
 
           <view class="companion-head"><text>同行人员（{{ filledCompanionCount }}）</text><button :disabled="companions.length >= 49" @tap="addCompanion">添加</button></view>
-          <text v-if="!companions.length" class="field-hint">没有同行人员可不添加，主联系人已计入总人数。</text>
+          <text v-if="!companions.length" class="field-hint">没有同行人员可不添加，本人已计入总人数。</text>
           <view v-for="(person, index) in companions" :key="index" class="companion-card">
             <view class="companion-title"><text>同行人员 {{ index + 1 }}</text><button @tap="companions.splice(index, 1)">移除</button></view>
             <label class="meeting-field"><text>单位（选填）</text><input v-model="person.personCompany" maxlength="200" placeholder="请输入同行人员单位" /></label>
             <label class="meeting-field"><text>姓名（选填）</text><input v-model="person.personName" maxlength="50" placeholder="请输入同行人员姓名" /></label>
-            <label class="meeting-field"><text>手机号（选填）</text><input v-model="person.personPhone" type="number" maxlength="11" placeholder="填写时校验手机号格式" /></label>
+            <label class="meeting-field"><text>手机号码（选填）</text><input v-model="person.personPhone" type="number" maxlength="11" placeholder="填写时校验手机号码格式" /></label>
           </view>
           <text class="field-hint">本次已填写 {{ filledCompanionCount + 1 }} 人，最多登记50人；空白同行项不会保存。</text>
 
@@ -394,6 +397,8 @@ onBeforeUnmount(cleanup);
             <checkbox-group @change="profileSaveChange"><label class="check-row"><checkbox value="save" :checked="savingProfile" color="#315f86" /><text>保存为当前项目常用资料</text></label></checkbox-group>
             <label v-if="savingProfile" class="meeting-field"><text>常用资料名称</text><input v-model="profileName" maxlength="100" placeholder="例如：张三会议资料" /></label>
           </view>
+          <view class="personal-info-note" v-if="personalInfoApplied">已自动带入本人和车辆资料，请核对本次信息；同行人员另行填写。</view>
+          <checkbox-group class="remember-info-control" @change="rememberChange"><label><checkbox value="remember" :checked="rememberInfo" color="#315f86" /><text>记住本人和车辆信息，下次同项目扫码自动填写（提交后生效）</text></label></checkbox-group>
           <checkbox-group @change="privacyChange"><label class="check-row privacy"><checkbox value="agreed" :checked="privacyAgreed" color="#315f86" /><text>我已阅读并同意访客隐私告知，仅用于本次来访登记与门卫核验。</text></label></checkbox-group>
           <button class="submit-button" :disabled="submitting" @tap="submit">{{ submitting ? '正在登记...' : '提交登记并生成放行凭证' }}</button>
         </view>
@@ -763,4 +768,9 @@ onBeforeUnmount(cleanup);
 .state-card button::after {
   border: 0;
 }
+</style>
+
+<style scoped>
+.personal-info-note{padding:20rpx;margin:12rpx 0;border-radius:12rpx;background:#eef6ff;color:#285b83;font-size:25rpx;line-height:1.6}
+.remember-info-control{display:block;margin:24rpx 0;font-size:25rpx;color:#385366;line-height:1.7}.remember-info-control label{display:flex;align-items:flex-start;gap:10rpx}.remember-info-control text{flex:1;min-width:0}
 </style>

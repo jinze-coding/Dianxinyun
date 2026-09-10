@@ -13,6 +13,7 @@ import com.example.siteplatform.siteaccess.dto.PublicMeetingVisitorSessionReques
 import com.example.siteplatform.siteaccess.entity.SiteMeetingVisitRegistration;
 import com.example.siteplatform.siteaccess.entity.SiteVisitInvitation;
 import com.example.siteplatform.siteaccess.mapper.SiteMeetingVisitAuditLogMapper;
+import com.example.siteplatform.siteaccess.mapper.SiteMeetingAttendanceMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteMeetingVisitPersonMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteMeetingVisitRegistrationMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteVisitInvitationMapper;
@@ -45,6 +46,7 @@ class MeetingVisitServiceTest {
     @Mock private SiteMeetingVisitRegistrationMapper registrationMapper;
     @Mock private SiteMeetingVisitPersonMapper personMapper;
     @Mock private SiteMeetingVisitAuditLogMapper auditMapper;
+    @Mock private SiteMeetingAttendanceMapper attendanceMapper;
     @Mock private SiteVisitInvitationMapper invitationMapper;
     @Mock private ProjectInfoMapper projectMapper;
     @Mock private ProjectPermissionService permissionService;
@@ -52,6 +54,7 @@ class MeetingVisitServiceTest {
     @Mock private VisitorDataCryptoService cryptoService;
     @Mock private VisitorSessionService sessionService;
     @Mock private VisitorProfileService profileService;
+    @Mock private VisitorPersonalProfileService personalProfileService;
     @Mock private SiteAccessService siteAccessService;
     @Mock private RedisRateLimitService rateLimitService;
     @Mock private OperationLogMapper operationLogMapper;
@@ -61,9 +64,9 @@ class MeetingVisitServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new MeetingVisitService(registrationMapper, personMapper, auditMapper,
+        service = new MeetingVisitService(registrationMapper, personMapper, auditMapper, attendanceMapper,
                 invitationMapper, projectMapper, permissionService, routeImageService,
-                cryptoService, sessionService, profileService, siteAccessService,
+                cryptoService, sessionService, profileService, personalProfileService, siteAccessService,
                 rateLimitService, operationLogMapper, new ObjectMapper().findAndRegisterModules(),
                 transactionTemplate);
         lenient().when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
@@ -223,6 +226,24 @@ class MeetingVisitServiceTest {
         assertThatThrownBy(() -> service.voidRegistration(21L, "信息有误", 2, user))
                 .isInstanceOfSatisfying(BusinessException.class,
                         error -> assertThat(error.getCode()).isEqualTo(409));
+        verify(registrationMapper, never()).updateById(any());
+    }
+
+    @Test
+    void checkedInRegistrationMustRevokeAttendanceBeforeGroupVoid() {
+        SiteMeetingVisitRegistration existing = registration();
+        when(registrationMapper.selectForUpdate(21L)).thenReturn(existing);
+        when(invitationMapper.selectForUpdate(11L)).thenReturn(meeting(LocalDateTime.now().plusHours(2)));
+        when(attendanceMapper.countCheckedInByRegistration(21L)).thenReturn(1L);
+        SysUser user = new SysUser();
+        user.setId(8L);
+        user.setUsername("manager");
+
+        assertThatThrownBy(() -> service.voidRegistration(21L, "信息有误", 3, user))
+                .isInstanceOfSatisfying(BusinessException.class, error -> {
+                    assertThat(error.getCode()).isEqualTo(409);
+                    assertThat(error.getMessage()).contains("先逐人撤销签到");
+                });
         verify(registrationMapper, never()).updateById(any());
     }
 

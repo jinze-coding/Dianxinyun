@@ -161,7 +161,7 @@ class VisitorLegacyReencryptionToolTest {
 
         assertThatThrownBy(() -> tool().execute())
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("手机号格式不正确");
+                .hasMessageContaining("手机号码格式不正确");
         assertThat(store.replaceCalls).isZero();
 
         store.cells.clear();

@@ -13,6 +13,9 @@ import com.example.siteplatform.siteaccess.dto.PublicGuardProjectProfileRequest;
 import com.example.siteplatform.siteaccess.dto.PublicGuardVisitorSessionRequest;
 import com.example.siteplatform.siteaccess.dto.PublicMeetingVisitorSessionRequest;
 import com.example.siteplatform.siteaccess.dto.PublicMeetingVisitSubmitRequest;
+import com.example.siteplatform.siteaccess.dto.PublicMeetingCheckinConfirmRequest;
+import com.example.siteplatform.siteaccess.dto.PublicMeetingCheckinSessionRequest;
+import com.example.siteplatform.siteaccess.dto.PublicMeetingCheckinWalkInRequest;
 import com.example.siteplatform.siteaccess.dto.PublicSiteVisitResolveRequest;
 import com.example.siteplatform.siteaccess.dto.PublicSiteVisitSubmitRequest;
 import com.example.siteplatform.siteaccess.dto.PublicVisitorProfileRequest;
@@ -20,10 +23,13 @@ import com.example.siteplatform.siteaccess.dto.PublicVisitorSessionCreateRequest
 import com.example.siteplatform.siteaccess.service.SiteAccessService;
 import com.example.siteplatform.siteaccess.service.GuardVisitService;
 import com.example.siteplatform.siteaccess.service.MeetingVisitService;
+import com.example.siteplatform.siteaccess.service.MeetingCheckinService;
 import com.example.siteplatform.siteaccess.vo.PublicGuardVisitPassVO;
 import com.example.siteplatform.siteaccess.vo.PublicGuardVisitorSessionVO;
 import com.example.siteplatform.siteaccess.vo.PublicMeetingVisitorSessionVO;
 import com.example.siteplatform.siteaccess.vo.PublicMeetingVisitPassVO;
+import com.example.siteplatform.siteaccess.vo.PublicMeetingCheckinReceiptVO;
+import com.example.siteplatform.siteaccess.vo.PublicMeetingCheckinSessionVO;
 import com.example.siteplatform.siteaccess.vo.PublicSiteVisitInvitationVO;
 import com.example.siteplatform.siteaccess.vo.PublicVisitorSessionVO;
 import com.example.siteplatform.siteaccess.vo.SiteVisitorProfileVO;
@@ -47,12 +53,15 @@ public class PublicSiteAccessController {
     private final SiteAccessService service;
     private final GuardVisitService guardVisitService;
     private final MeetingVisitService meetingVisitService;
+    private final MeetingCheckinService meetingCheckinService;
 
     public PublicSiteAccessController(SiteAccessService service, GuardVisitService guardVisitService,
-                                      MeetingVisitService meetingVisitService) {
+                                      MeetingVisitService meetingVisitService,
+                                      MeetingCheckinService meetingCheckinService) {
         this.service = service;
         this.guardVisitService = guardVisitService;
         this.meetingVisitService = meetingVisitService;
+        this.meetingCheckinService = meetingCheckinService;
     }
 
     @PostMapping("/project-profile")
@@ -190,10 +199,63 @@ public class PublicSiteAccessController {
         return Result.success();
     }
 
+    @PostMapping("/meeting-check-in/session")
+    public Result<PublicMeetingCheckinSessionVO> createMeetingCheckinSession(
+            @Valid @RequestBody PublicMeetingCheckinSessionRequest request) {
+        return Result.success(meetingCheckinService.createPublicSession(request));
+    }
+
+    @PostMapping("/meeting-check-in/confirm")
+    public Result<PublicMeetingCheckinReceiptVO> confirmMeetingCheckin(
+            @Valid @RequestBody PublicMeetingCheckinConfirmRequest request,
+            @RequestHeader("X-Visitor-Session") String visitorSessionToken) {
+        return Result.success(meetingCheckinService.confirmPublic(request, visitorSessionToken));
+    }
+
+    @PostMapping("/meeting-check-in/walk-in")
+    public Result<PublicMeetingCheckinReceiptVO> createMeetingCheckinWalkIn(
+            @Valid @RequestBody PublicMeetingCheckinWalkInRequest request,
+            @RequestHeader("X-Visitor-Session") String visitorSessionToken) {
+        return Result.success(meetingCheckinService.walkInPublic(request, visitorSessionToken));
+    }
+
+    @PostMapping("/meeting-check-in/profiles/list")
+    public Result<List<SiteVisitorProfileVO>> meetingCheckinProfiles(
+            @RequestHeader("X-Visitor-Session") String visitorSessionToken) {
+        return Result.success(meetingCheckinService.publicProfiles(visitorSessionToken));
+    }
+
+    @PostMapping("/meeting-check-in/profiles/detail")
+    public Result<SiteVisitorProfileVO> meetingCheckinProfileDetail(
+            @Valid @RequestBody PublicVisitorProfileRequest request,
+            @RequestHeader("X-Visitor-Session") String visitorSessionToken) {
+        return Result.success(meetingCheckinService.publicProfile(visitorSessionToken, request.getProfileCode()));
+    }
+
+    @PostMapping("/meeting-check-in/profiles/disable")
+    public Result<Void> disableMeetingCheckinProfile(
+            @Valid @RequestBody PublicVisitorProfileRequest request,
+            @RequestHeader("X-Visitor-Session") String visitorSessionToken) {
+        meetingCheckinService.disablePublicProfile(visitorSessionToken, request.getProfileCode());
+        return Result.success();
+    }
+
     @PostMapping("/guard/session")
     public Result<PublicGuardVisitorSessionVO> createGuardSession(
             @Valid @RequestBody PublicGuardVisitorSessionRequest request) {
         return Result.success(guardVisitService.createPublicSession(request));
+    }
+
+    @PostMapping("/guard/state")
+    public Result<PublicGuardVisitorSessionVO> guardState(
+            @RequestHeader(value = "X-Visitor-Session", required = false) String session) {
+        return Result.success(guardVisitService.refreshPublicState(session));
+    }
+
+    @PostMapping("/guard/meetings")
+    public Result<java.util.List<com.example.siteplatform.siteaccess.vo.PublicGuardMeetingChoiceVO>> guardMeetings(
+            @RequestHeader(value = "X-Visitor-Session", required = false) String session) {
+        return Result.success(guardVisitService.publicMeetings(session));
     }
 
     @PostMapping("/guard/submit")

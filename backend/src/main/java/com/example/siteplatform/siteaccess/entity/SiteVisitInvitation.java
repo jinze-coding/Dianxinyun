@@ -35,6 +35,8 @@ public class SiteVisitInvitation {
     private String vehiclePlate;
     private String visitorRemark;
     private Long sourceProfileId;
+    private String wechatAppId;
+    private String visitorIdentityHash;
     private LocalDateTime privacyAgreedTime;
     private LocalDateTime submittedTime;
     private String voidReason;

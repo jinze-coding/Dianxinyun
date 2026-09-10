@@ -132,3 +132,25 @@
     grid-template-columns: 1fr;
   }
 }
+
+.site-access-table-card th.site-access-invitation-topic-column,
+.site-access-table-card td.site-access-invitation-topic-column {
+  width: 280px;
+  min-width: 240px;
+  max-width: 340px;
+  text-align: left;
+}
+
+.site-access-page button.site-access-invitation-topic {
+  display: -webkit-box;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  line-height: 1.55;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}

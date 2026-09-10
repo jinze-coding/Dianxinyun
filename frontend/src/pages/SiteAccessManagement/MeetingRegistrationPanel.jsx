@@ -12,6 +12,7 @@ import {
   meetingRequestContext,
   normalizePageAfterRemoval,
 } from './meetingManagement';
+import MeetingCheckinPanel from './MeetingCheckinPanel';
 
 const PAGE_SIZE = 20;
 const responseData = (response, fallback) => {
@@ -33,6 +34,7 @@ function MeetingModal({ title, children, onClose, width = 760, className = '' })
 }
 
 export default function MeetingRegistrationPanel({ invitation, projectId, canManage, canExport, currentTime = Date.now(), onChanged }) {
+  const [section, setSection] = useState('checkin');
   const [filters, setFilters] = useState({ status: '', keyword: '' });
   const [pageNo, setPageNo] = useState(1);
   const [page, setPage] = useState({ records: [], total: 0 });
@@ -103,6 +105,7 @@ export default function MeetingRegistrationPanel({ invitation, projectId, canMan
     setReason('');
     setSaving(false);
     setExporting(false);
+    setSection('checkin');
     load(1, nextFilters);
     return () => {
       registrationListRequestGuardRef.current.invalidate();
@@ -206,8 +209,8 @@ export default function MeetingRegistrationPanel({ invitation, projectId, canMan
       return;
     }
     const form = editing.form;
-    if (!form.visitorCompany.trim() || !form.contactName.trim()) return setError('请填写单位和主联系人');
-    if (!/^1[3-9]\d{9}$/.test(form.contactPhone.trim())) return setError('请填写正确的手机号');
+    if (!form.visitorCompany.trim() || !form.contactName.trim()) return setError('请填写单位和姓名');
+    if (!/^1[3-9]\d{9}$/.test(form.contactPhone.trim())) return setError('请填写正确的手机号码');
     const companions = form.companions.filter(hasContent).map((item) => ({
       personCompany: item.personCompany.trim(),
       personName: item.personName.trim(),
@@ -215,7 +218,7 @@ export default function MeetingRegistrationPanel({ invitation, projectId, canMan
     }));
     if (companions.length > 49) return setError('同行人员最多添加49位');
     if (companions.some((item) => item.personPhone && !/^1[3-9]\d{9}$/.test(item.personPhone))) {
-      return setError('同行人员手机号格式不正确');
+      return setError('同行人员手机号码格式不正确');
     }
     if (form.travelMode === 'DRIVING' && !form.vehiclePlate.trim()) return setError('驾车来访请填写车牌号');
     const activeContext = meetingRequestContext(projectId, invitation.id);
@@ -336,6 +339,12 @@ export default function MeetingRegistrationPanel({ invitation, projectId, canMan
 
   const totalPages = Math.max(1, Math.ceil(Number(page.total || 0) / PAGE_SIZE));
   return <div className="site-access-meeting-panel">
+    <div className="meeting-closed-loop">
+      {[['1', '创建会议'], ['2', '分享邀请'], ['3', '预约登记'], ['4', '会场签到'], ['5', '导出名单']].map(([step, label], index) => <React.Fragment key={step}><div className={index < 4 ? 'done' : ''}><span>{step}</span><b>{label}</b></div>{index < 4 && <i>→</i>}</React.Fragment>)}
+    </div>
+    <div className="meeting-workbench-tabs"><button type="button" className={section === 'registrations' ? 'active' : ''} onClick={() => setSection('registrations')}>预约登记管理</button><button type="button" className={section === 'checkin' ? 'active' : ''} onClick={() => setSection('checkin')}>会场签到管理</button><p>{section === 'registrations' ? '查看会前预约登记组，并在开放期内纠错或作废。' : '管理会场二维码、逐人签到、现场补录和签到名单导出。'}</p></div>
+    {section === 'checkin' && <MeetingCheckinPanel invitation={invitation} projectId={projectId} canManage={canManage} canExport={canExport} />}
+    {section === 'registrations' && <>
     <div className="site-access-meeting-summary">
       <div><strong>{invitation.registrationGroupCount || 0}</strong><span>登记组</span></div>
       <div><strong>{invitation.registeredPersonCount || 0}</strong><span>登记人员</span></div>
@@ -349,11 +358,11 @@ export default function MeetingRegistrationPanel({ invitation, projectId, canMan
         const next = { ...filters, status: event.target.value };
         setFilters(next); load(1, next);
       }}><option value="">全部登记</option><option value="REGISTERED">已登记</option><option value="VOIDED">已作废</option></select>
-      <input value={filters.keyword} placeholder="登记编号、单位、联系人、车牌" onChange={(event) => setFilters({ ...filters, keyword: event.target.value })} onKeyDown={(event) => event.key === 'Enter' && load(1)} />
+      <input value={filters.keyword} placeholder="登记编号、单位、姓名、车牌" onChange={(event) => setFilters({ ...filters, keyword: event.target.value })} onKeyDown={(event) => event.key === 'Enter' && load(1)} />
       <button type="button" onClick={() => load(1)}>查询</button>
     </div>
     {error && <div className="site-access-error" onClick={() => setError('')}>{error}</div>}
-    <div className="site-access-meeting-table"><table><thead><tr><th>登记编号</th><th>单位 / 联系人</th><th>人数</th><th>出行</th><th>登记时间</th><th>状态</th><th>操作</th></tr></thead>
+    <div className="site-access-meeting-table"><table><thead><tr><th>登记编号</th><th>单位 / 姓名</th><th>人数</th><th>出行</th><th>登记时间</th><th>状态</th><th>操作</th></tr></thead>
       <tbody>{!loading && (page.records || []).map((item) => <tr key={item.id}>
         <td><button className="link" type="button" onClick={() => openDetail(item.id)}>{item.registrationNo}</button></td>
         <td>{item.visitorCompany}<small>{item.contactName}</small></td><td>{item.visitorCount}</td>
@@ -371,23 +380,24 @@ export default function MeetingRegistrationPanel({ invitation, projectId, canMan
     {detail && <MeetingModal title={`会议登记 · ${detail.registrationNo}`} onClose={() => setDetail(null)} width={920} className="site-access-visitor-modal">
       <div className="site-access-detail-grid">{[
         ['状态', detail.status === 'REGISTERED' ? '已登记' : '已作废'], ['单位', detail.visitorCompany],
-        ['主联系人', `${detail.contactName} ${detail.contactPhone || ''}`], ['登记时间', formatDateTime(detail.registeredTime)],
+        ['姓名', `${detail.contactName} ${detail.contactPhone || ''}`], ['登记时间', formatDateTime(detail.registeredTime)],
         ['出行方式', detail.travelMode === 'DRIVING' ? `驾车 · ${detail.vehiclePlate || '-'}` : '非驾车'],
         ['资料来源', detail.sourceProfileName || '本次手工填写'], ['备注', detail.visitorRemark || '-'],
       ].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}</div>
-      <h3>登记人员（{detail.visitors?.length || 0}）</h3><div className="site-access-person-list">{(detail.visitors || []).map((person, index) => <div key={index}><span>{person.personType === 'CONTACT' ? '主联系人' : '同行人员'}</span><div className="site-access-person-contact-fields"><b>单位：{person.personCompany || '-'}</b><b>姓名：{person.personName || '-'}</b><b>手机号：{person.personPhone || '-'}</b></div></div>)}</div>
+      <h3>登记人员（{detail.visitors?.length || 0}）</h3><div className="site-access-person-list">{(detail.visitors || []).map((person, index) => <div key={index}><span>{person.personType === 'CONTACT' ? '本人' : '同行人员'}</span><div className="site-access-person-contact-fields"><b>单位：{person.personCompany || '-'}</b><b>姓名：{person.personName || '-'}</b><b>手机号码：{person.personPhone || '-'}</b></div></div>)}</div>
       <h3>操作记录</h3><div className="site-access-audit-list">{(detail.auditLogs || []).map((log, index) => <div key={index}><b>{({ REGISTER: '访客登记', UPDATE: '后台纠错', VOID: '作废登记' })[log.actionType] || log.actionType}</b><span>{log.operatorName} · {formatDateTime(log.createTime)}</span><p>{log.comment || '-'}</p></div>)}</div>
       {detail.voidReason && <div className="site-access-void-reason">作废原因：{detail.voidReason}</div>}
       <div className="site-access-modal-actions"><button type="button" onClick={() => setDetail(null)}>关闭</button>{canManage && open && detail.status === 'REGISTERED' && <button type="button" onClick={() => { setDetail(null); openEdit(detail.id); }}>纠错</button>}{canManage && open && detail.status === 'REGISTERED' && <button className="danger" type="button" onClick={() => { setReason(''); setVoiding(detail); }}>作废</button>}</div>
     </MeetingModal>}
 
     {editing && <MeetingModal title={`纠错 · ${editing.value.registrationNo}`} onClose={() => !saving && setEditing(null)}>
-      <div className="site-access-form-grid"><label className="site-access-field full"><span>外访单位</span><input maxLength="200" value={editing.form.visitorCompany} onChange={(event) => updateForm({ visitorCompany: event.target.value })} /></label><label className="site-access-field"><span>主联系人</span><input maxLength="50" value={editing.form.contactName} onChange={(event) => updateForm({ contactName: event.target.value })} /></label><label className="site-access-field"><span>手机号</span><input maxLength="11" value={editing.form.contactPhone} onChange={(event) => updateForm({ contactPhone: event.target.value })} /></label>
-        <div className="site-access-companions full"><div className="site-access-companion-head"><strong>同行人员（最多49位）</strong><button type="button" disabled={editing.form.companions.length >= 49} onClick={() => updateForm({ companions: [...editing.form.companions, { personCompany: '', personName: '', personPhone: '' }] })}>添加同行人</button></div>{editing.form.companions.map((person, index) => <div className="site-access-companion-row" key={index}><input placeholder="单位" maxLength="200" value={person.personCompany} onChange={(event) => updateForm({ companions: editing.form.companions.map((item, i) => i === index ? { ...item, personCompany: event.target.value } : item) })} /><input placeholder="姓名" maxLength="50" value={person.personName} onChange={(event) => updateForm({ companions: editing.form.companions.map((item, i) => i === index ? { ...item, personName: event.target.value } : item) })} /><input placeholder="手机号" maxLength="11" value={person.personPhone} onChange={(event) => updateForm({ companions: editing.form.companions.map((item, i) => i === index ? { ...item, personPhone: event.target.value } : item) })} /><button className="danger" type="button" onClick={() => updateForm({ companions: editing.form.companions.filter((_, i) => i !== index) })}>移除</button></div>)}</div>
+      <div className="site-access-form-grid"><label className="site-access-field full"><span>单位</span><input maxLength="200" value={editing.form.visitorCompany} onChange={(event) => updateForm({ visitorCompany: event.target.value })} /></label><label className="site-access-field"><span>姓名</span><input maxLength="50" value={editing.form.contactName} onChange={(event) => updateForm({ contactName: event.target.value })} /></label><label className="site-access-field"><span>手机号码</span><input maxLength="11" value={editing.form.contactPhone} onChange={(event) => updateForm({ contactPhone: event.target.value })} /></label>
+        <div className="site-access-companions full"><div className="site-access-companion-head"><strong>同行人员（最多49位）</strong><button type="button" disabled={editing.form.companions.length >= 49} onClick={() => updateForm({ companions: [...editing.form.companions, { personCompany: '', personName: '', personPhone: '' }] })}>添加同行人</button></div>{editing.form.companions.map((person, index) => <div className="site-access-companion-row" key={index}><input placeholder="单位" maxLength="200" value={person.personCompany} onChange={(event) => updateForm({ companions: editing.form.companions.map((item, i) => i === index ? { ...item, personCompany: event.target.value } : item) })} /><input placeholder="姓名" maxLength="50" value={person.personName} onChange={(event) => updateForm({ companions: editing.form.companions.map((item, i) => i === index ? { ...item, personName: event.target.value } : item) })} /><input placeholder="手机号码" maxLength="11" value={person.personPhone} onChange={(event) => updateForm({ companions: editing.form.companions.map((item, i) => i === index ? { ...item, personPhone: event.target.value } : item) })} /><button className="danger" type="button" onClick={() => updateForm({ companions: editing.form.companions.filter((_, i) => i !== index) })}>移除</button></div>)}</div>
         <label className="site-access-field"><span>出行方式</span><select value={editing.form.travelMode} onChange={(event) => updateForm({ travelMode: event.target.value, vehiclePlate: event.target.value === 'OTHER' ? '' : editing.form.vehiclePlate })}><option value="OTHER">非驾车</option><option value="DRIVING">驾车</option></select></label><label className="site-access-field"><span>车牌号</span><input disabled={editing.form.travelMode !== 'DRIVING'} maxLength="20" value={editing.form.vehiclePlate} onChange={(event) => updateForm({ vehiclePlate: event.target.value.toUpperCase() })} /></label><label className="site-access-field full"><span>外访备注</span><textarea maxLength="500" value={editing.form.visitorRemark} onChange={(event) => updateForm({ visitorRemark: event.target.value })} /></label></div>
       <div className="site-access-modal-actions"><button type="button" disabled={saving} onClick={() => setEditing(null)}>取消</button><button className="primary" type="button" disabled={saving || !open} onClick={save}>{saving ? '保存中...' : '保存纠错'}</button></div>
     </MeetingModal>}
 
     {voiding && <MeetingModal title={`作废登记 · ${voiding.registrationNo}`} onClose={() => { if (!saving) { setVoiding(null); setReason(''); } }} width={520}><div className="site-access-form-grid"><label className="site-access-field full"><span>作废原因</span><textarea maxLength="300" value={reason} onChange={(event) => setReason(event.target.value)} /></label><p className="full">作废后原记录与审计仍保留，该微信用户可在会议截止前重新登记。</p></div><div className="site-access-modal-actions"><button type="button" disabled={saving} onClick={() => { setVoiding(null); setReason(''); }}>取消</button><button className="danger" type="button" disabled={saving || !open || !reason.trim()} onClick={confirmVoid}>{saving ? '处理中...' : '确认作废'}</button></div></MeetingModal>}
+    </>}
   </div>;
 }
