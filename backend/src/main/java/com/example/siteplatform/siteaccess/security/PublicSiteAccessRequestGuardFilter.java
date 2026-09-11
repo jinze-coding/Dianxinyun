@@ -62,7 +62,8 @@ public class PublicSiteAccessRequestGuardFilter extends OncePerRequestFilter {
             Map.entry(BASE_PATH + "/guard/state",
                     new RateLimitRule("public-site-guard-state", 600, Duration.ofMinutes(10))),
             Map.entry(BASE_PATH + "/guard/meetings",
-                    new RateLimitRule("public-site-guard-meetings", 120, Duration.ofMinutes(10))),
+                    // 与门卫状态的 15 秒轮询配套，兼容同一现场网络的多位访客；身份额度仍独立限制。
+                    new RateLimitRule("public-site-guard-meetings", 600, Duration.ofMinutes(10))),
             Map.entry(BASE_PATH + "/guard/submit",
                     new RateLimitRule("public-site-guard-submit", 10, Duration.ofMinutes(30))),
             Map.entry(BASE_PATH + "/guard/project-profile",

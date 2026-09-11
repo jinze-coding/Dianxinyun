@@ -40,13 +40,17 @@ const meetings = ref<PublicGuardMeetingChoice[]>([]);
 const selectedMeetings = ref<string[]>([]);
 const meetingsLoading = ref(false);
 const meetingsError = ref('');
+const meetingsNotice = ref('');
+const meetingsUpdatedAt = ref(0);
 const stateError = ref('');
 const checkingState = ref(false);
 let stateTimer: ReturnType<typeof setInterval> | undefined;
 let pageVisible = true;
+let disposed = false;
 let ready = false;
 let initializationId = 0;
 let refreshing = false;
+let stateRequestId = 0;
 let meetingsRequestId = 0;
 
 const profiles = ref<SiteVisitorProfile[]>([]);
@@ -118,11 +122,23 @@ onLoad(async (options) => {
   // #endif
   sceneToken.value = extractGuardVisitorToken(options as Record<string, unknown>);
   await initialize();
+  if (disposed) return;
   ready = true;
   stateTimer = setInterval(() => { if (pageVisible) void refreshState(); }, 15000);
 });
 onShow(() => { pageVisible = true; if (ready) void refreshState(true); });
-onHide(() => { pageVisible = false; });
+onHide(() => {
+  pageVisible = false;
+  invalidateRefreshes();
+});
+
+function invalidateRefreshes() {
+  stateRequestId += 1;
+  meetingsRequestId += 1;
+  refreshing = false;
+  checkingState.value = false;
+  meetingsLoading.value = false;
+}
 
 function applyState(state: PublicGuardVisitorSession) {
   const previouslyPassed = Boolean(pass.value || matchedPasses.value.length);
@@ -136,7 +152,7 @@ function applyState(state: PublicGuardVisitorSession) {
   if (pass.value || matchedPasses.value.length) clearForm();
   else {
     applyPersonalInfo(state.personalInfo);
-    if (previouslyPassed) { void loadProfiles(); void loadMeetings(); }
+    if (previouslyPassed) void loadProfiles();
   }
 }
 
@@ -146,50 +162,83 @@ function matchedPassActive(pass: PublicGuardMatchedPass) {
 }
 
 async function refreshState(block = false) {
-  if (refreshing || loading.value || submitting.value || !visitorSessionToken.value) return;
+  if (!pageVisible || refreshing || loading.value || submitting.value || !visitorSessionToken.value) return;
+  const requestId = ++stateRequestId;
   refreshing = true;
   checkingState.value = block;
   const session = visitorSessionToken.value;
   try {
     const state = await refreshPublicGuardState(session);
-    if (session !== visitorSessionToken.value) return;
+    if (requestId !== stateRequestId || session !== visitorSessionToken.value || !pageVisible) return;
     applyState(state);
+    if (!pass.value && !matchedPasses.value.length) await loadMeetings();
   } catch (error) {
-    if (session !== visitorSessionToken.value) return;
+    if (requestId !== stateRequestId || session !== visitorSessionToken.value || !pageVisible) return;
     const code = Number((error as { code?: number; statusCode?: number })?.code || (error as { statusCode?: number })?.statusCode);
     if (code === 401) await initialize();
     else {
       matchedPasses.value = []; pass.value = undefined;
       stateError.value = error instanceof Error ? error.message : '暂时无法核验放行状态，请刷新后向门卫展示';
+      if ([403, 404, 410].includes(code)) { resetMeetings(); closeProjectProfile(); }
     }
-  } finally { refreshing = false; checkingState.value = false; }
+  } finally {
+    if (requestId === stateRequestId) { refreshing = false; checkingState.value = false; }
+  }
 }
 
 async function loadMeetings() {
-  const requestId = ++meetingsRequestId;
   const session = visitorSessionToken.value;
-  if (!session) return;
+  if (!session || !pageVisible || meetingsLoading.value || pass.value || matchedPasses.value.length) return;
+  const requestId = ++meetingsRequestId;
   meetingsLoading.value = true;
-  meetingsError.value = '';
-  selectedMeetings.value = [];
   try {
     const values = await getPublicGuardMeetings(session);
-    if (requestId === meetingsRequestId && session === visitorSessionToken.value) meetings.value = values;
+    if (requestId !== meetingsRequestId || session !== visitorSessionToken.value || !pageVisible) return;
+    const selectable = new Set(values.filter((item) => !item.registered).map((item) => item.choiceToken));
+    const retained = selectedMeetings.value.filter((token) => selectable.has(token));
+    if (retained.length < selectedMeetings.value.length) {
+      meetingsNotice.value = '部分所选会议已变更、结束或已预约，请核对最新列表并重新选择。';
+    }
+    selectedMeetings.value = retained;
+    meetings.value = values;
+    meetingsError.value = '';
+    meetingsUpdatedAt.value = Date.now() + serverOffset;
   } catch (error) {
-    if (requestId === meetingsRequestId) {
-      meetings.value = [];
-      meetingsError.value = error instanceof Error ? error.message : '会议列表加载失败，可刷新或按普通来访登记';
+    if (requestId !== meetingsRequestId || session !== visitorSessionToken.value || !pageVisible) return;
+    const code = Number((error as { code?: number; statusCode?: number })?.code || (error as { statusCode?: number })?.statusCode);
+    if (code === 401) await initialize();
+    else if ([403, 404, 410].includes(code)) {
+      resetMeetings();
+      closeProjectProfile();
+      stateError.value = error instanceof Error ? error.message : '门卫登记入口已失效，请重新扫码';
+    } else {
+      meetingsError.value = error instanceof Error ? error.message : '会议同步失败，请重试';
     }
   } finally { if (requestId === meetingsRequestId) meetingsLoading.value = false; }
 }
 
 function meetingsChange(event: { detail: { value: string[] } }) {
+  if (meetingsError.value) return;
   selectedMeetings.value = event.detail.value.filter((token) => meetings.value.some((item) => item.choiceToken === token && !item.registered));
+  meetingsNotice.value = '';
 }
 
+function resetMeetings() {
+  meetingsRequestId += 1;
+  meetings.value = [];
+  selectedMeetings.value = [];
+  meetingsLoading.value = false;
+  meetingsError.value = '';
+  meetingsUpdatedAt.value = 0;
+}
 
 async function initialize() {
+  if (disposed) return;
   const requestId = ++initializationId;
+  invalidateRefreshes();
+  const hadSelectedMeetings = selectedMeetings.value.length > 0;
+  resetMeetings();
+  if (hadSelectedMeetings) meetingsNotice.value = '微信身份已重新核验，请重新选择需要参加的会议；已填人员信息已保留。';
   loading.value = true;
   errorMessage.value = '';
   stateError.value = '';
@@ -296,6 +345,7 @@ const passExpired = computed(() => {
 
 function validate() {
   if (!visitorSessionToken.value) return '请重新识别微信身份';
+  if (selectedMeetings.value.length && (meetingsLoading.value || meetingsError.value)) return '请先刷新会议列表，确认所选会议后再提交';
   if (selectedMeetings.value.length > 50) return '一次最多选择50场会议';
   if (!visitorCompany.value.trim()) return '请填写单位';
   if (!contactName.value.trim()) return '请填写姓名';
@@ -314,6 +364,8 @@ async function submit() {
   if (submitting.value || pass.value || matchedPasses.value.length) return;
   const validation = validate();
   if (validation) return showToast(validation);
+  // 提交开始后丢弃此前的轮询，避免旧表单状态覆盖新生成的放行凭证。
+  invalidateRefreshes();
   submitting.value = true;
   errorMessage.value = '';
   const payload: PublicGuardVisitSubmitPayload = {
@@ -351,10 +403,8 @@ async function submit() {
 }
 
 function clearForm() {
-  meetingsRequestId += 1;
-  meetings.value = [];
-  selectedMeetings.value = [];
-  meetingsLoading.value = false;
+  resetMeetings();
+  meetingsNotice.value = '';
   profileRequestId += 1;
   profiles.value = [];
   selectedProfile.value = undefined;
@@ -480,6 +530,7 @@ onBackPress(() => {
 });
 
 function cleanup() {
+  disposed = true;
   initializationId += 1;
   visitorSessionToken.value = '';
   profileRequestId += 1;
@@ -487,7 +538,7 @@ function cleanup() {
   if (stateTimer) clearInterval(stateTimer);
   stateTimer = undefined;
   matchedPasses.value = [];
-  meetingsRequestId += 1;
+  invalidateRefreshes();
   stopClock();
   projectProfileRequestId += 1;
   removePublicProjectProfileImages(projectImagePaths.value);
@@ -500,7 +551,7 @@ onBeforeUnmount(cleanup);
 
 <template>
   <view class="guard-shell">
-    <AppNavBar :title="showingProjectProfile ? '项目信息' : '门卫访客登记'" @back="handleBack" />
+    <view class="guard-navbar"><AppNavBar :title="showingProjectProfile ? '项目信息' : '门卫访客登记'" @back="handleBack" /></view>
     <view v-if="showingProjectProfile" class="project-profile-content">
       <view v-if="projectProfileLoading" class="guard-card state-card">正在加载项目信息...</view>
       <view v-else-if="projectProfileError" class="guard-card state-card error-state">
@@ -600,9 +651,9 @@ onBeforeUnmount(cleanup);
 
         <view class="guard-card form-card">
           <text class="section-title">来访人员信息</text>
-          <label class="field"><text>单位 *</text><input v-model="visitorCompany" maxlength="200" placeholder="请输入单位全称" /></label>
-          <label class="field"><text>姓名 *</text><input v-model="contactName" maxlength="50" placeholder="请输入姓名" /></label>
-          <label class="field"><text>手机号码 *</text><input v-model="contactPhone" type="number" maxlength="11" placeholder="仅校验格式，不发送验证码" /></label>
+          <label class="field"><text>单位 *</text><input v-model="visitorCompany" maxlength="200" placeholder="请输入单位全称" placeholder-class="guard-placeholder" :cursor-spacing="24" /></label>
+          <label class="field"><text>姓名 *</text><input v-model="contactName" maxlength="50" placeholder="请输入姓名" placeholder-class="guard-placeholder" :cursor-spacing="24" /></label>
+          <label class="field"><text>手机号码 *</text><input v-model="contactPhone" type="number" maxlength="11" placeholder="仅校验格式，不发送验证码" placeholder-class="guard-placeholder" :cursor-spacing="24" /></label>
         </view>
 
         <view class="guard-card form-card">
@@ -610,28 +661,41 @@ onBeforeUnmount(cleanup);
           <text v-if="!companions.length" class="empty-copy">没有同行人员可不添加，本人已计入总人数。</text>
           <view v-for="(person, index) in companions" :key="index" class="companion-card">
             <view class="section-head"><text>同行人员 {{ index + 1 }}</text><button @tap="companions.splice(index, 1)">移除</button></view>
-            <label class="field"><text>单位（选填）</text><input v-model="person.personCompany" maxlength="200" placeholder="请输入同行人员单位" /></label>
-            <label class="field"><text>姓名（选填）</text><input v-model="person.personName" maxlength="50" placeholder="请输入同行人员姓名" /></label>
-            <label class="field"><text>手机号码（选填）</text><input v-model="person.personPhone" type="number" maxlength="11" placeholder="填写时校验手机号码格式" /></label>
+            <label class="field"><text>单位（选填）</text><input v-model="person.personCompany" maxlength="200" placeholder="请输入同行人员单位" placeholder-class="guard-placeholder" :cursor-spacing="24" /></label>
+            <label class="field"><text>姓名（选填）</text><input v-model="person.personName" maxlength="50" placeholder="请输入同行人员姓名" placeholder-class="guard-placeholder" :cursor-spacing="24" /></label>
+            <label class="field"><text>手机号码（选填）</text><input v-model="person.personPhone" type="number" maxlength="11" placeholder="填写时校验手机号码格式" placeholder-class="guard-placeholder" :cursor-spacing="24" /></label>
           </view>
           <text class="empty-copy">本次已填写 {{ filledCompanionCount + 1 }} 人；空白同行卡片不会保存，最多50人。</text>
         </view>
 
         <view class="guard-card form-card">
           <text class="section-title">车辆与备注</text>
-          <radio-group class="travel-options" @change="travelMode = $event.detail.value"><label><radio value="OTHER" :checked="travelMode === 'OTHER'" color="#315f86" />非驾车</label><label><radio value="DRIVING" :checked="travelMode === 'DRIVING'" color="#315f86" />驾车</label></radio-group>
-          <label v-if="travelMode === 'DRIVING'" class="field"><text>车牌号 *</text><input v-model="vehiclePlate" maxlength="20" placeholder="请输入本次来访车辆车牌" /></label>
-          <label class="field"><text>外访备注</text><textarea v-model="visitorRemark" maxlength="500" placeholder="可填写门卫或项目人员需要了解的事项" /></label>
+          <view class="travel-options"><button :class="{ active: travelMode === 'OTHER' }" @tap="travelMode = 'OTHER'">非驾车</button><button :class="{ active: travelMode === 'DRIVING' }" @tap="travelMode = 'DRIVING'">驾车</button></view>
+          <label v-if="travelMode === 'DRIVING'" class="field"><text>车牌号 *</text><input v-model="vehiclePlate" maxlength="20" placeholder="请输入本次来访车辆车牌" placeholder-class="guard-placeholder" :cursor-spacing="24" /></label>
+          <label class="field"><text>外访备注</text><textarea v-model="visitorRemark" maxlength="500" placeholder="可填写门卫或项目人员需要了解的事项" placeholder-class="guard-placeholder" :cursor-spacing="24" /></label>
         </view>
 
         <view class="guard-card meeting-choice-card">
-          <view class="section-head"><text class="section-title">近期会议（可多选）</text><button :disabled="meetingsLoading" @tap="loadMeetings">刷新</button></view>
-          <text class="empty-copy">今天及后6天的会议；不选择即按普通来访登记。所选会议共用本次人员信息，到各会场分别扫码签到。</text>
-          <text v-if="meetingsLoading" class="empty-copy">正在加载会议...</text>
-          <text v-else-if="meetingsError" class="notice-copy">{{ meetingsError }}</text>
-          <text v-else-if="!meetings.length" class="empty-copy">近期暂无可预约会议</text>
-          <checkbox-group @change="meetingsChange"><label v-for="meeting in meetings" :key="meeting.choiceToken" class="meeting-choice"><checkbox :value="meeting.choiceToken" :checked="meeting.registered || selectedMeetings.includes(meeting.choiceToken)" :disabled="meeting.registered" color="#315f86" /><view><text>{{ meeting.title }}{{ meeting.registered ? '（已预约）' : '' }}</text><text>{{ formatTime(meeting.visitStartTime) }} 至 {{ formatTime(meeting.visitEndTime) }}</text><text>{{ meeting.location }}</text></view></label></checkbox-group>
-          <text v-if="selectedMeetings.length" class="empty-copy">本次同时预约 {{ selectedMeetings.length }} 场会议</text>
+          <view class="section-head"><text class="section-title">近期会议（可多选）</text><button :disabled="meetingsLoading || submitting" @tap="loadMeetings">{{ meetingsLoading ? '同步中' : '刷新' }}</button></view>
+          <text class="empty-copy">本项目今天及后6天尚未结束的会议。不选择即按普通来访登记，参加会议请到会场另行扫码签到。</text>
+          <text v-if="meetingsUpdatedAt" class="meeting-sync-time">{{ meetingsError ? '上次同步' : '已同步' }} {{ formatTime(meetingsUpdatedAt, true) }} · 每15秒更新</text>
+          <text v-if="meetingsError" class="notice-copy">{{ meetingsError }}{{ meetings.length ? '。当前显示上次结果，请刷新后再提交所选会议。' : '，可点击刷新重试。' }}</text>
+          <text v-if="meetingsNotice" class="notice-copy">{{ meetingsNotice }}</text>
+          <text v-if="meetingsLoading && !meetings.length" class="empty-copy">正在加载会议...</text>
+          <text v-else-if="!meetingsError && !meetings.length" class="empty-copy">近期暂无可预约会议，可继续普通来访登记。</text>
+          <checkbox-group class="meeting-choices" @change="meetingsChange">
+            <label v-for="meeting in meetings" :key="meeting.choiceToken" class="meeting-choice" :class="{ selected: selectedMeetings.includes(meeting.choiceToken), registered: meeting.registered }">
+              <checkbox :value="meeting.choiceToken" :checked="meeting.registered || selectedMeetings.includes(meeting.choiceToken)" :disabled="meeting.registered || Boolean(meetingsError)" color="#315f86" />
+              <view>
+                <text class="meeting-name">{{ meeting.title }}</text>
+                <text v-if="meeting.registered" class="meeting-registered">已预约</text>
+                <text>开始：{{ formatTime(meeting.visitStartTime) }}</text>
+                <text>结束：{{ formatTime(meeting.visitEndTime) }}</text>
+                <text v-if="meeting.location">地点：{{ meeting.location }}</text>
+              </view>
+            </label>
+          </checkbox-group>
+          <text class="meeting-selection-summary">{{ selectedMeetings.length ? `已选 ${selectedMeetings.length} 场会议，将与本次来访一并预约` : '未选择会议，本次按普通来访登记' }}</text>
         </view>
 
         <view class="guard-card privacy-card">
@@ -643,12 +707,12 @@ onBeforeUnmount(cleanup);
 
         <view class="guard-card profile-save-card">
           <checkbox-group @change="profileSaveChange"><label class="privacy-check"><checkbox value="save" :checked="savingProfile" color="#315f86" /><text>{{ selectedProfile ? '用本次修改更新这份常用资料' : '将本次人员和车辆信息保存为常用资料' }}</text></label></checkbox-group>
-          <label v-if="savingProfile" class="field"><text>常用资料名称</text><input v-model="profileName" maxlength="100" placeholder="例如：张三来访资料" /></label>
+          <label v-if="savingProfile" class="field"><text>常用资料名称</text><input v-model="profileName" maxlength="100" placeholder="例如：张三来访资料" placeholder-class="guard-placeholder" :cursor-spacing="24" /></label>
           <text class="privacy-copy">此项为单独、自愿的长期保存同意，仅限当前项目使用，以后可停用。</text>
         </view>
 
         <view v-if="errorMessage" class="submit-error">{{ errorMessage }}</view>
-        <button class="submit-button" :disabled="submitting" @tap="submit">{{ submitting ? '正在登记...' : (selectedMeetings.length ? '登记来访并预约所选会议' : '确认登记并生成放行页') }}</button>
+        <button class="submit-button" :disabled="submitting || (selectedMeetings.length > 0 && (meetingsLoading || Boolean(meetingsError)))" @tap="submit">{{ submitting ? '正在登记...' : (selectedMeetings.length ? '登记来访并预约所选会议' : '确认登记并生成放行页') }}</button>
         <text class="submit-hint">提交后立即登记成功，不进入审批流程；有效期内不能自行覆盖。</text>
       </template>
     </view>
@@ -656,15 +720,110 @@ onBeforeUnmount(cleanup);
 </template>
 
 <style scoped>
-.guard-shell{min-height:100vh;background:var(--workspace-page);color:var(--workspace-text)}.guard-content{display:flex;flex-direction:column;gap:20rpx;padding:20rpx 24rpx calc(48rpx + env(safe-area-inset-bottom))}.guard-card,.pass-card{border:1rpx solid var(--workspace-divider);border-radius:22rpx;background:#fff;box-shadow:var(--workspace-shadow)}.state-card{display:flex;min-height:320rpx;align-items:center;justify-content:center;flex-direction:column;padding:40rpx;color:var(--workspace-text-muted);font-size:23rpx;text-align:center}.error-state text:first-child{color:var(--workspace-text);font-size:29rpx;font-weight:850}.error-state text:nth-child(2){margin-top:14rpx;line-height:1.6}.error-state button{min-height:66rpx;margin-top:24rpx;padding:0 36rpx;border-radius:14rpx;background:var(--workspace-accent-deep);color:#fff;font-size:22rpx}.intro-card{padding:28rpx;background:linear-gradient(145deg,#eaf3fa,#fff)}.intro-tag,.intro-title,.intro-copy{display:block}.intro-tag{color:var(--workspace-accent-deep);font-size:19rpx;font-weight:800}.intro-title{margin-top:12rpx;font-size:32rpx;font-weight:900}.intro-copy{margin-top:14rpx;color:var(--workspace-text-secondary);font-size:21rpx;line-height:1.7}.profile-card,.form-card,.privacy-card,.profile-save-card{padding:26rpx}.section-head{display:flex;align-items:center;justify-content:space-between}.section-head button{min-height:52rpx;padding:0 18rpx;border:1rpx solid var(--workspace-divider);border-radius:12rpx;background:#f7fafc;color:var(--workspace-accent-deep);font-size:20rpx}.section-title{font-size:28rpx;font-weight:850}.section-subtitle{display:block;margin-top:5rpx;color:var(--workspace-text-muted);font-size:19rpx}.empty-copy,.notice-copy{display:block;margin-top:18rpx;color:var(--workspace-text-muted);font-size:21rpx;line-height:1.6}.notice-copy{border-radius:14rpx;padding:14rpx;background:#fff8e9;color:#80602d}.profile-list{display:flex;flex-direction:column;gap:14rpx;margin-top:18rpx}.profile-item{display:flex;align-items:center;justify-content:space-between;gap:14rpx;padding:18rpx;border:1rpx solid var(--workspace-divider);border-radius:16rpx;background:#f9fbfc}.profile-item.selected{border-color:var(--workspace-accent-deep);background:#edf5fa}.profile-item>view{display:flex;min-width:0;flex:1;flex-direction:column;gap:6rpx}.profile-item>view text:first-child{font-size:23rpx;font-weight:800}.profile-item>view text:not(:first-child){color:var(--workspace-text-muted);font-size:19rpx}.profile-item>button{min-height:48rpx;padding:0 15rpx;border:1rpx solid #e8c7c4;border-radius:11rpx;background:#fff7f6;color:#a64d45;font-size:19rpx}.field{display:flex;flex-direction:column;gap:10rpx;margin-top:22rpx}.field>text{color:var(--workspace-text-secondary);font-size:22rpx;font-weight:650}.field input,.field textarea{width:100%;border:1rpx solid #d5e0e7;border-radius:14rpx;background:#f9fbfc;font-size:24rpx}.field input{height:78rpx;padding:0 20rpx}.field textarea{min-height:150rpx;padding:18rpx 20rpx}.companion-card{margin-top:18rpx;padding:18rpx;border:1rpx solid var(--workspace-divider);border-radius:16rpx;background:#f8fafb}.companion-card>.section-head>text{font-size:22rpx;font-weight:750}.travel-options{display:flex;gap:40rpx;margin-top:24rpx}.travel-options label{display:flex;align-items:center;gap:8rpx;font-size:23rpx}.privacy-card{background:#f8fbfd}.profile-save-card{background:#f7fbf8}.privacy-check{display:flex;align-items:center;gap:8rpx;font-size:23rpx;font-weight:750}.privacy-copy{display:block;margin-top:15rpx;color:var(--workspace-text-muted);font-size:20rpx;line-height:1.75}.submit-error{border:1rpx solid #edc8c5;border-radius:14rpx;padding:18rpx;background:#fff4f3;color:#a63f3f;font-size:21rpx}.submit-button{min-height:84rpx;border-radius:16rpx;background:var(--workspace-accent-deep);color:#fff;font-size:26rpx;font-weight:800}.submit-button[disabled]{opacity:.65}.submit-hint{color:var(--workspace-text-muted);font-size:20rpx;text-align:center}.pass-card{display:flex;align-items:center;flex-direction:column;padding:42rpx 30rpx;background:linear-gradient(155deg,#e9f8f0,#fff 56%);border-color:#aad7c3}.pass-check{display:flex;width:112rpx;height:112rpx;align-items:center;justify-content:center;border-radius:50%;background:#2f8065;color:#fff;font-size:62rpx;font-weight:900;box-shadow:0 12rpx 30rpx rgba(47,128,101,.22)}.pass-label{margin-top:22rpx;color:#247157;font-size:36rpx;font-weight:950}.pass-project{margin-top:10rpx;color:var(--workspace-text-secondary);font-size:23rpx;text-align:center}.pass-current{display:flex;width:100%;align-items:center;justify-content:space-between;margin-top:28rpx;border-radius:16rpx;padding:20rpx;background:#236e55;color:#fff}.pass-current text:first-child{font-size:20rpx}.pass-current text:last-child{font-size:27rpx;font-weight:900;font-variant-numeric:tabular-nums}.pass-grid{display:grid;width:100%;grid-template-columns:150rpx 1fr;gap:0;margin-top:24rpx;border-top:1rpx solid #cfe5db}.pass-grid text{padding:16rpx 0;border-bottom:1rpx solid #dcebe4;font-size:22rpx;line-height:1.5}.pass-grid text:nth-child(odd){color:var(--workspace-text-muted)}.pass-grid text:nth-child(even){overflow-wrap:anywhere;font-weight:650}.pass-hint{margin-top:24rpx;color:#44705f;font-size:20rpx;line-height:1.7;text-align:center}.pass-card.expired{border-color:#e7c5c1;background:linear-gradient(155deg,#fceeed,#fff 56%)}.pass-card.expired .pass-check,.pass-card.expired .pass-current{background:#b75353}.pass-card.expired .pass-label{color:#a44444}.pass-reload{min-height:70rpx;margin-top:22rpx;padding:0 34rpx;border-radius:14rpx;background:var(--workspace-accent-deep);color:#fff;font-size:23rpx;font-weight:800}
-.project-info-button{min-height:64rpx;margin-top:24rpx;border:1rpx solid #a8c4d7;border-radius:14rpx;background:#fff;color:var(--workspace-accent-deep);font-size:23rpx;font-weight:800}.project-profile-content{display:flex;flex-direction:column;gap:20rpx;padding:20rpx 24rpx calc(46rpx + env(safe-area-inset-bottom))}.public-project-hero,.public-project-card{border:1rpx solid var(--workspace-divider);border-radius:22rpx;background:#fff;box-shadow:var(--workspace-shadow)}.public-project-hero{padding:30rpx;background:linear-gradient(145deg,#eaf3fa,#fff)}.public-project-label,.public-project-title,.public-project-subtitle{display:block}.public-project-label{color:var(--workspace-accent-deep);font-size:18rpx;font-weight:850;letter-spacing:3rpx}.public-project-title{margin-top:12rpx;font-size:34rpx;font-weight:900;line-height:1.45}.public-project-subtitle{margin-top:10rpx;color:var(--workspace-text-muted);font-size:22rpx}.public-project-card{padding:24rpx}.public-project-section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18rpx;font-size:27rpx;font-weight:850}.public-project-section-head text:last-child:not(:first-child){color:var(--workspace-text-muted);font-size:20rpx;font-weight:500}.public-project-swiper{height:360rpx;overflow:hidden;border-radius:18rpx;background:#eef3f6}.public-project-swiper image{width:100%;height:100%}.public-project-empty-image{display:flex;height:190rpx;align-items:center;justify-content:center;border:1rpx dashed var(--workspace-divider);border-radius:18rpx;background:#f8fafb;color:var(--workspace-text-muted);font-size:22rpx}.public-project-image-error{display:block;margin-top:12rpx;color:#a64d45;font-size:20rpx}.public-project-fields{border-top:1rpx solid var(--workspace-divider)}.public-project-field{display:grid;grid-template-columns:180rpx 1fr;gap:20rpx;padding:18rpx 0;border-bottom:1rpx solid var(--workspace-divider);font-size:22rpx;line-height:1.65}.public-project-field:last-child{border-bottom:0}.public-project-field text:first-child{color:var(--workspace-text-muted)}.public-project-field text:last-child{overflow-wrap:anywhere;white-space:pre-wrap}.public-project-boundary{padding:8rpx 20rpx 20rpx;color:var(--workspace-text-muted);font-size:19rpx;line-height:1.7;text-align:center}
-</style>
+.guard-shell{min-height:100vh;background:var(--workspace-page);color:var(--workspace-text)}
+.guard-content{display:flex;flex-direction:column;gap:20rpx;padding:20rpx 24rpx calc(48rpx + env(safe-area-inset-bottom))}
+.guard-card,.pass-card{box-sizing:border-box;min-width:0;border:1rpx solid var(--workspace-divider);border-radius:22rpx;background:#fff;box-shadow:var(--workspace-shadow)}
+.state-card{display:flex;min-height:320rpx;align-items:center;justify-content:center;flex-direction:column;padding:40rpx;color:var(--workspace-text-muted);font-size:23rpx;text-align:center}
+.error-state text:first-child{color:var(--workspace-text);font-size:29rpx;font-weight:850}
+.error-state text:nth-child(2){margin-top:14rpx;line-height:1.6}
+.error-state button{min-height:66rpx;margin-top:24rpx;padding:0 36rpx;border-radius:14rpx;background:var(--workspace-accent-deep);color:#fff;font-size:22rpx}
+.intro-card{padding:28rpx;background:linear-gradient(145deg,#eaf3fa,#fff)}
+.intro-tag,.intro-title,.intro-copy{display:block}
+.intro-tag{color:var(--workspace-accent-deep);font-size:19rpx;font-weight:800}
+.intro-title{margin-top:12rpx;font-size:32rpx;font-weight:900}
+.intro-copy{margin-top:14rpx;color:var(--workspace-text-secondary);font-size:21rpx;line-height:1.7}
+.profile-card,.form-card,.privacy-card,.profile-save-card,.meeting-choice-card{padding:26rpx}
+.section-head{display:flex;align-items:center;justify-content:space-between;gap:16rpx}.section-head>view{flex:1;min-width:0}
+.section-head button{display:flex;align-items:center;justify-content:center;flex-shrink:0;height:64rpx;min-height:34px;margin:0;line-height:1.2;padding:0 18rpx;border:1rpx solid var(--workspace-divider);border-radius:12rpx;background:#f7fafc;color:var(--workspace-accent-deep);font-size:20rpx}
+.section-title{display:block;min-width:0;font-size:28rpx;font-weight:800;line-height:1.5}
+.section-subtitle{display:block;margin-top:5rpx;color:var(--workspace-text-muted);font-size:19rpx}
+.empty-copy,.notice-copy{display:block;margin-top:18rpx;color:var(--workspace-text-muted);font-size:21rpx;line-height:1.6}
+.notice-copy{border-radius:14rpx;padding:14rpx;background:#fff8e9;color:#80602d}
+.profile-list{display:flex;flex-direction:column;gap:14rpx;margin-top:18rpx}
+.profile-item{display:flex;align-items:center;justify-content:space-between;gap:14rpx;padding:18rpx;border:1rpx solid var(--workspace-divider);border-radius:16rpx;background:#f9fbfc}
+.profile-item.selected{border-color:var(--workspace-accent-deep);background:#edf5fa}
+.profile-item>view{display:flex;min-width:0;flex:1;flex-direction:column;gap:6rpx}
+.profile-item>view text:first-child{font-size:23rpx;font-weight:800}
+.profile-item>view text:not(:first-child){color:var(--workspace-text-muted);font-size:19rpx}
+.profile-item>button{min-height:48rpx;padding:0 15rpx;border:1rpx solid #e8c7c4;border-radius:11rpx;background:#fff7f6;color:#a64d45;font-size:19rpx}
+.field{display:flex;flex-direction:column;gap:10rpx;margin-top:22rpx}
+.field>text{color:var(--workspace-text-secondary);font-size:24rpx;line-height:1.5;font-weight:650}
+.field input,.field textarea{box-sizing:border-box;display:block;width:100%;min-width:0;color:var(--workspace-text);border:1rpx solid #d5e0e7;border-radius:14rpx;background:#f9fbfc;font-size:28rpx}
+.field input{height:88rpx;min-height:44px;padding:0 20rpx;line-height:normal}
+.field textarea{height:180rpx;min-height:90px;padding:18rpx 20rpx;line-height:1.6}
+.companion-card{margin-top:18rpx;padding:18rpx;border:1rpx solid var(--workspace-divider);border-radius:16rpx;background:#f8fafb}
+.companion-card>.section-head>text{font-size:22rpx;font-weight:750}
+.travel-options{display:flex;gap:14rpx;margin-top:24rpx}
+.travel-options button{box-sizing:border-box;display:flex;align-items:center;justify-content:center;flex:1;min-width:0;height:80rpx;min-height:40px;margin:0;padding:0 16rpx;border:1rpx solid var(--workspace-divider);border-radius:14rpx;background:#eef3f7;color:var(--workspace-text-secondary);font-size:28rpx;line-height:1.2}.travel-options button.active{background:var(--workspace-accent-deep);border-color:var(--workspace-accent-deep);color:#fff}
+.privacy-card{background:#f8fbfd}
+.profile-save-card{background:#f7fbf8}
+.privacy-check{display:flex;align-items:flex-start;gap:12rpx;line-height:1.6;font-size:23rpx;font-weight:750}
+.privacy-copy{display:block;margin-top:15rpx;color:var(--workspace-text-muted);font-size:20rpx;line-height:1.75}
+.submit-error{border:1rpx solid #edc8c5;border-radius:14rpx;padding:18rpx;background:#fff4f3;color:#a63f3f;font-size:21rpx}
+.submit-button{box-sizing:border-box;width:100%;display:flex;align-items:center;justify-content:center;height:88rpx;min-height:44px;margin:0;padding:0 18rpx;line-height:1.3;border-radius:16rpx;background:var(--workspace-accent-deep);color:#fff;font-size:26rpx;font-weight:800}
+.submit-button[disabled]{opacity:.65}
+.submit-hint{color:var(--workspace-text-muted);font-size:20rpx;text-align:center}
+.pass-card{display:flex;align-items:center;flex-direction:column;padding:42rpx 30rpx;background:linear-gradient(155deg,#e9f8f0,#fff 56%);border-color:#aad7c3}
+.pass-check{display:flex;width:112rpx;height:112rpx;align-items:center;justify-content:center;border-radius:50%;background:#2f8065;color:#fff;font-size:62rpx;font-weight:900;box-shadow:0 12rpx 30rpx rgba(47,128,101,.22)}
+.pass-label{margin-top:22rpx;color:#247157;font-size:36rpx;font-weight:950}
+.pass-project{margin-top:10rpx;color:var(--workspace-text-secondary);font-size:23rpx;text-align:center}
+.pass-current{display:flex;width:100%;align-items:center;justify-content:space-between;margin-top:28rpx;border-radius:16rpx;padding:20rpx;background:#236e55;color:#fff}
+.pass-current text:first-child{font-size:20rpx}
+.pass-current text:last-child{font-size:27rpx;font-weight:900;font-variant-numeric:tabular-nums}
+.pass-grid{display:grid;width:100%;grid-template-columns:150rpx 1fr;gap:0;margin-top:24rpx;border-top:1rpx solid #cfe5db}
+.pass-grid text{padding:16rpx 0;border-bottom:1rpx solid #dcebe4;font-size:22rpx;line-height:1.5}
+.pass-grid text:nth-child(odd){color:var(--workspace-text-muted)}
+.pass-grid text:nth-child(even){overflow-wrap:anywhere;font-weight:650}
+.pass-hint{margin-top:24rpx;color:#44705f;font-size:20rpx;line-height:1.7;text-align:center}
+.pass-card.expired{border-color:#e7c5c1;background:linear-gradient(155deg,#fceeed,#fff 56%)}
+.pass-card.expired .pass-check,.pass-card.expired .pass-current{background:#b75353}
+.pass-card.expired .pass-label{color:#a44444}
+.pass-reload{min-height:70rpx;margin-top:22rpx;padding:0 34rpx;border-radius:14rpx;background:var(--workspace-accent-deep);color:#fff;font-size:23rpx;font-weight:800}
+.project-info-button{min-height:64rpx;margin-top:24rpx;border:1rpx solid #a8c4d7;border-radius:14rpx;background:#fff;color:var(--workspace-accent-deep);font-size:23rpx;font-weight:800}
+.project-profile-content{display:flex;flex-direction:column;gap:20rpx;padding:20rpx 24rpx calc(46rpx + env(safe-area-inset-bottom))}
+.public-project-hero,.public-project-card{border:1rpx solid var(--workspace-divider);border-radius:22rpx;background:#fff;box-shadow:var(--workspace-shadow)}
+.public-project-hero{padding:30rpx;background:linear-gradient(145deg,#eaf3fa,#fff)}
+.public-project-label,.public-project-title,.public-project-subtitle{display:block}
+.public-project-label{color:var(--workspace-accent-deep);font-size:18rpx;font-weight:850;letter-spacing:3rpx}
+.public-project-title{margin-top:12rpx;font-size:34rpx;font-weight:900;line-height:1.45}
+.public-project-subtitle{margin-top:10rpx;color:var(--workspace-text-muted);font-size:22rpx}
+.public-project-card{padding:24rpx}
+.public-project-section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18rpx;font-size:27rpx;font-weight:850}
+.public-project-section-head text:last-child:not(:first-child){color:var(--workspace-text-muted);font-size:20rpx;font-weight:500}
+.public-project-swiper{height:360rpx;overflow:hidden;border-radius:18rpx;background:#eef3f6}
+.public-project-swiper image{width:100%;height:100%}
+.public-project-empty-image{display:flex;height:190rpx;align-items:center;justify-content:center;border:1rpx dashed var(--workspace-divider);border-radius:18rpx;background:#f8fafb;color:var(--workspace-text-muted);font-size:22rpx}
+.public-project-image-error{display:block;margin-top:12rpx;color:#a64d45;font-size:20rpx}
+.public-project-fields{border-top:1rpx solid var(--workspace-divider)}
+.public-project-field{display:grid;grid-template-columns:180rpx 1fr;gap:20rpx;padding:18rpx 0;border-bottom:1rpx solid var(--workspace-divider);font-size:22rpx;line-height:1.65}
+.public-project-field:last-child{border-bottom:0}
+.public-project-field text:first-child{color:var(--workspace-text-muted)}
+.public-project-field text:last-child{overflow-wrap:anywhere;white-space:pre-wrap}
+.public-project-boundary{padding:8rpx 20rpx 20rpx;color:var(--workspace-text-muted);font-size:19rpx;line-height:1.7;text-align:center}
 
-<style scoped>
 .personal-info-note{padding:20rpx;margin:12rpx 0;border-radius:12rpx;background:#eef6ff;color:#285b83;font-size:25rpx;line-height:1.6}
-.remember-info-control{display:block;margin:24rpx 0;font-size:25rpx;color:#385366;line-height:1.7}.remember-info-control label{display:flex;align-items:flex-start;gap:10rpx}.remember-info-control text{flex:1;min-width:0}
-</style>
+.remember-info-control{display:block;margin:24rpx 0;font-size:25rpx;color:#385366;line-height:1.7}
+.remember-info-control label{display:flex;align-items:flex-start;gap:10rpx}
+.remember-info-control text{flex:1;min-width:0}
 
-<style scoped>
-.meeting-choice{display:flex;align-items:flex-start;gap:14rpx;padding:22rpx 0;border-bottom:1rpx solid #e7edf3}.meeting-choice>view{display:flex;flex:1;min-width:0;flex-direction:column;gap:8rpx}.meeting-choice text:first-child{font-size:29rpx;font-weight:650;color:#203c52}.meeting-choice text{font-size:24rpx;color:#667989;line-height:1.5}.matched-people{display:flex;flex-direction:column;gap:12rpx;text-align:left;margin-top:24rpx;font-size:26rpx;color:#456253}
+.meeting-choice{box-sizing:border-box;display:flex;align-items:flex-start;gap:14rpx;padding:20rpx;border:1rpx solid var(--workspace-divider);border-radius:16rpx;background:#f9fbfc}
+.meeting-choice>view{display:flex;flex:1;min-width:0;flex-direction:column;gap:8rpx}
+.meeting-choice .meeting-name{font-size:27rpx;font-weight:700;color:var(--workspace-text)}
+.meeting-choice text{font-size:23rpx;color:var(--workspace-text-secondary);line-height:1.6;overflow-wrap:anywhere}
+.matched-people{display:flex;flex-direction:column;gap:12rpx;text-align:left;margin-top:24rpx;font-size:26rpx;color:#456253}
+
+.guard-navbar{position:sticky;top:0;z-index:30;background:var(--workspace-page)}
+.guard-placeholder{font-size:26rpx;color:#8a96a5}
+.field{min-width:0}
+.meeting-sync-time{display:block;margin-top:12rpx;color:var(--workspace-text-muted);font-size:20rpx;line-height:1.6}
+.meeting-choices{display:flex;flex-direction:column;gap:16rpx;margin-top:20rpx}
+.meeting-choice.selected{border-color:var(--workspace-accent-deep);background:#eef6fc}
+.meeting-choice.registered{background:#f0f8f3}
+.meeting-choice .meeting-registered{align-self:flex-start;padding:2rpx 12rpx;border-radius:8rpx;background:#e2f3e9;color:#277655;font-size:21rpx}
+.meeting-choice checkbox,.privacy-check checkbox,.remember-info-control checkbox{flex-shrink:0}
+.privacy-check>text{flex:1;min-width:0}
+.meeting-selection-summary{display:block;margin-top:20rpx;padding:16rpx;border-radius:12rpx;background:#eef6fc;color:var(--workspace-accent-deep);font-size:22rpx;line-height:1.6}
+.pass-current{box-sizing:border-box;gap:16rpx;flex-wrap:wrap}
+.pass-grid{grid-template-columns:130rpx minmax(0,1fr)}
+.section-head button::after,.travel-options button::after,.submit-button::after{border:0}
 </style>

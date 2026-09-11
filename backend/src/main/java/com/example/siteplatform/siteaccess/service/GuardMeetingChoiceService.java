@@ -55,7 +55,10 @@ public class GuardMeetingChoiceService {
         }
         var result = new ArrayList<PublicGuardMeetingChoiceVO>();
         for (var value : values) {
-            String token = UUID.randomUUID().toString().replace("-", "");
+            // 同一短会话、同一会议版本保持稳定，轮询不会丢失访客已勾选的会议。
+            // 版本或会话变化即换证；仍通过 Redis 校验归属和有效期，不暴露业务主键。
+            String token = crypto.fingerprint("guard-meeting-choice:v1", crypto.digest(sessionToken)
+                    + ":" + context.projectId() + ":" + value.getId() + ":" + value.getVersion()).substring(0, 32);
             var choice = new Choice(value.getId(), context.projectId(), value.getVersion(), crypto.digest(sessionToken));
             try {
                 redis.opsForValue().set(PREFIX + crypto.digest(token), json.writeValueAsString(choice), Duration.ofMinutes(30));

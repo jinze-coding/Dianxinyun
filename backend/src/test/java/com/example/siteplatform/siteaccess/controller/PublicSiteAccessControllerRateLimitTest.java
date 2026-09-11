@@ -74,7 +74,7 @@ class PublicSiteAccessControllerRateLimitTest {
                     .contentType(MediaType.APPLICATION_JSON).content("{}"))).andExpect(status().isOk());
         }
         verify(rateLimitService).check("public-site-guard-state", CLIENT_IP, 600, Duration.ofMinutes(10));
-        verify(rateLimitService).check("public-site-guard-meetings", CLIENT_IP, 120, Duration.ofMinutes(10));
+        verify(rateLimitService).check("public-site-guard-meetings", CLIENT_IP, 600, Duration.ofMinutes(10));
         org.mockito.Mockito.reset(guardVisitService);
         org.mockito.Mockito.doThrow(com.example.siteplatform.common.BusinessException.of(429, "请稍后重试"))
                 .when(rateLimitService).check(anyString(), anyString(), anyInt(), any(Duration.class));
