@@ -8,7 +8,9 @@ export const getSealApplication = (id) => get(`/seal/applications/${id}`);
 export const createSealApplication = (data) => post('/seal/applications', data);
 export const updateSealApplication = (id, data) => put(`/seal/applications/${id}`, data);
 export const submitSealApplication = (id) => post(`/seal/applications/${id}/submit`);
-export const approveSealApplication = (id, opinion) => post(`/seal/applications/${id}/approve`, { opinion });
+export const approveSealApplication = (id, opinion, stampedResultRequired = false) => post(
+  `/seal/applications/${id}/approve`, { opinion, stampedResultRequired },
+);
 export const rejectSealApplication = (id, opinion) => post(`/seal/applications/${id}/reject`, { opinion });
 export const withdrawSealApplication = (id) => post(`/seal/applications/${id}/withdraw`);
 export const copySealApplication = (id, data) => post(`/seal/applications/${id}/copy`, data);

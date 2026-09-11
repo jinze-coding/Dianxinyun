@@ -35,6 +35,7 @@ public class SealApplication {
     private Long approverId;
     private String approverName;
     private String approvalOpinion;
+    private Boolean stampedResultRequired;
     private LocalDateTime approvalTime;
     private Integer version;
     @TableLogic

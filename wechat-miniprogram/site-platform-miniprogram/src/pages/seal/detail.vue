@@ -34,6 +34,7 @@ const busy = ref(false);
 const errorMessage = ref('');
 const opinionAction = ref<OpinionAction>(null);
 const opinion = ref('');
+const stampedResultRequired = ref(false);
 const archiveOpen = ref(false);
 const archiveFile = ref<SealApplicationFile | null>(null);
 const archiveMode = ref<ArchiveMode>('NEW_DOCUMENT');
@@ -89,7 +90,6 @@ function confirmModal(title: string, content: string) {
 
 async function submitDraft() {
   if (!detail.value?.canSubmit || busy.value) return;
-  if (!sourceFiles.value.length) { showToast('请先编辑草稿并上传待盖章资料'); return; }
   if (!await confirmModal('提交用印审批', '提交后申请内容和原始资料将不可修改，确认继续？')) return;
   busy.value = true;
   try { detail.value = await submitSealApplication(applicationId.value); showToast('申请已提交审批'); }
@@ -97,7 +97,15 @@ async function submitDraft() {
   finally { busy.value = false; }
 }
 
-function openOpinion(action: Exclude<OpinionAction, null>) { opinion.value = ''; opinionAction.value = action; }
+function openOpinion(action: Exclude<OpinionAction, null>) {
+  opinion.value = '';
+  stampedResultRequired.value = false;
+  opinionAction.value = action;
+}
+
+function changeStampedRequirement(event: unknown) {
+  stampedResultRequired.value = (event as { detail?: { value?: boolean } }).detail?.value === true;
+}
 
 async function submitOpinion() {
   if (!detail.value || !opinionAction.value || busy.value) return;
@@ -105,7 +113,7 @@ async function submitOpinion() {
   busy.value = true;
   try {
     detail.value = opinionAction.value === 'APPROVE'
-      ? await approveSealApplication(detail.value.id, opinion.value.trim())
+      ? await approveSealApplication(detail.value.id, opinion.value.trim(), stampedResultRequired.value)
       : await rejectSealApplication(detail.value.id, opinion.value.trim());
     showToast(opinionAction.value === 'APPROVE' ? '审批已通过' : '申请已驳回');
     opinionAction.value = null;
@@ -131,7 +139,7 @@ async function copyApplication() {
       requestKey: `seal-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       ccUserIds: detail.value.ccRecipients.map((item) => item.userId)
     });
-    showToast('已生成新草稿，请补充本次待盖章资料');
+    showToast('已生成新草稿，附件可按需上传');
     setTimeout(() => uni.redirectTo({ url: `/pages/seal/apply?id=${copied.id}` }), 450);
   } catch (error) { showToast(error instanceof Error ? error.message : '复制申请失败'); }
   finally { busy.value = false; }
@@ -307,25 +315,26 @@ async function confirmArchive() {
           <view class="info-card">
             <view class="section-title">申请信息</view>
             <view class="row"><text>公司名称</text><text>{{ detail.companyName || '—' }}</text></view><view class="row"><text>申请部门 / 项目部</text><text>{{ detail.departmentName || detail.projectName }}</text></view><view class="row"><text>使用印章</text><text>{{ detail.sealName }}</text></view><view class="row"><text>申请人</text><text>{{ detail.applicantName || '—' }}</text></view><view class="row"><text>联系方式</text><text>{{ detail.applicantPhone || '—' }}</text></view><view class="row"><text>申请日期</text><text>{{ formatTime(detail.submitTime || detail.applicationDate || detail.createTime) }}</text></view>
+            <view v-if="detail.status === 'APPROVED'" class="row"><text>盖章件上传要求</text><text>{{ detail.stampedResultRequired ? '用印后须上传' : '按需上传' }} · {{ stampedFiles.length ? `已上传 ${stampedFiles.length} 份` : detail.stampedResultRequired ? '待上传' : '未上传' }}</text></view>
             <view class="purpose"><text>用印事由</text><text>{{ detail.purpose }}</text></view>
           </view>
 
           <view class="info-card"><view class="section-title">用印文件清单</view><view v-for="(item,index) in detail.items" :key="item.id || index" class="item"><text>{{ index + 1 }}</text><text>{{ item.documentName }}</text><text>{{ item.copies }} 份</text></view></view>
 
-          <view class="info-card"><view class="section-head"><view><text class="section-title">待盖章资料</text><text>{{ sourceFiles.length }} 个源文件</text></view></view><view v-for="file in sourceFiles" :key="file.id" class="file-row"><button class="file-main" @tap="openFile(file)"><view><text>{{ fileName(file) }}</text><text>{{ formatFileSize(file.fileSize) }} · {{ file.uploaderName || '申请人' }}</text></view><text>打开</text></button><button v-if="file.canDelete" class="delete" @tap="removeFile(file)">删除</button></view><view v-if="!sourceFiles.length" class="empty-line">尚未上传待盖章资料</view></view>
+          <view class="info-card"><view class="section-head"><view><text class="section-title">待盖章资料（选填）</text><text>{{ sourceFiles.length }} 个源文件</text></view></view><view v-for="file in sourceFiles" :key="file.id" class="file-row"><button class="file-main" @tap="openFile(file)"><view><text>{{ fileName(file) }}</text><text>{{ formatFileSize(file.fileSize) }} · {{ file.uploaderName || '申请人' }}</text></view><text>打开</text></button><button v-if="file.canDelete" class="delete" @tap="removeFile(file)">删除</button></view><view v-if="!sourceFiles.length" class="empty-line">本次未上传附件</view></view>
 
-          <view class="info-card result-card"><view class="section-head"><view><text class="section-title">盖章件与资料归档</text><text>审批通过后补传，归档时可新建资料或追加版本</text></view><button v-if="detail.canUploadStampedResult" :disabled="busy" @tap="uploadStampedFile">＋ 补传盖章件</button></view><view v-for="file in stampedFiles" :key="file.id" class="result-file"><button class="file-main" @tap="openFile(file)"><view><text>{{ fileName(file) }}</text><text>{{ formatFileSize(file.fileSize) }} · {{ file.archivedDocumentId ? '已归档资料库' : '待归档' }}</text></view><text>打开</text></button><view class="file-actions"><button v-if="detail.canArchive && !file.archivedDocumentId" @tap="openArchive(file)">归档</button><button v-if="file.archivedDocumentId" @tap="navigateTo(`/pages/documents/detail?id=${file.archivedDocumentId}`)">查看资料</button><button v-if="file.canDelete" class="delete" @tap="removeFile(file)">删除</button></view></view><view v-if="!stampedFiles.length" class="empty-line">{{ detail.status === 'APPROVED' ? '审批已通过，请补传最终盖章件' : '审批通过后可补传盖章件' }}</view></view>
+          <view class="info-card result-card"><view class="section-head"><view><text class="section-title">盖章件与资料归档</text><text>审批时决定是否要求补传，上传后可按需归档</text></view><button v-if="detail.canUploadStampedResult" :disabled="busy" @tap="uploadStampedFile">＋ 补传盖章件</button></view><view v-for="file in stampedFiles" :key="file.id" class="result-file"><button class="file-main" @tap="openFile(file)"><view><text>{{ fileName(file) }}</text><text>{{ formatFileSize(file.fileSize) }} · {{ file.archivedDocumentId ? '已归档资料库' : '待归档' }}</text></view><text>打开</text></button><view class="file-actions"><button v-if="detail.canArchive && !file.archivedDocumentId" @tap="openArchive(file)">归档</button><button v-if="file.archivedDocumentId" @tap="navigateTo(`/pages/documents/detail?id=${file.archivedDocumentId}`)">查看资料</button><button v-if="file.canDelete" class="delete" @tap="removeFile(file)">删除</button></view></view><view v-if="!stampedFiles.length" class="empty-line">{{ detail.status === 'APPROVED' ? (detail.stampedResultRequired ? '审批要求用印后上传盖章件，当前待上传' : '盖章件按需上传') : '审批时可选择是否要求上传盖章件' }}</view></view>
 
           <view v-if="detail.approvalOpinion || detail.approverName" class="opinion-card"><text>项目经理审批意见</text><text>{{ detail.approvalOpinion || '无' }}</text><text>{{ detail.approverName || '审批人' }} · {{ formatTime(detail.approvalTime) }}</text></view>
           <view v-if="detail.ccRecipients.length" class="info-card"><view class="section-title">通知抄送</view><view class="cc-list"><text v-for="item in detail.ccRecipients" :key="item.userId">{{ item.displayName }}</text></view></view>
-          <view v-if="detail.logs.length" class="info-card"><view class="section-title">流转记录</view><view v-for="log in detail.logs" :key="log.id" class="log-row"><view></view><view><text>{{ log.actionLabel || log.action }}</text><text v-if="log.opinion || log.description">{{ log.opinion || log.description }}</text><text>{{ log.operatorName || '系统' }} · {{ formatTime(log.createTime) }}</text></view></view></view>
+          <view v-if="detail.logs.length" class="info-card"><view class="section-title">流转记录</view><view v-for="log in detail.logs" :key="log.id" class="log-row"><view></view><view><text>{{ log.actionLabel || log.action }}</text><text v-if="log.opinion || log.description">{{ log.opinion || log.description }}</text><text v-if="log.opinion && log.description">{{ log.description }}</text><text>{{ log.operatorName || '系统' }} · {{ formatTime(log.createTime) }}</text></view></view></view>
 
           <view class="action-row"><button v-if="detail.canEdit" @tap="navigateTo(`/pages/seal/apply?id=${detail.id}`)">继续填写</button><button v-if="detail.canSubmit" class="primary" :disabled="busy" @tap="submitDraft">提交审批</button><button v-if="detail.canApprove" class="approve" :disabled="busy" @tap="openOpinion('APPROVE')">审批通过</button><button v-if="detail.canReject" class="reject" :disabled="busy" @tap="openOpinion('REJECT')">驳回</button><button v-if="detail.canCancel" class="reject" :disabled="busy" @tap="withdraw">撤回</button><button v-if="canCopy" :disabled="busy" @tap="copyApplication">复制申请</button></view>
         </template>
       </view>
     </scroll-view>
 
-    <view v-if="opinionAction" class="overlay" @tap="opinionAction = null"><view class="sheet" @tap.stop><view class="sheet-head"><view><text>{{ opinionAction === 'APPROVE' ? '填写项目经理审批意见' : '填写驳回原因' }}</text><text>审批意见会进入申请单和流转记录</text></view><button @tap="opinionAction = null">×</button></view><textarea v-model="opinion" maxlength="1000" :placeholder="opinionAction === 'APPROVE' ? '请输入项目经理审批意见' : '请明确填写需修改的内容'" /><button class="confirm" :class="{ danger: opinionAction === 'REJECT' }" :disabled="busy" @tap="submitOpinion">确认{{ opinionAction === 'APPROVE' ? '通过' : '驳回' }}</button></view></view>
+    <view v-if="opinionAction" class="overlay" @tap="opinionAction = null"><view class="sheet" @tap.stop><view class="sheet-head"><view><text>{{ opinionAction === 'APPROVE' ? '填写项目经理审批意见' : '填写驳回原因' }}</text><text>审批意见会进入申请单和流转记录</text></view><button @tap="opinionAction = null">×</button></view><textarea v-model="opinion" maxlength="1000" :placeholder="opinionAction === 'APPROVE' ? '请输入项目经理审批意见' : '请明确填写需修改的内容'" /><view v-if="opinionAction === 'APPROVE'" class="stamped-requirement"><view><text>要求上传盖章件</text><text>勾选后须在用印后补传，未勾选时按需上传</text></view><switch :checked="stampedResultRequired" :disabled="busy" color="#2f8065" @change="changeStampedRequirement" /></view><button class="confirm" :class="{ danger: opinionAction === 'REJECT' }" :disabled="busy" @tap="submitOpinion">确认{{ opinionAction === 'APPROVE' ? '通过' : '驳回' }}</button></view></view>
 
     <view v-if="archiveOpen" class="overlay" @tap="closeArchive">
       <view class="sheet archive-sheet" @tap.stop>
@@ -369,4 +378,6 @@ async function confirmArchive() {
 .action-row { display: flex; flex-wrap: wrap; gap: 11rpx; }.action-row button { min-width: 180rpx; min-height: 70rpx; flex: 1; padding: 0 17rpx; border: 1rpx solid #cbd7df; border-radius: 13rpx; background: #fff; color: #52697b; font-size: 21rpx; font-weight: 750; }.action-row button.primary { border-color: #8a612c; background: #8a612c; color: #fff; }.action-row button.approve { border-color: #2f8065; background: #2f8065; color: #fff; }.action-row button.reject { border-color: #e4bcbc; color: #ad514c; }
 .overlay { position: fixed; z-index: 90; inset: 0; display: flex; align-items: flex-end; background: rgba(23,35,48,.43); }.sheet { width: 100%; padding: 18rpx 24rpx calc(24rpx + env(safe-area-inset-bottom)); border-radius: 24rpx 24rpx 0 0; background: #fff; }.sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18rpx; }.sheet-head view text { display: block; }.sheet-head view text:first-child { font-size: 27rpx; font-weight: 820; }.sheet-head view text:last-child { margin-top: 5rpx; color: #8b98a5; font-size: 19rpx; }.sheet-head>button { width: 50rpx; height: 50rpx; border-radius: 50%; background: #eef2f5; color: #687889; font-size: 27rpx; }.sheet textarea { box-sizing: border-box; width: 100%; min-height: 180rpx; margin-top: 20rpx; padding: 16rpx; border: 1rpx solid #dce4e9; border-radius: 13rpx; background: #f8fafb; font-size: 22rpx; }.confirm { width: 100%; min-height: 76rpx; margin-top: 18rpx; border-radius: 13rpx; background: #2f8065; color: #fff; font-size: 23rpx; font-weight: 780; }.confirm.danger { background: #b75353; }.archive-sheet label { display: block; margin-top: 16rpx; }.archive-sheet label>text { display: block; margin-bottom: 8rpx; color: #617284; font-size: 20rpx; font-weight: 700; }.archive-sheet input,.picker-value { box-sizing: border-box; width: 100%; min-height: 70rpx; padding: 15rpx 16rpx; border: 1rpx solid #dfe6eb; border-radius: 12rpx; background: #f8fafb; font-size: 21rpx; }.mode-tabs { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9rpx; margin-top: 18rpx; padding: 7rpx; border-radius: 14rpx; background: #e8edf1; }.mode-tabs button { min-height: 56rpx; border-radius: 10rpx; color: #6b7a89; font-size: 20rpx; }.mode-tabs button.active { background: #fff; color: #315f86; font-weight: 750; }
 .archive-document-search { display: flex; gap: 10rpx; }.archive-document-search input { min-width: 0; flex: 1; }.archive-document-search button { width: 112rpx; flex-shrink: 0; border-radius: 12rpx; background: #e8f0f4; color: #315f86; font-size: 20rpx; }.archive-document-meta { display: flex; min-height: 54rpx; align-items: center; justify-content: space-between; gap: 12rpx; }.archive-document-meta text { color: #8a97a4; font-size: 18rpx; }.archive-document-meta button { min-height: 44rpx; padding: 0 12rpx; border-radius: 10rpx; background: #edf2f5; color: #41667f; font-size: 18rpx; }.archive-document-empty { display: block; padding: 12rpx 0 2rpx; color: #ad514c; font-size: 18rpx; }.archive-sheet { max-height: 88vh; overflow-y: auto; }
+.stamped-requirement { display: flex; align-items: center; justify-content: space-between; gap: 18rpx; margin-top: 20rpx; padding: 18rpx; border: 1rpx solid #dce4e9; border-radius: 13rpx; }
+.stamped-requirement>view { flex: 1; min-width: 0; }.stamped-requirement text { display: block; color: #34475a; font-size: 22rpx; }.stamped-requirement text+text { margin-top: 8rpx; color: #7b8996; font-size: 19rpx; line-height: 1.5; }.stamped-requirement switch { flex-shrink: 0; }
 </style>

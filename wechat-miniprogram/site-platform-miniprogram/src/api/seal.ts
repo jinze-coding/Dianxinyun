@@ -175,9 +175,9 @@ export async function submitSealApplication(id: number): Promise<SealApplication
   return request<SealApplicationDetail>(`/seal/applications/${id}/submit`, { method: 'POST' });
 }
 
-export async function approveSealApplication(id: number, opinion: string): Promise<SealApplicationDetail> {
+export async function approveSealApplication(id: number, opinion: string, stampedResultRequired = false): Promise<SealApplicationDetail> {
   return request<SealApplicationDetail>(`/seal/applications/${id}/approve`, {
-    method: 'POST', data: { opinion }
+    method: 'POST', data: { opinion, stampedResultRequired }
   });
 }
 

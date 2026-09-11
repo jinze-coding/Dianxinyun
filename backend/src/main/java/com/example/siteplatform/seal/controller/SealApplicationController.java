@@ -104,7 +104,8 @@ public class SealApplicationController {
                                              @Valid @RequestBody SealDecisionRequest request,
                                              @RequestHeader(value = "Authorization", required = false) String token,
                                              HttpServletRequest servletRequest) {
-        return Result.success(service.approve(id, request.getOpinion(), authService.getCurrentUser(token), servletRequest));
+        return Result.success(service.approve(id, request.getOpinion(), request.getStampedResultRequired(),
+                authService.getCurrentUser(token), servletRequest));
     }
 
     @PostMapping("/{id}/reject")

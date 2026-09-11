@@ -16,6 +16,7 @@
     "test:project-location": "node --experimental-strip-types scripts/test-project-map-navigation.mjs",
     "test:visitor-profile": "node --experimental-strip-types scripts/test-visitor-profile-flow.mjs",
     "test:meeting-dialogs": "node --experimental-strip-types scripts/test-meeting-service-dialogs.mjs",
+    "test:seal-attachments": "node scripts/test-seal-attachments.mjs",
     "test:edge-inspection": "node --experimental-strip-types scripts/test-edge-inspection-view.mjs",
     "test:scan": "node --experimental-strip-types scripts/test-electric-box-scene.mjs && node --experimental-strip-types scripts/test-visitor-invite-scene.mjs && node --experimental-strip-types scripts/test-meeting-invite-scene.mjs && node --experimental-strip-types scripts/test-meeting-checkin-scene.mjs && node --experimental-strip-types scripts/test-guard-visitor-scene.mjs && npm run test:visitor-personal-info && npm run test:visitor-profile && npm run test:project-location && node --experimental-strip-types scripts/test-seal-scene.mjs",
     "verify:mp-weixin:real": "node scripts/verify-mp-weixin-real.mjs",

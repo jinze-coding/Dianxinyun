@@ -32,6 +32,9 @@ import com.example.siteplatform.workflow.service.WorkflowApprovalConfigService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -48,6 +51,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -171,7 +175,7 @@ class SealApplicationServiceTest {
     }
 
     @Test
-    void submitGeneratesNumberAndSnapshotsCurrentProjectSealApplicantConfigAndCandidates() {
+    void submitWithoutAttachmentsGeneratesNumberAndSnapshotsCurrentProjectSealApplicantConfigAndCandidates() {
         SealApplication draft = draft(42L, applicant.getId());
         SealDefinition currentSeal = seal(3L, 9L, "合同专用章", "最新公司名称");
         ProjectInfo currentProject = project(9L, "最新项目名称");
@@ -184,7 +188,6 @@ class SealApplicationServiceTest {
         when(sealService.requireActiveSeal(3L, 9L)).thenReturn(currentSeal);
         when(projectMapper.selectById(9L)).thenReturn(currentProject);
         when(itemMapper.selectCount(any())).thenReturn(1L);
-        when(applicationFileMapper.selectCount(any())).thenReturn(1L);
         when(configService.requireEnabledSnapshot(9L, 3L)).thenReturn(
                 new WorkflowApprovalConfigService.ApprovalConfigSnapshot(
                         config, List.of(selfApprover, secondApprover)));
@@ -238,6 +241,7 @@ class SealApplicationServiceTest {
         assertEquals(number.getValue(), result.getApplicationNo());
         assertEquals("最新项目名称", result.getDepartmentName());
         assertEquals("合同专用章", result.getSealName());
+        assertTrue(result.getFiles().isEmpty(), "没有源文件附件也可以提交审批");
         assertTrue(result.getCanApprove(), "申请人被直接配置为审批人时应能审批本人申请");
 
         ArgumentCaptor<WorkflowApprovalInstance> instance = ArgumentCaptor.forClass(WorkflowApprovalInstance.class);
@@ -260,6 +264,21 @@ class SealApplicationServiceTest {
     }
 
     @Test
+    void optionalAttachmentsDoNotMakeDocumentNamesAndCopiesOptional() {
+        when(applicationMapper.selectForUpdate(42L)).thenReturn(draft(42L, applicant.getId()));
+        when(sealService.requireActiveSeal(3L, 9L)).thenReturn(seal(3L, 9L, "项目章", "测试公司"));
+        when(projectMapper.selectById(9L)).thenReturn(project(9L, "测试项目"));
+        when(itemMapper.selectCount(any())).thenReturn(0L);
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.submit(42L, applicant, null));
+
+        assertTrue(error.getMessage().contains("至少填写一项用印文件"));
+        verify(instanceMapper, never()).insert(any());
+        verify(taskMapper, never()).insert(any());
+    }
+
+    @Test
     void repeatedSubmitReturnsExistingApplicationWithoutCreatingDuplicateWorkflow() {
         SealApplication alreadySubmitted = pending(42L, applicant.getId(), 501L);
         when(applicationMapper.selectForUpdate(42L)).thenReturn(alreadySubmitted);
@@ -277,7 +296,7 @@ class SealApplicationServiceTest {
     @Test
     void approveAndRejectBothRequireNonBlankManagerOpinionBeforeAnyWrite() {
         BusinessException approve = assertThrows(BusinessException.class,
-                () -> service.approve(42L, "   ", applicant, null));
+                () -> service.approve(42L, "   ", true, applicant, null));
         BusinessException reject = assertThrows(BusinessException.class,
                 () -> service.reject(42L, null, applicant, null));
 
@@ -287,8 +306,10 @@ class SealApplicationServiceTest {
         verify(taskMapper, never()).decide(anyLong(), any(), anyString(), anyLong(), anyString(), anyString(), any());
     }
 
-    @Test
-    void explicitlyAssignedApplicantCanApproveOwnApplicationAndClosesOtherAnyOneTasks() {
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(booleans = {false, true})
+    void assignedApproverChoosesStampedRequirementAndClosesOtherAnyOneTasks(Boolean stampedResultRequired) {
         SealApplication pending = pending(42L, 7L, 501L);
         WorkflowApprovalTask ownTask = task(701L, 501L, 7L, 0);
         WorkflowApprovalInstance instance = instance(501L, 0);
@@ -304,21 +325,26 @@ class SealApplicationServiceTest {
             pending.setApproverName("申请人张三");
             pending.setApprovalOpinion("同意用印");
             pending.setApprovalTime(invocation.getArgument(6));
+            pending.setStampedResultRequired(invocation.getArgument(7));
             pending.setVersion(2);
             return 1;
         }).when(applicationMapper).decide(eq(42L), eq(1), eq(SealApplicationService.APPROVED), eq(7L),
-                eq("申请人张三"), eq("同意用印"), any());
+                eq("申请人张三"), eq("同意用印"), any(), eq(Boolean.TRUE.equals(stampedResultRequired)));
 
-        var result = service.approve(42L, "同意用印", applicant, null);
+        var result = service.approve(42L, "同意用印", stampedResultRequired, applicant, null);
 
         assertEquals(SealApplicationService.APPROVED, result.getStatus());
         assertEquals(7L, result.getApproverId());
         assertEquals("同意用印", result.getApprovalOpinion());
+        assertEquals(Boolean.TRUE.equals(stampedResultRequired), result.getStampedResultRequired());
+        assertTrue(result.getCanUploadStampedResult(), "要求上传和按需上传都允许申请人补传");
         verify(taskMapper).cancelPendingByInstance(eq(501L), any());
         ArgumentCaptor<SealApplicationLog> log = ArgumentCaptor.forClass(SealApplicationLog.class);
         verify(logMapper).insert(log.capture());
         assertEquals("APPROVE", log.getValue().getActionCode());
         assertEquals("同意用印", log.getValue().getOpinion());
+        assertTrue(log.getValue().getDescription().contains(Boolean.TRUE.equals(stampedResultRequired)
+                ? "用印后须上传盖章件" : "盖章件按需上传"));
     }
 
     @Test
@@ -328,13 +354,13 @@ class SealApplicationServiceTest {
         when(applicationMapper.selectForUpdate(42L)).thenReturn(pending);
         when(taskMapper.selectOne(any())).thenReturn(null);
         BusinessException error = assertThrows(BusinessException.class,
-                () -> service.approve(42L, "管理员代批", administrator, null));
+                () -> service.approve(42L, "管理员代批", true, administrator, null));
 
         assertEquals(403, error.getCode());
         assertTrue(error.getMessage().contains("不是该申请的待办审批人"));
         verify(taskMapper, never()).decide(anyLong(), any(), anyString(), anyLong(), anyString(), anyString(), any());
         verify(instanceMapper, never()).decide(anyLong(), any(), anyString(), anyLong(), anyString(), anyString(), any());
-        verify(applicationMapper, never()).decide(anyLong(), any(), anyString(), anyLong(), anyString(), anyString(), any());
+        verify(applicationMapper, never()).decide(anyLong(), any(), anyString(), anyLong(), anyString(), anyString(), any(), anyBoolean());
     }
 
     @Test
@@ -345,12 +371,12 @@ class SealApplicationServiceTest {
         when(permissionService.getProjectAccessStatus(8L, 9L)).thenReturn("DISABLED");
 
         BusinessException error = assertThrows(BusinessException.class,
-                () -> service.approve(42L, "试图继续审批", removedApprover, null));
+                () -> service.approve(42L, "试图继续审批", true, removedApprover, null));
 
         assertEquals(403, error.getCode());
         verify(taskMapper, never()).selectOne(any());
         verify(taskMapper, never()).decide(anyLong(), any(), anyString(), anyLong(), anyString(), anyString(), any());
-        verify(applicationMapper, never()).decide(anyLong(), any(), anyString(), anyLong(), anyString(), anyString(), any());
+        verify(applicationMapper, never()).decide(anyLong(), any(), anyString(), anyLong(), anyString(), anyString(), any(), anyBoolean());
     }
 
     @Test
@@ -368,7 +394,7 @@ class SealApplicationServiceTest {
 
         assertEquals(409, error.getCode());
         verify(instanceMapper, never()).decide(anyLong(), any(), anyString(), anyLong(), anyString(), anyString(), any());
-        verify(applicationMapper, never()).decide(anyLong(), any(), anyString(), anyLong(), anyString(), anyString(), any());
+        verify(applicationMapper, never()).decide(anyLong(), any(), anyString(), anyLong(), anyString(), anyString(), any(), anyBoolean());
         verify(taskMapper, never()).cancelPendingByInstance(anyLong(), any());
         verify(logMapper, never()).insert(any());
     }

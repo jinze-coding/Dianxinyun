@@ -74,6 +74,20 @@ class SealPdfServiceTest {
     }
 
     @Test
+    void approvedFormIncludesManagersStampedCopyChoice() throws Exception {
+        for (boolean required : new boolean[]{false, true}) {
+            SealApplicationVO application = application();
+            application.setStatus(SealApplicationService.APPROVED);
+            application.setStampedResultRequired(required);
+            byte[] bytes = new SealPdfService(null).render(application);
+            try (PDDocument document = Loader.loadPDF(bytes)) {
+                String text = new PDFTextStripper().getText(document).replaceAll("\\s+", "");
+                assertTrue(text.contains(required ? "盖章件要求：用印后须上传" : "盖章件要求：按需上传"));
+            }
+        }
+    }
+
+    @Test
     void xhtmlTemplateProducesSearchableMultipageChinesePdf() throws Exception {
         SealApplicationVO application = application();
         byte[] bytes = new SealPdfService(null).render(application);

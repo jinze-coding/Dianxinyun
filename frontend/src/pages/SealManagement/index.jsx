@@ -205,15 +205,17 @@ function ApplicationEditor({ value, ccCandidates, ccLoading, busy, onSearchCc, o
 
 function OpinionDialog({ action, busy, onClose, onSubmit }) {
   const [opinion, setOpinion] = useState('');
+  const [stampedResultRequired, setStampedResultRequired] = useState(false);
   const approving = action === 'approve';
   return (
     <Modal
       title={approving ? '填写项目经理审批意见' : '填写驳回意见'}
       subtitle="审批意见将进入正式申请单和操作留痕，提交后不可由申请人修改。"
       onClose={busy ? undefined : onClose}
-      footer={<><button onClick={onClose} disabled={busy}>取消</button><button className={approving ? 'primary' : 'danger'} disabled={busy || !opinion.trim()} onClick={() => onSubmit(opinion.trim())}>{busy ? '提交中…' : approving ? '同意用印' : '驳回申请'}</button></>}
+      footer={<><button onClick={onClose} disabled={busy}>取消</button><button className={approving ? 'primary' : 'danger'} disabled={busy || !opinion.trim()} onClick={() => onSubmit(opinion.trim(), approving && stampedResultRequired)}>{busy ? '提交中…' : approving ? '同意用印' : '驳回申请'}</button></>}
     >
       <label className="seal-dialog-field"><span>项目经理审批意见 *</span><textarea autoFocus value={opinion} maxLength={1000} onChange={(event) => setOpinion(event.target.value)} placeholder={approving ? '请填写同意用印的审批意见' : '请说明驳回原因和修改要求'} /></label>
+      {approving && <label className="seal-stamped-requirement"><input type="checkbox" checked={stampedResultRequired} disabled={busy} onChange={(event) => setStampedResultRequired(event.target.checked)} /><span><strong>要求上传盖章件</strong><small>勾选后，申请人须在用印后补传；未勾选时按需上传。</small></span></label>}
     </Modal>
   );
 }
@@ -569,7 +571,7 @@ export default function SealManagementPage({
         ccUserIds: (detail.ccRecipients || detail.ccUsers || []).map((user) => user.userId ?? user.id).filter(Boolean),
       }), '复制申请失败');
       const copiedId = copied?.id ?? copied?.applicationId;
-      setNotice('已复制为新草稿并保留 COPY 审计记录；原附件不会复制，请重新上传。');
+      setNotice('已复制为新草稿；原附件未复制，可按需上传。');
       await refreshAll();
       if (copiedId) await openDetail(copiedId);
     } catch (copyError) {
@@ -579,9 +581,9 @@ export default function SealManagementPage({
     }
   };
 
-  const submitOpinion = async (opinion) => {
+  const submitOpinion = async (opinion, stampedResultRequired) => {
     const action = opinionAction === 'approve'
-      ? () => approveSealApplication(detail.id, opinion)
+      ? () => approveSealApplication(detail.id, opinion, stampedResultRequired)
       : () => rejectSealApplication(detail.id, opinion);
     const succeeded = await runAction(action, opinionAction === 'approve' ? '审批已通过' : '申请已驳回');
     if (succeeded) setOpinionAction('');
@@ -858,13 +860,14 @@ export default function SealManagementPage({
               <div><span>申请日期</span><strong>{formatDateTime(detail.applicationDate || detail.createTime || detail.createdAt)}</strong></div>
               <div><span>当前状态</span><StatusPill status={detail.status} /></div>
               <div className="full"><span>用印事由</span><strong>{detail.purpose || '-'}</strong></div>
+              {statusOf(detail) === 'APPROVED' && <div><span>盖章件上传要求</span><strong>{detail.stampedResultRequired ? '用印后须上传' : '按需上传'}</strong><small>{stampedFiles.length ? `已上传 ${stampedFiles.length} 份` : detail.stampedResultRequired ? '待上传' : '未上传'}</small></div>}
               {detail.approvalTime && <div><span>审批完成时间</span><strong>{formatDateTime(detail.approvalTime)}</strong></div>}
               {detail.approvalOpinion && <div className="full"><span>项目经理审批意见</span><strong>{detail.approvalOpinion}</strong><small>{detail.approverName || '-'}</small></div>}
             </div>
             <section className="seal-detail-section"><h3>待盖章资料</h3><div className="seal-item-list">{(detail.items || []).map((item, index) => <div key={itemIdOf(item) || index}><span>{index + 1}</span><strong>{item.documentName || item.title}</strong><b>{item.copies || item.copyCount || 1} 份</b></div>)}{!detail.items?.length && <div className="seal-inline-empty">未填写资料明细</div>}</div></section>
-            <section className="seal-detail-section"><div className="seal-section-head"><h3>待盖章资料附件</h3>{detail.canEdit && <button onClick={() => sourceFileRef.current?.click()}>上传资料</button>}</div><input ref={sourceFileRef} type="file" hidden onChange={(event) => uploadSelectedFile(event, 'SOURCE')} /><div className="seal-file-list">{sourceFiles.map((file) => <div key={fileIdOf(file)}><div><strong>{file.fileName || file.originalFileName || file.originalName || `文件 ${fileIdOf(file)}`}</strong><span>{formatDateTime(file.createTime || file.createdAt || file.uploadTime)}</span></div><button onClick={() => previewFile(file)}>预览</button><button onClick={() => downloadFile(file)}>下载</button>{detail.canEdit && file.canDelete !== false && <button className="danger" onClick={() => removeFile(file)}>移除</button>}</div>)}{!sourceFiles.length && <div className="seal-inline-empty">尚未上传待盖章资料</div>}</div></section>
-            <section className="seal-detail-section"><div className="seal-section-head"><div><h3>盖章件与资料归档</h3><p>审批通过后上传盖章扫描件，再按需复制归档到工程资料。</p></div>{canUploadStamped && <button className="primary" onClick={() => stampedFileRef.current?.click()}>上传盖章件</button>}</div><input ref={stampedFileRef} type="file" hidden onChange={(event) => uploadSelectedFile(event, 'STAMPED_RESULT')} /><div className="seal-file-list">{stampedFiles.map((file) => <div key={fileIdOf(file)}><div><strong>{file.fileName || file.originalName || `文件 ${fileIdOf(file)}`}</strong><span>{file.archivedDocumentId ? `已归档为资料 #${file.archivedDocumentId}` : '尚未归档'}</span></div><button onClick={() => previewFile(file)}>预览</button><button onClick={() => downloadFile(file)}>下载</button>{detail.canArchive && !file.archivedDocumentId && <button className="primary" onClick={() => openArchive(file)}>归档</button>}</div>)}{!stampedFiles.length && <div className="seal-inline-empty">{statusOf(detail) === 'APPROVED' ? '尚未上传盖章件' : '审批通过后可上传盖章件'}</div>}</div></section>
-            <section className="seal-detail-section"><h3>审批与操作留痕</h3><div className="seal-timeline">{[...(detail.tasks || []), ...(detail.logs || detail.operationLogs || [])].map((item, index) => <div key={item.id || `${item.action || item.taskStatus}-${index}`}><i /><div><strong>{item.actionLabel || item.actionName || item.action || item.taskName || item.taskStatus || '流程记录'}</strong><span>{item.operatorName || item.assigneeName || item.createdByName || '-'} · {formatDateTime(item.createTime || item.createdAt || item.actionTime || item.completedAt)}</span>{(item.opinion || item.comment || item.description) && <p>{item.opinion || item.comment || item.description}</p>}</div></div>)}{!(detail.tasks?.length || detail.logs?.length || detail.operationLogs?.length) && <div className="seal-inline-empty">暂无审批留痕</div>}</div></section>
+            <section className="seal-detail-section"><div className="seal-section-head"><h3>待盖章资料附件（选填）</h3>{detail.canEdit && <button onClick={() => sourceFileRef.current?.click()}>上传资料</button>}</div><input ref={sourceFileRef} type="file" hidden onChange={(event) => uploadSelectedFile(event, 'SOURCE')} /><div className="seal-file-list">{sourceFiles.map((file) => <div key={fileIdOf(file)}><div><strong>{file.fileName || file.originalFileName || file.originalName || `文件 ${fileIdOf(file)}`}</strong><span>{formatDateTime(file.createTime || file.createdAt || file.uploadTime)}</span></div><button onClick={() => previewFile(file)}>预览</button><button onClick={() => downloadFile(file)}>下载</button>{detail.canEdit && file.canDelete !== false && <button className="danger" onClick={() => removeFile(file)}>移除</button>}</div>)}{!sourceFiles.length && <div className="seal-inline-empty">{detail.canSubmit ? '未上传附件，可直接提交审批' : '本次未上传附件'}</div>}</div></section>
+            <section className="seal-detail-section"><div className="seal-section-head"><div><h3>盖章件与资料归档</h3><p>由审批人决定是否要求上传，上传后可按需归档到工程资料。</p></div>{canUploadStamped && <button className="primary" onClick={() => stampedFileRef.current?.click()}>上传盖章件</button>}</div><input ref={stampedFileRef} type="file" hidden onChange={(event) => uploadSelectedFile(event, 'STAMPED_RESULT')} /><div className="seal-file-list">{stampedFiles.map((file) => <div key={fileIdOf(file)}><div><strong>{file.fileName || file.originalName || `文件 ${fileIdOf(file)}`}</strong><span>{file.archivedDocumentId ? `已归档为资料 #${file.archivedDocumentId}` : '尚未归档'}</span></div><button onClick={() => previewFile(file)}>预览</button><button onClick={() => downloadFile(file)}>下载</button>{detail.canArchive && !file.archivedDocumentId && <button className="primary" onClick={() => openArchive(file)}>归档</button>}</div>)}{!stampedFiles.length && <div className="seal-inline-empty">{statusOf(detail) === 'APPROVED' ? (detail.stampedResultRequired ? '审批要求用印后上传盖章件，当前待上传' : '盖章件按需上传') : '审批时可选择是否要求上传盖章件'}</div>}</div></section>
+            <section className="seal-detail-section"><h3>审批与操作留痕</h3><div className="seal-timeline">{[...(detail.tasks || []), ...(detail.logs || detail.operationLogs || [])].map((item, index) => <div key={item.id || `${item.action || item.taskStatus}-${index}`}><i /><div><strong>{item.actionLabel || item.actionName || item.action || item.taskName || item.taskStatus || '流程记录'}</strong><span>{item.operatorName || item.assigneeName || item.createdByName || '-'} · {formatDateTime(item.createTime || item.createdAt || item.actionTime || item.completedAt)}</span>{(item.opinion || item.comment || item.description) && <p>{item.opinion || item.comment || item.description}</p>}{item.description && (item.opinion || item.comment) && <p>{item.description}</p>}</div></div>)}{!(detail.tasks?.length || detail.logs?.length || detail.operationLogs?.length) && <div className="seal-inline-empty">暂无审批留痕</div>}</div></section>
             {(detail.ccRecipients || detail.ccUsers)?.length > 0 && <section className="seal-detail-section"><h3>抄送人</h3><div className="seal-people-tags">{(detail.ccRecipients || detail.ccUsers).map((user) => <span key={user.userId || user.id}>{user.displayName || user.realName || user.username}</span>)}</div></section>}
           </>}
         </aside>

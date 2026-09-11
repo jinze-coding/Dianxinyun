@@ -56,7 +56,8 @@ public interface SealApplicationMapper extends BaseMapper<SealApplication> {
     @Update("""
             UPDATE seal_application
             SET status = #{targetStatus}, approver_id = #{approverId}, approver_name = #{approverName},
-                approval_opinion = #{opinion}, approval_time = #{approvalTime},
+                approval_opinion = #{opinion}, stamped_result_required = #{stampedResultRequired},
+                approval_time = #{approvalTime},
                 version = version + 1, update_time = #{approvalTime}
             WHERE id = #{id} AND status = 'PENDING_APPROVAL'
               AND version = #{expectedVersion} AND deleted = 0
@@ -64,7 +65,8 @@ public interface SealApplicationMapper extends BaseMapper<SealApplication> {
     int decide(@Param("id") Long id, @Param("expectedVersion") Integer expectedVersion,
                @Param("targetStatus") String targetStatus, @Param("approverId") Long approverId,
                @Param("approverName") String approverName, @Param("opinion") String opinion,
-               @Param("approvalTime") LocalDateTime approvalTime);
+               @Param("approvalTime") LocalDateTime approvalTime,
+               @Param("stampedResultRequired") boolean stampedResultRequired);
 
     @Update("""
             UPDATE seal_application

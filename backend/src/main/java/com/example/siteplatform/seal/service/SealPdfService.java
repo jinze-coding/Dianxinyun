@@ -221,7 +221,12 @@ public class SealPdfService {
         values.put("APPLICANT_PHONE", escaped(value(application.getApplicantPhone(), "-")));
         values.put("APPLICATION_DATE", escaped(application.getApplicationDate() == null
                 ? "-" : application.getApplicationDate().toString()));
-        values.put("APPROVAL_OPINION", htmlValue(value(application.getApprovalOpinion(), "尚未审批")));
+        String approvalOpinion = value(application.getApprovalOpinion(), "尚未审批");
+        if (SealApplicationService.APPROVED.equals(application.getStatus())) {
+            approvalOpinion += Boolean.TRUE.equals(application.getStampedResultRequired())
+                    ? "\n盖章件要求：用印后须上传" : "\n盖章件要求：按需上传";
+        }
+        values.put("APPROVAL_OPINION", htmlValue(approvalOpinion));
         values.put("APPROVER_NAME", escaped(value(application.getApproverName(), "-")));
         values.put("APPROVAL_TIME", escaped(application.getApprovalTime() == null
                 ? "-" : application.getApprovalTime().format(DATE_TIME)));

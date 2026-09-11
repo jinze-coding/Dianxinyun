@@ -96,6 +96,22 @@ class SealLedgerServiceTest {
     }
 
     @Test
+    void missingStampedFilesDistinguishOptionalUploadFromApprovalRequirement() throws Exception {
+        SealLedgerService service = new SealLedgerService(null, null, null, null, null, null, null);
+        for (boolean required : new boolean[]{false, true}) {
+            SealApplication application = application();
+            application.setStampedResultRequired(required);
+            byte[] bytes = service.buildWorkbook(List.of(application),
+                    new LedgerDateRange(LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31)),
+                    Map.of(), Map.of(), Map.of());
+            try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+                assertEquals(required ? "待上传（审批要求）" : "按需上传（未上传）",
+                        workbook.getSheetAt(0).getRow(1).getCell(15).getStringCellValue());
+            }
+        }
+    }
+
+    @Test
     void safeCellTextProtectsAllSpreadsheetFormulaPrefixes() {
         assertEquals("'=1+1", SealLedgerService.safeCellText("=1+1"));
         assertEquals("'+cmd", SealLedgerService.safeCellText("+cmd"));

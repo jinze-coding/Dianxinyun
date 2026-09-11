@@ -31,6 +31,7 @@ public class SealApplicationVO {
     private Long approverId;
     private String approverName;
     private String approvalOpinion;
+    private Boolean stampedResultRequired;
     private LocalDateTime approvalTime;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;

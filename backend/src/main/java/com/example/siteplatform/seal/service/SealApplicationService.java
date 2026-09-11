@@ -242,6 +242,7 @@ public class SealApplicationService {
         application.setApplicantPhone(currentUser.getPhone());
         application.setApplicationDate(null);
         application.setStatus(DRAFT);
+        application.setStampedResultRequired(false);
         application.setVersion(0);
         application.setDeleted(0);
         application.setCreateTime(now);
@@ -355,11 +356,6 @@ public class SealApplicationService {
         ProjectInfo currentProject = requireProject(application.getProjectId());
         if (itemMapper.selectCount(new LambdaQueryWrapper<SealApplicationItem>()
                 .eq(SealApplicationItem::getApplicationId, id)) == 0) throw new BusinessException("至少填写一项用印文件");
-        if (applicationFileMapper.selectCount(new LambdaQueryWrapper<SealApplicationFile>()
-                .eq(SealApplicationFile::getApplicationId, id)
-                .eq(SealApplicationFile::getFileRole, "SOURCE")) == 0) {
-            throw new BusinessException("请先上传至少一份待盖章资料");
-        }
         WorkflowApprovalConfigService.ApprovalConfigSnapshot configSnapshot =
                 configService.requireEnabledSnapshot(application.getProjectId(), application.getSealId());
         WorkflowApprovalConfig config = configSnapshot.config();
@@ -420,18 +416,20 @@ public class SealApplicationService {
     }
 
     @Transactional
-    public SealApplicationVO approve(Long id, String opinion, SysUser currentUser,
+    public SealApplicationVO approve(Long id, String opinion, Boolean stampedResultRequired, SysUser currentUser,
                                      HttpServletRequest servletRequest) {
-        return decide(id, APPROVED, required(opinion, 1000, "项目经理审批意见"), currentUser, servletRequest);
+        return decide(id, APPROVED, required(opinion, 1000, "项目经理审批意见"),
+                Boolean.TRUE.equals(stampedResultRequired), currentUser, servletRequest);
     }
 
     @Transactional
     public SealApplicationVO reject(Long id, String opinion, SysUser currentUser,
                                     HttpServletRequest servletRequest) {
-        return decide(id, REJECTED, required(opinion, 1000, "项目经理审批意见"), currentUser, servletRequest);
+        return decide(id, REJECTED, required(opinion, 1000, "项目经理审批意见"), false, currentUser, servletRequest);
     }
 
-    private SealApplicationVO decide(Long id, String targetStatus, String opinion, SysUser currentUser,
+    private SealApplicationVO decide(Long id, String targetStatus, String opinion, boolean stampedResultRequired,
+                                     SysUser currentUser,
                                      HttpServletRequest servletRequest) {
         SealApplication application = applicationMapper.selectForUpdate(id);
         if (application == null) throw BusinessException.notFound("用印申请不存在");
@@ -449,11 +447,14 @@ public class SealApplicationService {
                 currentUser.getId(), displayName(currentUser), opinion, now), "审批实例处理");
         taskMapper.cancelPendingByInstance(instance.getId(), now);
         requireSingleWrite(applicationMapper.decide(id, application.getVersion(), targetStatus, currentUser.getId(),
-                displayName(currentUser), opinion, now), "用印申请审批");
+                displayName(currentUser), opinion, now, stampedResultRequired), "用印申请审批");
         String event = APPROVED.equals(targetStatus) ? "SEAL_APPROVED" : "SEAL_REJECTED";
         String label = APPROVED.equals(targetStatus) ? "审批通过" : "审批驳回";
+        String requirement = stampedResultRequired ? "用印后须上传盖章件" : "盖章件按需上传";
+        String decisionDescription = APPROVED.equals(targetStatus) ? label + "；" + requirement : label;
         notificationService.notify(application.getApplicantId(), application.getProjectId(), BUSINESS_CODE, id,
-                event, "用印申请" + label, displayName(currentUser) + "已处理您的申请",
+                event, "用印申请" + label, displayName(currentUser) + "已处理您的申请"
+                        + (APPROVED.equals(targetStatus) ? "；" + requirement : ""),
                 "seal:decision:" + targetStatus + ":" + id + ":applicant");
         for (WorkflowCcRecipient recipient : ccRecipients(id)) {
             if (Objects.equals(recipient.getUserId(), application.getApplicantId())
@@ -463,7 +464,7 @@ public class SealApplicationService {
                     "seal:decision:" + targetStatus + ":" + id + ":cc:" + recipient.getUserId());
         }
         record(application, APPROVED.equals(targetStatus) ? "APPROVE" : "REJECT", PENDING_APPROVAL,
-                targetStatus, currentUser, opinion, label, servletRequest);
+                targetStatus, currentUser, opinion, decisionDescription, servletRequest);
         return toVO(requireApplication(id), currentUser, true);
     }
 
@@ -666,6 +667,7 @@ public class SealApplicationService {
         vo.setApproverId(application.getApproverId());
         vo.setApproverName(application.getApproverName());
         vo.setApprovalOpinion(application.getApprovalOpinion());
+        vo.setStampedResultRequired(Boolean.TRUE.equals(application.getStampedResultRequired()));
         vo.setApprovalTime(application.getApprovalTime());
         vo.setCreateTime(application.getCreateTime());
         vo.setUpdateTime(application.getUpdateTime());

@@ -1615,6 +1615,7 @@ CREATE TABLE IF NOT EXISTS seal_application (
     approver_id BIGINT,
     approver_name VARCHAR(50),
     approval_opinion VARCHAR(1000),
+    stamped_result_required TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Approval requires a stamped copy',
     approval_time DATETIME,
     version INT NOT NULL DEFAULT 0,
     deleted TINYINT NOT NULL DEFAULT 0,
@@ -2969,4 +2970,7 @@ CREATE TABLE IF NOT EXISTS site_meeting_material_preview (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT INTO sys_data_migration(migration_key) VALUES ('20260911_MEETING_MATERIALS_V1') AS incoming
+ON DUPLICATE KEY UPDATE migration_key=incoming.migration_key;
+
+INSERT INTO sys_data_migration(migration_key) VALUES ('20260911_SEAL_OPTIONAL_ATTACHMENTS_V1') AS incoming
 ON DUPLICATE KEY UPDATE migration_key=incoming.migration_key;

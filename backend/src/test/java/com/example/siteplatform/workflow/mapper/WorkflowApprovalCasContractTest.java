@@ -29,7 +29,7 @@ class WorkflowApprovalCasContractTest {
         Method instanceDecision = WorkflowApprovalInstanceMapper.class.getMethod("decide", Long.class,
                 Integer.class, String.class, Long.class, String.class, String.class, LocalDateTime.class);
         Method applicationDecision = SealApplicationMapper.class.getMethod("decide", Long.class, Integer.class,
-                String.class, Long.class, String.class, String.class, LocalDateTime.class);
+                String.class, Long.class, String.class, String.class, LocalDateTime.class, boolean.class);
 
         String instanceSql = normalizedSql(instanceDecision);
         String applicationSql = normalizedSql(applicationDecision);
@@ -39,6 +39,7 @@ class WorkflowApprovalCasContractTest {
         assertTrue(applicationSql.contains("status = 'PENDING_APPROVAL'"));
         assertTrue(applicationSql.contains("version = #{expectedVersion}"));
         assertTrue(applicationSql.contains("version = version + 1"));
+        assertTrue(applicationSql.contains("stamped_result_required = #{stampedResultRequired}"));
     }
 
     private String normalizedSql(Method method) {

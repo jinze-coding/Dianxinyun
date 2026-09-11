@@ -233,7 +233,7 @@ function candidateInitial(item: SealCcCandidate) {
   return String(item.displayName || item.realName || item.username || '人').trim().slice(0, 1);
 }
 
-function validate(submit: boolean) {
+function validate() {
   if (!form.projectId) return '请选择施工区域';
   if (!selectedSeal.value?.id) return '当前项目没有可申请的印章';
   if (!form.departmentName.trim()) return '未获取到印章所属项目，请重新进入';
@@ -241,13 +241,12 @@ function validate(submit: boolean) {
   if (!form.purpose.trim()) return '请填写用印事由';
   if (form.items.some((item) => !item.documentName.trim())) return '请完整填写用印文件名称';
   if (form.items.some((item) => !Number.isInteger(Number(item.copies)) || Number(item.copies) < 1 || Number(item.copies) > 999)) return '每项份数应为 1–999 的整数';
-  if (submit && !sourceFiles.value.length && !pendingFiles.value.length) return '提交前请上传需要盖章的资料';
   return '';
 }
 
 async function save(submit: boolean) {
   if (saving.value) return;
-  const message = validate(submit);
+  const message = validate();
   if (message) { showToast(message); return; }
   saving.value = true;
   try {
@@ -315,10 +314,10 @@ function goBack() { getCurrentPages().length > 1 ? uni.navigateBack() : uni.reLa
           </view>
 
           <view class="form-card">
-            <view class="section-head"><view><text class="section-title">待盖章资料</text><text>支持 Word、Excel、PDF、图片等，单个不超过 50MB</text></view><button @tap="chooseFile">选择文件</button></view>
+            <view class="section-head"><view><text class="section-title">待盖章资料（选填）</text><text>支持 Word、Excel、PDF、图片等，单个不超过 50MB</text></view><button @tap="chooseFile">选择文件</button></view>
             <view v-for="file in sourceFiles" :key="file.id" class="file-row"><view><text>{{ file.originalFileName || file.fileName }}</text><text>{{ formatFileSize(file.fileSize) }} · 已上传</text></view><button v-if="file.canDelete" @tap="removeExistingFile(file)">删除</button></view>
             <view v-for="file in pendingFiles" :key="file.key" class="file-row pending"><view><text>{{ file.name }}</text><text>{{ formatFileSize(file.size) }} · 待上传</text></view><button @tap="pendingFiles = pendingFiles.filter((item) => item.key !== file.key)">移除</button></view>
-            <view v-if="!sourceFiles.length && !pendingFiles.length" class="empty-line">尚未选择待盖章资料</view>
+            <view v-if="!sourceFiles.length && !pendingFiles.length" class="empty-line">无需附件也可提交审批</view>
           </view>
 
           <button class="cc-card" @tap="openCcSheet"><view><text>通知抄送人</text><text>{{ !ccCandidatesReady ? '配置未加载，点击重试' : selectedCc.length ? selectedCc.map((item) => item.displayName).join('、') : '未选择，状态变化时不额外抄送' }}</text></view><text>›</text></button>

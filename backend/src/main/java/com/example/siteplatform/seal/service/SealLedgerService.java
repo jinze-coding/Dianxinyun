@@ -149,7 +149,10 @@ public class SealLedgerService {
                         .filter(Objects::nonNull).mapToInt(Integer::intValue).sum(), styles.body);
                 List<SealApplicationFile> stamped = files.stream()
                         .filter(file -> "STAMPED_RESULT".equals(file.getFileRole())).toList();
-                text(row, column++, stamped.isEmpty() ? "未上传" : "已上传 " + stamped.size() + " 份", styles.body);
+                String stampedStatus = stamped.isEmpty()
+                        ? (Boolean.TRUE.equals(application.getStampedResultRequired()) ? "待上传（审批要求）" : "按需上传（未上传）")
+                        : "已上传 " + stamped.size() + " 份";
+                text(row, column++, stampedStatus, styles.body);
                 long archived = stamped.stream().filter(file -> file.getArchivedDocumentId() != null).count();
                 String archiveText = stamped.isEmpty() ? "无盖章件"
                         : (archived == 0 ? "未归档" : "已归档 " + archived + "/" + stamped.size() + "；"

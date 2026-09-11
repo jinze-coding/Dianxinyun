@@ -517,6 +517,7 @@ export interface SealApplication {
   approverId?: number;
   approverName?: string;
   approvalOpinion?: string;
+  stampedResultRequired?: boolean;
   approvalTime?: string;
   createTime?: string;
   updateTime?: string;
