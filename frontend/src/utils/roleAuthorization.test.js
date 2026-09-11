@@ -21,6 +21,16 @@ import {
   toggleMenuNode,
 } from './roleAuthorization.js';
 
+test('form export authorization does not grant all-application viewing or ledger export', () => {
+  const permissions = [
+    ['seal.view', 40], ['seal.export', 42], ['seal.application.export', 43],
+  ].map(([permissionCode, id]) => ({ id, permissionCode, enabled: 1 }));
+  const actions = buildPermissionActions(permissions);
+  const selected = toggleActionKey(new Set(), 'seal.application.export', true, actions);
+  assert.deepEqual(selected, new Set(['seal.application.export']));
+  assert.deepEqual(permissionIdsForActionKeys(selected, actions), [43]);
+});
+
 const menus = [
   { id: 1, menuCode: 'WEB_INSPECTION', menuName: '巡检管理' },
   { id: 2, menuCode: 'MINI_INSPECTION', menuName: '巡检管理' },

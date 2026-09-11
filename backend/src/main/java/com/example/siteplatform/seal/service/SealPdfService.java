@@ -63,6 +63,7 @@ public class SealPdfService {
     public byte[] generate(Long applicationId, SysUser currentUser, HttpServletRequest request) {
         SealApplication application = applicationService.requireApplication(applicationId);
         applicationService.requireReadable(application, currentUser);
+        applicationService.requireFormExportPermission(application, currentUser);
         if (!SealApplicationService.APPROVED.equals(application.getStatus())) {
             throw BusinessException.of(409, "仅审批通过的用印申请可以生成正式申请单 PDF");
         }

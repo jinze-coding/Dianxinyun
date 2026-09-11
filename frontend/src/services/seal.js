@@ -46,6 +46,10 @@ export const downloadSealApplicationFile = (id, fileId) => getFileBlob(
   '附件下载失败',
 );
 export const downloadSealApplicationPdf = (id) => getFileBlob(`/seal/applications/${id}/form.pdf`, '用印申请单下载失败');
+export const createSealFormExport = (data) => post('/seal/applications/form-export-jobs', data);
+export const getSealFormExports = (projectId) => get('/seal/applications/form-export-jobs', { projectId });
+export const retrySealFormExport = (id, requestKey) => post(`/seal/applications/form-export-jobs/${id}/retry`, { requestKey });
+export const downloadSealFormExport = (id) => getFileBlob(`/seal/applications/form-export-jobs/${id}/download`, '合并申请单下载失败');
 
 export const exportSealApplicationLedger = async (params = {}) => ensureFileBlob(
   await apiClient.get('/seal/ledger/export', { params, responseType: 'blob' }),

@@ -222,6 +222,16 @@ public interface FileResourceMapper extends BaseMapper<FileResource> {
             @Param("draftBusinessId") Long draftBusinessId);
 
     @Update("""
+            UPDATE file_resource
+            SET deleted = 1, status = 'PENDING_DELETE', update_time = CURRENT_TIMESTAMP
+            WHERE id = #{id} AND project_id = #{projectId}
+              AND business_type = 'SEAL_FORM_EXPORT' AND business_id = #{jobId}
+              AND deleted = 0
+            """)
+    int stageSealFormExportForDelete(@Param("id") Long id, @Param("projectId") Long projectId,
+                                    @Param("jobId") Long jobId);
+
+    @Update("""
             UPDATE file_resource SET deleted = 1, status = 'DELETE_FAILED', update_time = CURRENT_TIMESTAMP
             WHERE id = #{id} AND deleted = 1 AND status = 'PENDING_DELETE'
             """)

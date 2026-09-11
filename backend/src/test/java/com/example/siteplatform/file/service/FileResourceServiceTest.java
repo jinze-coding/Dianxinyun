@@ -179,6 +179,15 @@ class FileResourceServiceTest {
     }
 
     @Test
+    void mergedSealFormsCannotBypassExportPermissionThroughGenericFiles() {
+        FileResource file = file(11L, 2L, 7L, "SEAL_FORM_EXPORT", 42L);
+        assertEquals(403, assertThrows(BusinessException.class, () -> service.checkRead(user(7L), file)).getCode());
+        assertThrows(BusinessException.class, () -> service.checkWrite(user(7L), file));
+        assertThrows(BusinessException.class, () -> service.authorizeUpload(user(7L), 2L, "SEAL_FORM_EXPORT", 42L));
+        assertFalse(service.canReadInList(user(7L), file));
+    }
+
+    @Test
     void genericUploadCannotForgeSealEvidenceBusinessType() {
         BusinessException exception = assertThrows(BusinessException.class,
                 () -> service.authorizeUpload(user(7L), 2L, " seal_stamped_result ", 42L));

@@ -26,6 +26,7 @@ public final class SystemPermissionCodes {
     public static final String SEAL_VIEW = "seal.view";
     public static final String SEAL_MANAGE = "seal.manage";
     public static final String SEAL_EXPORT = "seal.export";
+    public static final String SEAL_APPLICATION_EXPORT = "seal.application.export";
 
     public static final String REGISTRATION_REVIEW = "system.registration.review";
     public static final String USER_VIEW = "system.user.view";

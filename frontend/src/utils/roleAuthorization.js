@@ -98,6 +98,7 @@ const ACTION_DEFINITIONS = [
   { key: 'seal.view', label: '查看项目全部用印申请', group: '资料管理 · 用印申请', menuCodes: ['DOCUMENT_SEAL'], primaryCodes: ['seal.view'], codes: ['seal.view'] },
   { key: 'seal.manage', label: '管理项目用印与盖章件', group: '资料管理 · 用印申请', menuCodes: ['DOCUMENT_SEAL'], primaryCodes: ['seal.manage'], codes: ['seal.manage', 'seal.view'], requiresActions: ['seal.view'] },
   { key: 'seal.export', label: '导出项目用印台账', group: '资料管理 · 用印申请', menuCodes: ['DOCUMENT_SEAL'], primaryCodes: ['seal.export'], codes: ['seal.export', 'seal.view'], requiresActions: ['seal.view'] },
+  { key: 'seal.application.export', label: '导出用印申请单', group: '资料管理 · 用印申请', menuCodes: ['DOCUMENT_SEAL'], primaryCodes: ['seal.application.export'], codes: ['seal.application.export'] },
 
   { key: 'system.approval.view', label: '查看印章与审批配置', group: '系统管理 · 用印审批', menuCodes: ['SYSTEM_APPROVAL'], primaryCodes: ['system.approval.view'], codes: ['system.approval.view'] },
   { key: 'system.approval.manage', label: '维护印章、审批配置与二维码', group: '系统管理 · 用印审批', menuCodes: ['SYSTEM_APPROVAL'], primaryCodes: ['system.approval.manage'], codes: ['system.approval.manage'] },

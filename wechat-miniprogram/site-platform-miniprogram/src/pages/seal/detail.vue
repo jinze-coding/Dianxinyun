@@ -185,7 +185,7 @@ async function openFile(file: SealApplicationFile) {
 }
 
 async function openApplicationForm() {
-  if (busy.value) return;
+  if (busy.value || !detail.value?.canExportForm) return;
   busy.value = true;
   try {
     const path = await downloadSealApplicationPdf(applicationId.value);
@@ -310,7 +310,7 @@ async function confirmArchive() {
         <view v-if="loading" class="state-card">正在加载用印申请…</view>
         <view v-else-if="errorMessage" class="state-card error"><text>{{ errorMessage }}</text><button @tap="loadDetail">重新加载</button></view>
         <template v-else-if="detail">
-          <view class="status-card" :class="detail.status.toLowerCase()"><view class="seal-mark">印</view><view><text>{{ statusLabel(detail.status) }}</text><text>{{ detail.applicationNo || `草稿 #${detail.id}` }}</text></view><button v-if="detail.status === 'APPROVED'" @tap="openApplicationForm">申请单 PDF</button></view>
+          <view class="status-card" :class="detail.status.toLowerCase()"><view class="seal-mark">印</view><view><text>{{ statusLabel(detail.status) }}</text><text>{{ detail.applicationNo || `草稿 #${detail.id}` }}</text></view><button v-if="detail.canExportForm" @tap="openApplicationForm">申请单 PDF</button></view>
 
           <view class="info-card">
             <view class="section-title">申请信息</view>

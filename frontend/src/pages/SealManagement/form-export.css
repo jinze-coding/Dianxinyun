@@ -1,0 +1,33 @@
+.seal-page .seal-merge-trigger { color: var(--seal-accent); border-color: var(--seal-accent); white-space: nowrap; }
+.seal-selection-bar { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--seal-border); font-size: 13px; color: var(--seal-secondary); }
+.seal-selection-bar strong { color: var(--seal-accent); }
+.seal-selection-bar button { margin-left: auto; }
+.seal-page .seal-select-cell { width: 44px; min-width: 44px; text-align: center; }
+.seal-page .seal-select-cell input { width: 16px; height: 16px; accent-color: var(--seal-accent); cursor: pointer; }
+.seal-page .seal-select-cell input:disabled { cursor: not-allowed; }
+.seal-form-export-mask { position: fixed; inset: 0; z-index: 1200; display: flex; align-items: center; justify-content: center; padding: 24px; background: #152c4966; }
+.seal-form-export-dialog { width: 820px; max-width: 96vw; max-height: 90vh; border-radius: 12px; background: var(--seal-card); color: var(--seal-text); box-shadow: 0 18px 60px #12253d33; display: flex; flex-direction: column; }
+.seal-form-export-dialog > header { display: flex; justify-content: space-between; align-items: flex-start; padding: 20px 24px; border-bottom: 1px solid var(--seal-border); }
+.seal-form-export-dialog h2 { font-size: 20px; margin: 0 0 8px; }
+.seal-form-export-dialog header p { margin: 0; color: var(--seal-secondary); font-size: 13px; }
+.seal-form-export-body { padding: 20px 24px; overflow: auto; }
+.seal-form-export-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.seal-page .seal-form-export-modes label { display: grid; grid-template-columns: 20px 1fr; gap: 8px; padding: 16px; border: 1px solid var(--seal-border); border-radius: 8px; cursor: pointer; }
+.seal-form-export-modes label.active { border-color: var(--seal-accent); background: var(--seal-active); }
+.seal-page .seal-form-export-modes input { min-height: 16px; padding: 0; accent-color: var(--seal-accent); width: 16px; height: 16px; }
+.seal-form-export-modes small { grid-column: 2; color: var(--seal-secondary); }
+.seal-form-export-summary { color: var(--seal-secondary); font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.seal-form-export-create { display: flex; align-items: center; gap: 16px; }
+.seal-form-export-create span { color: var(--seal-muted); font-size: 12px; }
+.seal-form-export-error { background: #fff1f0; color: #ad2525; padding: 10px 12px; border-radius: 6px; font-size: 13px; overflow-wrap: anywhere; margin-top: 12px; }
+.seal-form-export-history-head { margin-top: 24px; display: flex; justify-content: space-between; align-items: center; }
+.seal-form-export-history-head h3 { font-size: 16px; }
+.seal-form-export-jobs article { border: 1px solid var(--seal-border); border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+.seal-form-export-jobs article > div:first-child { display: flex; justify-content: space-between; gap: 20px; font-size: 14px; }
+.seal-form-export-jobs strong { overflow-wrap: anywhere; }
+.seal-form-export-jobs article > div:first-child span { white-space: nowrap; color: var(--seal-accent); }
+.seal-form-export-jobs p { font-size: 12px; color: var(--seal-secondary); }
+.seal-form-export-jobs progress { width: 100%; accent-color: var(--seal-accent); height: 8px; }
+.seal-form-export-job-actions { display: flex; justify-content: flex-end; align-items: center; gap: 16px; }
+.seal-form-export-job-actions small { color: var(--seal-muted); }
+@media (max-width: 640px) { .seal-form-export-modes { grid-template-columns: 1fr; } }

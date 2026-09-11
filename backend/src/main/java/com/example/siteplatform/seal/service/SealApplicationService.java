@@ -130,9 +130,27 @@ public class SealApplicationService {
     public PageResult<SealApplicationVO> list(Long projectId, String scope, String status, String keyword,
                                                LocalDate startDate, LocalDate endDate, String dateBasis,
                                                Integer pageNo, Integer pageSize, SysUser currentUser) {
-        String normalizedScope = normalizeScope(scope);
         int page = pageNo == null ? 1 : Math.max(1, pageNo);
         int size = pageSize == null ? 20 : Math.max(1, Math.min(pageSize, 100));
+        LambdaQueryWrapper<SealApplication> query = listQuery(projectId, scope, status, keyword,
+                startDate, endDate, dateBasis, currentUser);
+        Page<SealApplication> result = applicationMapper.selectPage(new Page<>(page, size), query);
+        return PageResult.of(page, size, result.getTotal(), result.getRecords().stream()
+                .map(application -> toVO(application, currentUser, false)).toList());
+    }
+
+    public List<SealApplication> findFormsByFilter(Long projectId, String scope, String status, String keyword,
+                                                   LocalDate startDate, LocalDate endDate, int limit,
+                                                   SysUser currentUser) {
+        return applicationMapper.selectList(listQuery(projectId, scope, status, keyword,
+                startDate, endDate, null, currentUser)
+                .eq(SealApplication::getStatus, APPROVED).last("LIMIT " + limit));
+    }
+
+    private LambdaQueryWrapper<SealApplication> listQuery(Long projectId, String scope, String status, String keyword,
+                                                          LocalDate startDate, LocalDate endDate, String dateBasis,
+                                                          SysUser currentUser) {
+        String normalizedScope = normalizeScope(scope);
         List<Long> activeProjectIds = activeProjectIds(currentUser);
         if (projectId != null && !activeProjectIds.contains(projectId)) {
             throw BusinessException.forbidden("仅当前项目有效成员可查看用印申请");
@@ -141,10 +159,9 @@ public class SealApplicationService {
             if (projectId == null) throw new BusinessException("全部申请查询必须指定项目");
             permissionService.requireSystemPermission(currentUser.getId(), projectId, SystemPermissionCodes.SEAL_VIEW);
         }
-        if (activeProjectIds.isEmpty()) return PageResult.of(page, size, 0L, List.of());
-
         LambdaQueryWrapper<SealApplication> query = new LambdaQueryWrapper<SealApplication>()
-                .in(SealApplication::getProjectId, projectId == null ? activeProjectIds : List.of(projectId));
+                .in(SealApplication::getProjectId, projectId == null
+                        ? (activeProjectIds.isEmpty() ? List.of(-1L) : activeProjectIds) : List.of(projectId));
         switch (normalizedScope) {
             case "INITIATED" -> query.eq(SealApplication::getApplicantId, currentUser.getId());
             case "PENDING_FOR_ME" -> query.inSql(SealApplication::getId,
@@ -177,9 +194,7 @@ public class SealApplicationService {
             throw new BusinessException("开始日期不能晚于结束日期");
         }
         query.orderByDesc(SealApplication::getCreateTime).orderByDesc(SealApplication::getId);
-        Page<SealApplication> result = applicationMapper.selectPage(new Page<>(page, size), query);
-        return PageResult.of(page, size, result.getTotal(), result.getRecords().stream()
-                .map(application -> toVO(application, currentUser, false)).toList());
+        return query;
     }
 
     public SealApplicationVO detail(Long id, SysUser currentUser) {
@@ -606,6 +621,11 @@ public class SealApplicationService {
         return permissionService.hasSystemPermission(user.getId(), projectId, SystemPermissionCodes.SEAL_MANAGE);
     }
 
+    public void requireFormExportPermission(SealApplication application, SysUser user) {
+        permissionService.requireSystemPermission(user.getId(), application.getProjectId(),
+                SystemPermissionCodes.SEAL_APPLICATION_EXPORT);
+    }
+
     public SealApplicationFileVO fileVO(SealApplicationFile relation, SealApplication application, SysUser user) {
         return toFileVO(relation, application, user);
     }
@@ -682,6 +702,9 @@ public class SealApplicationService {
         boolean pendingAssignee = pendingTask(application, user.getId()) != null;
         boolean manager = canManage(user, application.getProjectId());
         vo.setCanEdit(owner && DRAFT.equals(application.getStatus()));
+        vo.setCanExportForm(APPROVED.equals(application.getStatus())
+                && permissionService.hasSystemPermission(user.getId(), application.getProjectId(),
+                SystemPermissionCodes.SEAL_APPLICATION_EXPORT));
         vo.setCanSubmit(owner && DRAFT.equals(application.getStatus()));
         vo.setCanApprove(pendingAssignee && PENDING_APPROVAL.equals(application.getStatus()));
         vo.setCanReject(pendingAssignee && PENDING_APPROVAL.equals(application.getStatus()));

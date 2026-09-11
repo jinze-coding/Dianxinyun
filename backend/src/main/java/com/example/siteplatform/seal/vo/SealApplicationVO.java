@@ -42,6 +42,7 @@ public class SealApplicationVO {
     private List<SealCcRecipientVO> ccRecipients = new ArrayList<>();
     private List<SealApplicationLogVO> logs = new ArrayList<>();
     private Boolean canEdit;
+    private Boolean canExportForm;
     private Boolean canSubmit;
     private Boolean canApprove;
     private Boolean canReject;

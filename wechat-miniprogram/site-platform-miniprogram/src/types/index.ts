@@ -533,6 +533,7 @@ export interface SealApplication {
   canCancel?: boolean;
   canUploadStampedResult?: boolean;
   canArchive?: boolean;
+  canExportForm?: boolean;
 }
 
 export interface SealApplicationDetail extends SealApplication {

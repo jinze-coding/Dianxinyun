@@ -794,6 +794,35 @@ class SystemAdministrationServiceSafetyTest {
     }
 
     @Test
+    void formExportPermissionDoesNotGrantAllApplicationsOrLedgerExport() {
+        SystemRole projectRole = role(30L, "CUSTOM_REVIEWER", "PROJECT", 0, 1);
+        SystemMenu webDocument = menu(200L, "WEB_DOCUMENT");
+        SystemMenu miniDocument = menu(201L, "MINI_DOCUMENT");
+        SystemMenu sealMenu = menu(202L, "DOCUMENT_SEAL");
+        sealMenu.setParentId(200L);
+        SystemPermission sealManage = permission(100L, "seal.application.export");
+        SystemPermission sealExport = permission(101L, "seal.export");
+        SystemPermission sealView = permission(102L, "seal.view");
+        List<SystemPermission> permissions = List.of(sealManage, sealExport, sealView);
+        permissions.forEach(item -> item.setModuleCode("WEB_DOCUMENT"));
+        when(roleMapper.selectByIdForUpdate(30L)).thenReturn(projectRole);
+        when(roleMapper.selectMenuIds(30L)).thenReturn(List.of(200L, 201L, 202L));
+        when(roleBusinessModuleMapper.selectModuleCodesByRoleId(30L)).thenReturn(List.of("DOCUMENT"));
+        when(permissionMapper.selectById(100L)).thenReturn(sealManage);
+        when(permissionMapper.selectList(any())).thenReturn(permissions);
+        when(menuMapper.selectList(any())).thenReturn(List.of(webDocument, miniDocument, sealMenu));
+        when(menuMapper.selectById(200L)).thenReturn(webDocument);
+        when(menuMapper.selectById(201L)).thenReturn(miniDocument);
+        when(menuMapper.selectById(202L)).thenReturn(sealMenu);
+
+        service.updateRoleOperationPermissions(30L, List.of(100L), operator());
+
+        verify(roleMapper).insertPermission(30L, 100L);
+        verify(roleMapper, never()).insertPermission(30L, 101L);
+        verify(roleMapper, never()).insertPermission(30L, 102L);
+    }
+
+    @Test
     void sealPermissionRequiresSealPageInsteadOfAnyDocumentPage() {
         SystemRole projectRole = role(30L, "CUSTOM_REVIEWER", "PROJECT", 0, 1);
         SystemMenu webDocument = menu(200L, "WEB_DOCUMENT");

@@ -40,6 +40,7 @@ public class SealApplicationExportController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
                         .filename(fileName, StandardCharsets.UTF_8).build().toString())
                 .header("X-Content-Type-Options", "nosniff")
+                .header(HttpHeaders.CACHE_CONTROL, "no-store, private")
                 .body(pdf);
     }
 }

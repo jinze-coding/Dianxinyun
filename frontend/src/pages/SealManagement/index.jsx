@@ -21,6 +21,8 @@ import {
 } from '../../services/seal';
 import { getDocumentFolders, getProjectDocuments } from '../../services/document';
 import { hasProjectPermission, isPlatformAdmin } from '../../utils/permissions';
+import SealFormExportPanel from './SealFormExportPanel';
+import { canSelectForm, selectPageForms } from './formExportModel';
 import './index.css';
 import './editor.css';
 
@@ -332,6 +334,8 @@ export default function SealManagementPage({
   const [ledgerRangeAnchor, setLedgerRangeAnchor] = useState(() => localDateString());
   const [appliedLedgerRange, setAppliedLedgerRange] = useState(() => ({ unit: 'MONTH', anchor: localDateString() }));
   const [rows, setRows] = useState([]);
+  const [selectedForms, setSelectedForms] = useState([]);
+  const selectPageRef = useRef(null);
   const [total, setTotal] = useState(0);
   const [pageNo, setPageNo] = useState(1);
   const pageSize = 20;
@@ -370,6 +374,14 @@ export default function SealManagementPage({
     || hasProjectPermission(currentUser, projectId, 'seal.view', 'seal.manage', 'seal.export');
   const canManage = isPlatformAdmin(currentUser) || hasProjectPermission(currentUser, projectId, 'seal.manage');
   const canExport = isPlatformAdmin(currentUser) || hasProjectPermission(currentUser, projectId, 'seal.export');
+  const canExportForms = isPlatformAdmin(currentUser) || hasProjectPermission(currentUser, projectId, 'seal.application.export');
+  const showFormSelection = mode !== 'ledger' && canExportForms;
+  const selectableRows = rows.filter(canSelectForm);
+  const selectedOnPage = selectableRows.filter((row) => selectedForms.includes(row.id)).length;
+  useEffect(() => { setSelectedForms([]); }, [projectId, mode, scope, appliedFilters, canExportForms]);
+  useEffect(() => {
+    if (selectPageRef.current) selectPageRef.current.indeterminate = selectedOnPage > 0 && selectedOnPage < selectableRows.length;
+  }, [selectedOnPage, selectableRows.length]);
   const currentUserId = Number(currentUser?.id ?? currentUser?.userId ?? 0);
   const visibleScopes = useMemo(() => SCOPE_TABS.filter((item) => item.id !== 'ALL' || canViewAll), [canViewAll]);
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -647,6 +659,7 @@ export default function SealManagementPage({
   };
 
   const downloadPdf = async (application) => {
+    if (!application.canExportForm) return;
     try {
       const blob = await downloadSealApplicationPdf(application.id);
       saveBlob(blob, `${application.applicationNo || `用印申请-${application.id}`}.pdf`);
@@ -807,19 +820,23 @@ export default function SealManagementPage({
         {mode === 'ledger' && ledgerRangeUnit !== 'CUSTOM' && <span className="seal-range-preview">{filters.startDate} 至 {filters.endDate}</span>}
         <button className="primary" onClick={() => { setPageNo(1); setAppliedFilters(filters); if (mode === 'ledger') setAppliedLedgerRange({ unit: ledgerRangeUnit, anchor: ledgerRangeAnchor }); }}>查询</button>
         <button onClick={() => { const anchor = localDateString(); const next = mode === 'ledger' ? { ...emptyFilters, status: 'APPROVED', ...ledgerDateRange('MONTH', anchor) } : { ...emptyFilters }; setLedgerRangeUnit('MONTH'); setLedgerRangeAnchor(anchor); setAppliedLedgerRange({ unit: 'MONTH', anchor }); setFilters(next); setAppliedFilters(next); setPageNo(1); }}>重置</button>
+        {showFormSelection && <SealFormExportPanel key={JSON.stringify([projectId, scope, appliedFilters])} projectId={projectId} projectName={projectName} scope={scope} appliedFilters={appliedFilters} selected={selectedForms} />}
       </section>
 
       {notice && <div className="seal-notice" role="status" onClick={() => setNotice('')}>{notice}</div>}
       {error && <div className="seal-error" role="alert"><span>{error}</span><button onClick={() => setError('')}>×</button></div>}
 
       <section className="seal-table-card">
+        {showFormSelection && <div className="seal-selection-bar"><strong>已勾选 {selectedForms.length} 份</strong><span>仅支持已通过申请，翻页保留选择</span><button disabled={!selectedForms.length} onClick={() => setSelectedForms([])}>清空选择</button></div>}
         <div className="seal-table-wrap"><table><thead><tr>
+          {showFormSelection && <th className="seal-select-cell"><input ref={selectPageRef} type="checkbox" aria-label="全选本页已通过申请" disabled={loading || !selectableRows.length} checked={selectableRows.length > 0 && selectedOnPage === selectableRows.length} onChange={(event) => setSelectedForms((current) => selectPageForms(current, rows, event.target.checked))} /></th>}
           <th>申请编号</th><th>申请人/部门</th><th>印章</th><th>用印事由</th><th>资料/份数</th><th>状态</th><th>{mode === 'ledger' ? '审批完成时间' : '申请时间'}</th><th>当前处理</th><th>操作</th>
         </tr></thead><tbody>
           {rows.map((application) => {
             const applicationItems = application.items || [];
             const copies = applicationItems.reduce((sum, item) => sum + Number(item.copies || item.copyCount || 0), 0);
             return <tr key={application.id}>
+              {showFormSelection && <td className="seal-select-cell"><input type="checkbox" aria-label={`选择 ${application.applicationNo}`} disabled={loading || !canSelectForm(application)} checked={selectedForms.includes(application.id)} onChange={(event) => setSelectedForms((current) => selectPageForms(current, [application], event.target.checked))} /></td>}
               <td><button className="link" onClick={() => openDetail(application.id)}>{application.applicationNo || `#${application.id}`}</button><small>{application.projectName || projectName}</small></td>
               <td><strong>{application.applicantName || '-'}</strong><small>{application.departmentName || application.companyName || '-'}</small></td>
               <td>{application.sealName || '-'}</td>
@@ -828,10 +845,10 @@ export default function SealManagementPage({
               <td><StatusPill status={application.status} /></td>
               <td>{mode === 'ledger' ? formatDateTime(application.approvalTime || application.approvedAt || application.reviewedAt) : formatDateTime(application.applicationDate || application.createTime || application.createdAt)}</td>
               <td>{application.currentAssigneeName || application.currentApproverName || (statusOf(application) === 'PENDING_APPROVAL' ? '待审批' : '-')}</td>
-              <td><div className="seal-row-actions"><button onClick={() => openDetail(application.id)}>详情</button>{statusOf(application) === 'APPROVED' && <button onClick={() => downloadPdf(application)}>PDF</button>}</div></td>
+              <td><div className="seal-row-actions"><button onClick={() => openDetail(application.id)}>详情</button>{application.canExportForm && <button onClick={() => downloadPdf(application)}>PDF</button>}</div></td>
             </tr>;
           })}
-          {!loading && !rows.length && <tr><td className="seal-empty" colSpan="9">当前条件下暂无用印申请</td></tr>}
+          {!loading && !rows.length && <tr><td className="seal-empty" colSpan={showFormSelection ? 10 : 9}>当前条件下暂无用印申请</td></tr>}
         </tbody></table></div>
         {loading && <div className="seal-loading">正在加载用印申请…</div>}
         <div className="seal-pagination"><span>共 {total} 条，第 {pageNo}/{pageCount} 页</span><button disabled={pageNo <= 1 || loading} onClick={() => setPageNo((value) => value - 1)}>上一页</button><button disabled={pageNo >= pageCount || loading} onClick={() => setPageNo((value) => value + 1)}>下一页</button></div>
@@ -849,7 +866,7 @@ export default function SealManagementPage({
               {detail.canTransfer && <button onClick={openTransfer}>转办</button>}
               {(detail.canCancel || detail.canWithdraw) && <button className="danger" onClick={withdrawCurrent}>撤回</button>}
               {canCopyDetail && <button onClick={copyCurrent} disabled={busy}>复制申请</button>}
-              {statusOf(detail) === 'APPROVED' && <button onClick={() => downloadPdf(detail)}>下载申请单 PDF</button>}
+              {detail.canExportForm && <button onClick={() => downloadPdf(detail)}>下载申请单 PDF</button>}
             </div>
             <div className="seal-detail-grid">
               <div><span>项目</span><strong>{detail.projectName || projectName}</strong></div>

@@ -31,6 +31,21 @@ import static org.mockito.Mockito.when;
 class SealPdfServiceTest {
 
     @Test
+    void singleFormRequiresTheDedicatedExportPermissionBeforeRendering() {
+        SealApplicationService applications = mock(SealApplicationService.class);
+        SealApplication application = new SealApplication();
+        application.setId(42L);
+        application.setStatus(SealApplicationService.APPROVED);
+        SysUser user = new SysUser();
+        when(applications.requireApplication(42L)).thenReturn(application);
+        org.mockito.Mockito.doThrow(BusinessException.forbidden("没有导出用印申请单权限"))
+                .when(applications).requireFormExportPermission(application, user);
+        assertEquals(403, assertThrows(BusinessException.class,
+                () -> new SealPdfService(applications).generate(42L, user, null)).getCode());
+        verify(applications, never()).detail(42L, user);
+    }
+
+    @Test
     void formalPdfRejectsDraftAndOtherUnapprovedStates() {
         SealApplicationService applicationService = mock(SealApplicationService.class);
         SealApplication draft = new SealApplication();

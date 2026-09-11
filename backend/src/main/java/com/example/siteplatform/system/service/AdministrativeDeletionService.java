@@ -224,6 +224,7 @@ public class AdministrativeDeletionService {
                 """, id));
         add(impact, "sealApplications", "保留的本人用印申请",
                 count("seal_application", "applicant_id", id));
+        add(impact, "sealFormExports", "保留的申请单合并任务与下载记录", count("seal_form_export_job", "requested_by_id", id));
         add(impact, "sealUploads", "保留的用印附件上传快照",
                 count("seal_application_file", "uploader_id", id));
         add(impact, "sealCcHistory", "保留的用印抄送快照",
@@ -253,6 +254,8 @@ public class AdministrativeDeletionService {
                         + count("quality_issue_log", "project_id", id)
                         + count("quality_issue_export_job", "project_id", id)
                         + count("quality_issue_export_job_item", "project_id", id));
+        add(impact, "sealFormExports", "用印申请单合并任务与明细", count("seal_form_export_job", "project_id", id)
+                + count("seal_form_export_item", "project_id", id));
         add(impact, "sealWorkflow", "用印申请、印章、审批、抄送与通知", sealProjectDataCount(id));
         long submittedSealApplications = submittedSealApplicationCount(id);
         add(impact, "preservedSealHistory", "必须保留的已提交用印申请与审批台账", submittedSealApplications);
@@ -615,6 +618,8 @@ public class AdministrativeDeletionService {
         update("DELETE FROM workflow_approval_config_user WHERE project_id = ?", projectId);
         update("DELETE FROM workflow_approval_config WHERE project_id = ?", projectId);
         update("DELETE FROM seal_application_file WHERE project_id = ?", projectId);
+        update("DELETE FROM seal_form_export_item WHERE project_id = ?", projectId);
+        update("DELETE FROM seal_form_export_job WHERE project_id = ?", projectId);
         update("DELETE FROM seal_application_item WHERE project_id = ?", projectId);
         update("DELETE FROM seal_application_log WHERE project_id = ?", projectId);
         update("DELETE FROM seal_application WHERE project_id = ?", projectId);

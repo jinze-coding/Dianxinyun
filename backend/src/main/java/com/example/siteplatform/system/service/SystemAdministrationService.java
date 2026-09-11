@@ -1044,7 +1044,7 @@ public class SystemAdministrationService {
             if (!businessModuleCodes.contains("DOCUMENT")) return false;
             if (!strictTabs || !catalogHasAny(catalogMenuCodes,
                     "DOCUMENT_LIBRARY", "DOCUMENT_SEAL", "DOCUMENT_CIRCULATION", "DOCUMENT_RECYCLE")) return true;
-            if (Set.of("SEAL.VIEW", "SEAL.MANAGE", "SEAL.EXPORT").contains(code)) {
+            if (Set.of("SEAL.VIEW", "SEAL.MANAGE", "SEAL.EXPORT", "SEAL.APPLICATION.EXPORT").contains(code)) {
                 return selectedMenuCodes.contains("DOCUMENT_SEAL");
             }
             if (DOCUMENT_CIRCULATION_PERMISSION_CODES.contains(code)) {
