@@ -73,17 +73,14 @@ const visitorSource = await readFile(new URL('../src/pages/public/visitor-invite
 const componentSource = await readFile(new URL('../src/components/ProjectLocationCard.vue', import.meta.url), 'utf8');
 const guardSource = await readFile(new URL('../src/pages/public/guard-visitor-register.vue', import.meta.url), 'utf8');
 const apiSource = await readFile(new URL('../src/api/siteAccess.ts', import.meta.url), 'utf8');
-assert.equal((visitorSource.match(/<ProjectLocationCard/g) || []).length, 2, '预约登记前和放行页应各挂载一次地图卡片');
-assert.match(visitorSource, /invitation\.status === 'PENDING' && !invitationExpired && invitation\.projectLocation/);
-assert.match(visitorSource, /!invitationPassExpired && invitation\.projectLocation/);
-assert.match(visitorSource, /\['PENDING', 'SUBMITTED'\]\.includes\(invitation\.value\.status\)[\s\S]*startClock\(\)/, '待登记和已提交状态都必须按服务端时间持续判断过期');
-assert.match(visitorSource, /watch\(invitationExpired,[\s\S]*resetProjectRouteImage\(\)[\s\S]*closeProjectProfile\(\)/, '页面停留至预约过期时必须清理路线图并关闭项目信息');
-assert.equal((visitorSource.match(/:route-image-path="projectRouteImagePath"/g) || []).length, 2, '登记前和放行页应复用同一临时路线图');
-assert.match(visitorSource, /const current = await resolvePublicSiteVisit\(token\.value\);\s*if \(disposed \|\| requestId !== loadRequestId\) return;\s*invitation\.value = current;\s*void loadProjectRouteImage\(invitation\.value\)/, '解析邀请后应异步加载路线图');
-assert.match(visitorSource, /invitation\.value = data;[\s\S]*?void loadProjectRouteImage\(invitation\.value\)/, '提交成功后必须使用 ref 中的当前响应式对象刷新路线图');
+assert.equal((visitorSource.match(/<ProjectLocationCard/g) || []).length, 1, '登记前和放行页共用弹窗内唯一地图');
+const visitorTemplate = visitorSource.slice(visitorSource.indexOf('<template>'), visitorSource.lastIndexOf('</template>'));
+assert.doesNotMatch(visitorTemplate, /会议资料|会议时间|会议地点|共享会议/);
+assert.match(visitorSource, /navigationVisible && foreground && navigationVerified && canShowNavigation/, '地图仅在弹窗可见且有效邀请核验成功后挂载');
+assert.equal((visitorSource.match(/@tap="openNavigation"/g) || []).length, 2, '登记前和放行回执均提供导航按钮');
 assert.doesNotMatch(visitorSource, /invitation\.value\s*!==\s*current|invitation\.value\s*===\s*current/, '路线图迟到响应只能使用请求序号判断，不能比较 Vue 原始对象与响应式代理');
 assert.match(visitorSource, /function resetProjectRouteImage\(\)[\s\S]*removePublicProjectRouteImage\(projectRouteImagePath\.value\)/, '替换或离开页面时必须删除临时路线图');
-assert.match(visitorSource, /function cleanup\(\)[\s\S]*resetProjectRouteImage\(\)/, '页面卸载必须执行路线图清理');
+// The actual page lifecycle and route cleanup are exercised by test:visitor-navigation.
 assert.doesNotMatch(guardSource, /ProjectLocationCard/, '本次不得改动门卫长期登记页面');
 assert.match(componentSource, /<map[\s\S]*@tap="navigateToProject"/);
 assert.match(componentSource, /访客导航/);

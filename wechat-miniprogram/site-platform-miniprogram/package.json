@@ -16,6 +16,7 @@
     "test:project-location": "node --experimental-strip-types scripts/test-project-map-navigation.mjs",
     "test:visitor-profile": "node --experimental-strip-types scripts/test-visitor-profile-flow.mjs",
     "test:guard-meetings": "node --experimental-strip-types scripts/test-guard-meeting-refresh.mjs",
+    "test:visitor-navigation": "node --experimental-strip-types scripts/test-visitor-navigation.mjs",
     "test:meeting-dialogs": "node --experimental-strip-types scripts/test-meeting-service-dialogs.mjs",
     "test:seal-attachments": "node scripts/test-seal-attachments.mjs",
     "test:edge-inspection": "node --experimental-strip-types scripts/test-edge-inspection-view.mjs",

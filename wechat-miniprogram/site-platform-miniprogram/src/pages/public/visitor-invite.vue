@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { onBackPress, onLoad, onUnload } from '@dcloudio/uni-app';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { onBackPress, onHide, onLoad, onPageScroll, onShow, onUnload } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
 import { useVisitorPersonalInfo } from '@/utils/visitorPersonalInfo';
 import ProjectLocationCard from '@/components/ProjectLocationCard.vue';
+import NavigationDialog from '@/components/MeetingServiceDialog.vue';
+import { ApiRequestError } from '@/api/request';
 import {
   createPublicVisitorSession,
   downloadPublicProjectProfileImage,
@@ -60,6 +62,19 @@ let projectRouteImageRequestId = 0;
 const currentTime = ref(Date.now());
 let clockTimer: ReturnType<typeof setInterval> | undefined;
 let serverOffset = 0;
+const navigationVisible = ref(false);
+const foreground = ref(true);
+const navigationVerified = ref(false);
+const navigationError = ref('');
+const navigationScrollTarget = ref(0);
+const publicAccessDenied = ref(false);
+let navigationScrollTop = 0;
+let navigationRestoreTop: number | undefined;
+let pageScrollTop = 0;
+let returnScrollTop = 0;
+let navigationEpoch = 0;
+let navigationTask: Promise<void> | undefined;
+let navigationTimer: ReturnType<typeof setInterval> | undefined;
 
 type PublicProjectProfileKey = keyof PublicProjectProfile;
 interface PublicProfileField { key: PublicProjectProfileKey; label: string; suffix?: string }
@@ -123,7 +138,8 @@ async function load() {
   loading.value = true;
   errorMessage.value = '';
   invalidateIdentity();
-  resetProjectRouteImage();
+  void closeNavigation();
+  publicAccessDenied.value = false;
   if (!token.value) {
     errorMessage.value = '邀请小程序码无效';
     loading.value = false;
@@ -132,8 +148,8 @@ async function load() {
   try {
     const current = await resolvePublicSiteVisit(token.value);
     if (disposed || requestId !== loadRequestId) return;
+    if (current.inviteType === 'MEETING') throw new Error('请使用单次预约邀请的小程序码');
     invitation.value = current;
-    void loadProjectRouteImage(invitation.value);
     loading.value = false;
     if (['PENDING', 'SUBMITTED'].includes(invitation.value.status)) {
       syncServerClock(invitation.value.serverTime);
@@ -266,9 +282,7 @@ async function submit() {
     };
     const data = await submitPublicSiteVisit(payload, visitorSessionToken.value);
     invitation.value = data;
-    // ref 会把对象转换成响应式代理；后续异步结果必须以 ref 中的当前值为准，
-    // 否则拿原始响应对象做身份比较会把有效路线图误判成迟到响应并立即删除。
-    void loadProjectRouteImage(invitation.value);
+    resetProjectRouteImage();
     syncServerClock(data.serverTime);
     startClock();
     clearSensitiveForm();
@@ -312,6 +326,108 @@ const invitationPassExpired = computed(() => {
   if (!current || current.status !== 'SUBMITTED') return false;
   return invitationExpired.value;
 });
+
+const canShowNavigation = computed(() => canViewProjectProfile.value
+  && invitation.value?.inviteType !== 'MEETING'
+  && Boolean(invitation.value?.projectLocation) && !publicAccessDenied.value);
+
+async function restoreNavigationScroll() {
+  const target = navigationRestoreTop ?? navigationScrollTop;
+  navigationScrollTarget.value = -1;
+  await nextTick();
+  navigationScrollTarget.value = target;
+}
+
+function rememberNavigationScroll(event: { detail: { scrollTop: number } }) {
+  if (!foreground.value || !navigationVerified.value || projectRouteImageLoading.value) return;
+  // 地图/大图返回及图片布局时，不用临时归零的滚动事件覆盖原位置。
+  if (navigationRestoreTop !== undefined && Math.abs(event.detail.scrollTop - navigationRestoreTop) > 2) return;
+  navigationRestoreTop = undefined;
+  navigationScrollTop = event.detail.scrollTop;
+}
+
+function openNavigation() {
+  if (!canShowNavigation.value || navigationVisible.value) return;
+  uni.hideKeyboard();
+  returnScrollTop = pageScrollTop;
+  navigationRestoreTop = navigationScrollTop || undefined;
+  navigationVisible.value = true;
+  navigationVerified.value = false;
+  navigationError.value = '';
+  void refreshNavigation(true);
+}
+
+async function closeNavigation() {
+  const wasVisible = navigationVisible.value;
+  navigationVisible.value = false;
+  navigationVerified.value = false;
+  navigationEpoch += 1;
+  navigationTask = undefined;
+  resetProjectRouteImage();
+  await nextTick();
+  if (wasVisible && !disposed && !navigationVisible.value) uni.pageScrollTo({ scrollTop: returnScrollTop, duration: 0 });
+}
+
+function refreshNavigation(reloadRoute = false): Promise<void> {
+  if (disposed || !navigationVisible.value || !foreground.value) return Promise.resolve();
+  if (navigationTask) return navigationTask;
+  const ticket = navigationEpoch;
+  let pending: Promise<void>;
+  pending = resolvePublicSiteVisit(token.value).then(async (current) => {
+    if (ticket !== navigationEpoch || !foreground.value || !navigationVisible.value) return;
+    if (current.inviteType === 'MEETING') {
+      publicAccessDenied.value = true;
+      void closeNavigation();
+      return;
+    }
+    invitation.value = current;
+    syncServerClock(current.serverTime);
+    if (!canShowNavigation.value) {
+      void closeNavigation();
+      return;
+    }
+    navigationError.value = '';
+    navigationVerified.value = true;
+    if (reloadRoute) await loadProjectRouteImage();
+    if (ticket === navigationEpoch) void restoreNavigationScroll();
+  }).catch((error: unknown) => {
+    if (ticket !== navigationEpoch || !foreground.value || !navigationVisible.value) return;
+    navigationVerified.value = false;
+    navigationError.value = error instanceof Error ? error.message : '邀请状态核验失败，请重试';
+    resetProjectRouteImage();
+    if (error instanceof ApiRequestError && [400, 401, 403, 404, 410].includes(error.statusCode || error.code || 0)) {
+      publicAccessDenied.value = true;
+      void closeNavigation();
+    }
+  }).finally(() => { if (navigationTask === pending) navigationTask = undefined; });
+  navigationTask = pending;
+  return pending;
+}
+
+onShow(() => {
+  foreground.value = true;
+  currentTime.value = Date.now() + serverOffset;
+  if (invitation.value && !invitationExpired.value) startClock();
+  if (navigationVisible.value) void refreshNavigation(true);
+});
+onHide(() => {
+  if (navigationVisible.value) navigationRestoreTop = navigationScrollTop || undefined;
+  foreground.value = false;
+  navigationVerified.value = false;
+  navigationEpoch += 1;
+  navigationTask = undefined;
+  projectRouteImageRequestId += 1;
+  stopClock();
+});
+onPageScroll((event) => { if (!navigationVisible.value) pageScrollTop = event.scrollTop; });
+watch([navigationVisible, foreground], ([visible, shown]) => {
+  if (navigationTimer) clearInterval(navigationTimer);
+  navigationTimer = undefined;
+  if (visible && shown) navigationTimer = setInterval(() => { void refreshNavigation(); }, 30000);
+});
+watch(canShowNavigation, (available) => {
+  if (!available && navigationVisible.value) void closeNavigation();
+}, { flush: 'sync' });
 
 async function openProjectProfile() {
   if (!canViewProjectProfile.value || projectProfileLoading.value) return;
@@ -380,13 +496,14 @@ function resetProjectRouteImage() {
   projectRouteImagePath.value = '';
 }
 
-async function loadProjectRouteImage(current?: PublicSiteVisitInvitation) {
+async function loadProjectRouteImage() {
+  if (!navigationVisible.value || !foreground.value || !navigationVerified.value || !canShowNavigation.value) return;
   const requestId = ++projectRouteImageRequestId;
   removePublicProjectRouteImage(projectRouteImagePath.value);
   projectRouteImagePath.value = '';
   projectRouteImageError.value = '';
   projectRouteImageLoading.value = false;
-  if (!current?.projectLocation?.routeImageAvailable) return;
+  if (!invitation.value?.projectLocation?.routeImageAvailable) return;
 
   projectRouteImageLoading.value = true;
   try {
@@ -406,6 +523,10 @@ async function loadProjectRouteImage(current?: PublicSiteVisitInvitation) {
 }
 
 function handleBack() {
+  if (navigationVisible.value) {
+    void closeNavigation();
+    return;
+  }
   if (showingProjectProfile.value) {
     closeProjectProfile();
     return;
@@ -414,6 +535,10 @@ function handleBack() {
 }
 
 onBackPress(() => {
+  if (navigationVisible.value) {
+    void closeNavigation();
+    return true;
+  }
   if (!showingProjectProfile.value) return false;
   closeProjectProfile();
   return true;
@@ -424,7 +549,9 @@ function cleanup() {
   loadRequestId += 1;
   invalidateIdentity();
   stopClock();
-  resetProjectRouteImage();
+  void closeNavigation();
+  if (navigationTimer) clearInterval(navigationTimer);
+  navigationTimer = undefined;
   projectProfileRequestId += 1;
   removePublicProjectProfileImages(projectImagePaths.value);
   projectImagePaths.value = [];
@@ -447,6 +574,7 @@ function goBack() {
 </script>
 
 <template>
+  <page-meta :page-style="navigationVisible ? 'overflow:hidden' : ''" />
   <view class="visitor-shell">
     <view class="entry-navbar"><AppNavBar :title="showingProjectProfile ? '项目信息' : '外访登记'" @back="handleBack" /></view>
     <view v-if="showingProjectProfile" class="project-profile-content">
@@ -501,15 +629,9 @@ function goBack() {
           <button v-if="canViewProjectProfile" class="project-info-button" @tap="openProjectProfile">项目信息</button>
         </view>
 
-        <ProjectLocationCard
-          v-if="invitation.status === 'PENDING' && !invitationExpired && invitation.projectLocation"
-          :location="invitation.projectLocation"
-          :project-name="invitation.projectShortName || invitation.projectName"
-          map-id="visitor-pending-project-map"
-          :route-image-path="projectRouteImagePath"
-          :route-image-loading="projectRouteImageLoading"
-          :route-image-error="projectRouteImageError"
-        />
+        <button v-if="invitation.status === 'PENDING' && canShowNavigation" class="visitor-navigation-button" @tap="openNavigation">
+          访客导航 <text class="visitor-navigation-arrow">›</text>
+        </button>
 
         <template v-if="invitation.status === 'SUBMITTED'">
           <view class="visitor-card pass-card" :class="{ expired: invitationPassExpired }">
@@ -530,15 +652,9 @@ function goBack() {
             <text class="pass-hint">{{ invitationPassExpired ? '本次预约已超过计划离场时间，请联系项目接待人重新创建邀请。' : '本次预约提交后立即登记成功，无需审批；请将本页面出示给门卫核验。' }}</text>
             <button v-if="canViewProjectProfile" class="project-info-button" @tap="openProjectProfile">项目信息</button>
           </view>
-          <ProjectLocationCard
-            v-if="!invitationPassExpired && invitation.projectLocation"
-            :location="invitation.projectLocation"
-            :project-name="invitation.projectShortName || invitation.projectName"
-            map-id="visitor-pass-project-map"
-            :route-image-path="projectRouteImagePath"
-            :route-image-loading="projectRouteImageLoading"
-            :route-image-error="projectRouteImageError"
-          />
+          <button v-if="canShowNavigation" class="visitor-navigation-button" @tap="openNavigation">
+            访客导航 <text class="visitor-navigation-arrow">›</text>
+          </button>
         </template>
 
         <view v-else-if="invitationExpired || invitation.status !== 'PENDING'" class="visitor-card result-card" :class="invitationExpired ? 'expired' : invitation.status.toLowerCase()">
@@ -594,8 +710,38 @@ function goBack() {
         </template>
       </template>
     </view>
+    <NavigationDialog :visible="navigationVisible" title="访客导航" @close="closeNavigation">
+      <scroll-view class="visitor-navigation-scroll" scroll-y :scroll-top="navigationScrollTarget" @scroll="rememberNavigationScroll" @touchstart="navigationRestoreTop = undefined" @touchmove.stop>
+        <view class="visitor-navigation-content">
+          <view v-if="navigationError" class="visitor-navigation-state">
+            <text>{{ navigationError }}</text><button class="visitor-navigation-button" @tap="refreshNavigation(true)">重新加载</button>
+          </view>
+          <ProjectLocationCard
+            v-else-if="navigationVisible && foreground && navigationVerified && canShowNavigation && invitation?.projectLocation"
+            :location="invitation.projectLocation"
+            :project-name="invitation.projectShortName || invitation.projectName"
+            map-id="visitor-project-map"
+            :route-image-path="projectRouteImagePath"
+            :route-image-loading="projectRouteImageLoading"
+            :route-image-error="projectRouteImageError"
+            embedded
+            @route-image-loaded="restoreNavigationScroll"
+          />
+          <view v-else class="visitor-navigation-state">正在核验来访及导航信息…</view>
+        </view>
+      </scroll-view>
+    </NavigationDialog>
   </view>
 </template>
+
+<style scoped>
+.visitor-navigation-button{width:100%;display:flex;align-items:center;justify-content:center;gap:20rpx;min-height:84rpx;line-height:1.5;margin:0;padding:16rpx 20rpx;border-radius:16rpx;background:#edf5ff;color:var(--workspace-accent-deep,#315f86);font-size:28rpx;font-weight:700}
+.visitor-navigation-button::after{border:1rpx solid #d6e7f7;border-radius:16rpx}
+.visitor-navigation-arrow{font-size:38rpx;line-height:1;font-weight:400}
+.visitor-navigation-scroll{height:100%;width:100%}
+.visitor-navigation-content{padding:26rpx}
+.visitor-navigation-state{display:flex;flex-direction:column;gap:24rpx;padding:40rpx 0;color:#617086;font-size:26rpx;line-height:1.7;word-break:break-word}
+</style>
 
 <style scoped>
 .visitor-shell{min-height:100vh;background:var(--workspace-page);color:var(--workspace-text)}.visitor-content{display:flex;flex-direction:column;gap:20rpx;padding:20rpx 24rpx calc(46rpx + env(safe-area-inset-bottom))}.visitor-card{border:1rpx solid var(--workspace-divider);border-radius:22rpx;background:#fff;box-shadow:var(--workspace-shadow)}.invite-card{padding:26rpx;background:linear-gradient(145deg,#eaf3fa,#fff)}.invite-top{display:flex;align-items:center;justify-content:space-between;color:var(--workspace-accent-deep);font-size:21rpx;font-weight:750}.invite-title{display:block;margin:26rpx 0 20rpx;font-size:34rpx;font-weight:900;text-align:center}.invite-info{display:grid;grid-template-columns:130rpx 1fr;gap:14rpx;margin-top:12rpx;font-size:22rpx;line-height:1.6}.invite-info text:first-child{color:var(--workspace-text-muted)}.form-card,.profile-card{padding:26rpx}.section-title{font-size:28rpx;font-weight:850}.profile-subtitle{display:block;margin-top:5rpx;color:var(--workspace-text-muted);font-size:19rpx}.section-head,.companion-title{display:flex;align-items:center;justify-content:space-between}.section-head button,.companion-title button{min-height:52rpx;padding:0 18rpx;border:1rpx solid var(--workspace-divider);border-radius:12rpx;background:#f7fafc;color:var(--workspace-accent-deep);font-size:20rpx}.profile-list{display:flex;flex-direction:column;gap:14rpx;margin-top:20rpx}.profile-item{display:flex;align-items:center;justify-content:space-between;gap:14rpx;padding:18rpx;border:1rpx solid var(--workspace-divider);border-radius:16rpx;background:#f9fbfc}.profile-item.selected{border-color:var(--workspace-accent-deep);background:#edf5fa}.profile-item.loading{border-color:#89a9bf;background:#f0f6fa}.profile-main{display:flex;min-width:0;flex:1;flex-direction:column;gap:7rpx}.profile-main text:first-child{font-size:24rpx;font-weight:800}.profile-main text:not(:first-child){color:var(--workspace-text-muted);font-size:20rpx}.profile-main .profile-loading-copy{color:var(--workspace-accent-deep);font-weight:700}.profile-item>button{min-height:48rpx;padding:0 15rpx;border:1rpx solid #e8c7c4;border-radius:11rpx;background:#fff7f6;color:#a64d45;font-size:19rpx}.profile-item>button[disabled]{opacity:.55}.profile-notice,.selected-profile-copy{display:block;margin-top:18rpx;border-radius:14rpx;padding:16rpx;background:#fff8e9;color:#80602d;font-size:20rpx;line-height:1.65}.selected-profile-copy{background:#edf6f2;color:#356b58}.visitor-field{display:flex;flex-direction:column;gap:10rpx;margin-top:22rpx}.visitor-field>text{color:var(--workspace-text-secondary);font-size:22rpx;font-weight:650}.visitor-field input,.visitor-field textarea,.companion-card input{width:100%;border:1rpx solid #d5e0e7;border-radius:14rpx;background:#f9fbfc;font-size:24rpx}.visitor-field input,.companion-card input{height:78rpx;padding:0 20rpx}.visitor-field textarea{min-height:150rpx;padding:18rpx 20rpx}.companion-field{margin-top:4rpx}.empty-copy,.limit-copy{display:block;margin-top:18rpx;color:var(--workspace-text-muted);font-size:21rpx;line-height:1.6}.companion-card{display:flex;flex-direction:column;gap:12rpx;margin-top:18rpx;padding:18rpx;border:1rpx solid var(--workspace-divider);border-radius:16rpx;background:#f8fafb}.companion-title text{font-size:22rpx;font-weight:750}.travel-options{display:flex;gap:40rpx;margin-top:24rpx}.travel-options label{display:flex;align-items:center;gap:8rpx;font-size:23rpx}.privacy-card,.profile-save-card{padding:24rpx;background:#f8fbfd}.profile-save-card{background:#f7fbf8}.privacy-check{display:flex;align-items:center;gap:8rpx;font-size:23rpx;font-weight:750}.privacy-copy{display:block;margin-top:15rpx;color:var(--workspace-text-muted);font-size:20rpx;line-height:1.75}.submit-button{min-height:84rpx;border-radius:16rpx;background:var(--workspace-accent-deep);color:#fff;font-size:26rpx;font-weight:800}.submit-button[disabled]{opacity:.65}.submit-hint{color:var(--workspace-text-muted);font-size:20rpx;text-align:center}.submit-error{border:1rpx solid #edc8c5;border-radius:14rpx;padding:18rpx;background:#fff4f3;color:#a63f3f;font-size:21rpx}.state-card{display:flex;min-height:300rpx;align-items:center;justify-content:center;flex-direction:column;padding:40rpx;color:var(--workspace-text-muted);font-size:23rpx;text-align:center}.error-state text:first-child{color:var(--workspace-text);font-size:29rpx;font-weight:850}.error-state text:nth-child(2){margin-top:14rpx;line-height:1.6}.error-state button{min-height:66rpx;margin-top:24rpx;padding:0 36rpx;border-radius:14rpx;background:var(--workspace-accent-deep);color:#fff;font-size:22rpx}.result-card{display:flex;align-items:center;flex-direction:column;padding:54rpx 30rpx;text-align:center}.result-mark{display:flex;width:92rpx;height:92rpx;align-items:center;justify-content:center;border-radius:50%;background:#eaf6f1;color:#2f8065;font-size:50rpx;font-weight:900}.result-card.expired .result-mark,.result-card.voided .result-mark{background:#fceeed;color:#b75353}.result-title{margin:24rpx 0 12rpx;font-size:30rpx;font-weight:850}.result-card text:last-child{color:var(--workspace-text-muted);font-size:21rpx;line-height:1.7}
