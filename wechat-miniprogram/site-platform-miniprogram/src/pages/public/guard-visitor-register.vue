@@ -10,18 +10,14 @@ import {
   type PublicGuardMatchedPass,
   type PublicGuardMeetingChoice,
   type PublicGuardVisitorSession,
-  disablePublicGuardVisitorProfile,
   downloadPublicGuardProjectProfileImage,
   getPublicGuardProjectProfile,
-  getPublicGuardVisitorProfile,
-  getPublicGuardVisitorProfiles,
   removePublicProjectProfileImages,
   submitPublicGuardVisit,
   type PublicGuardVisitPass,
   type PublicGuardVisitSubmitPayload,
   type PublicProjectProfile,
   type SiteVisitCompanionInput,
-  type SiteVisitorProfile
 } from '@/api/siteAccess';
 import { extractGuardVisitorToken } from '@/utils/guardVisitorScene';
 import { getFreshWechatCode } from '@/utils/wechat';
@@ -53,27 +49,19 @@ let refreshing = false;
 let stateRequestId = 0;
 let meetingsRequestId = 0;
 
-const profiles = ref<SiteVisitorProfile[]>([]);
-const profilesLoading = ref(false);
-const profileNotice = ref('');
-const selectedProfile = ref<SiteVisitorProfile>();
-const profileDetailLoadingCode = ref('');
-const savingProfile = ref(false);
-const profileName = ref('');
 const visitorCompany = ref('');
 const contactName = ref('');
 const contactPhone = ref('');
 const companions = ref<SiteVisitCompanionInput[]>([]);
 const travelMode = ref<'DRIVING' | 'OTHER'>('OTHER');
 const vehiclePlate = ref('');
-const { rememberInfo, personalInfoApplied, applyPersonalInfo, resetPersonalInfo, rememberChange } =
+const { personalInfoApplied, applyPersonalInfo, resetPersonalInfo } =
   useVisitorPersonalInfo({ visitorCompany, contactName, contactPhone, travelMode, vehiclePlate });
 const visitorRemark = ref('');
 const privacyAgreed = ref(false);
 const currentTime = ref(Date.now());
 let clockTimer: ReturnType<typeof setInterval> | undefined;
 let serverOffset = 0;
-let profileRequestId = 0;
 const showingProjectProfile = ref(false);
 const projectProfile = ref<PublicProjectProfile>();
 const projectProfileLoading = ref(false);
@@ -141,7 +129,6 @@ function invalidateRefreshes() {
 }
 
 function applyState(state: PublicGuardVisitorSession) {
-  const previouslyPassed = Boolean(pass.value || matchedPasses.value.length);
   projectName.value = state.projectName;
   projectShortName.value = state.projectShortName || '';
   pass.value = state.registration;
@@ -152,7 +139,6 @@ function applyState(state: PublicGuardVisitorSession) {
   if (pass.value || matchedPasses.value.length) clearForm();
   else {
     applyPersonalInfo(state.personalInfo);
-    if (previouslyPassed) void loadProfiles();
   }
 }
 
@@ -253,7 +239,7 @@ async function initialize() {
     visitorSessionToken.value = session.visitorSessionToken;
     applyState(session);
     if (session.pageState === 'FORM') {
-      void loadProfiles();
+
       void loadMeetings();
     }
 
@@ -265,66 +251,6 @@ async function initialize() {
   } finally {
     if (requestId === initializationId) loading.value = false;
   }
-}
-
-async function loadProfiles() {
-  const requestId = ++profileRequestId;
-  profilesLoading.value = true;
-  profileNotice.value = '';
-  try {
-    const result = await getPublicGuardVisitorProfiles(visitorSessionToken.value);
-    if (requestId !== profileRequestId) return;
-    profiles.value = result;
-  } catch {
-    if (requestId !== profileRequestId) return;
-    profiles.value = [];
-    profileNotice.value = '暂未读取到历史常用资料，仍可手工填写并正常登记。';
-  } finally {
-    if (requestId === profileRequestId) profilesLoading.value = false;
-  }
-}
-
-async function chooseProfile(profile: SiteVisitorProfile) {
-  if (!visitorSessionToken.value || profileDetailLoadingCode.value) return;
-  profileDetailLoadingCode.value = profile.profileCode;
-  try {
-    const detail = await getPublicGuardVisitorProfile(visitorSessionToken.value, profile.profileCode);
-    selectedProfile.value = detail;
-    profileName.value = detail.profileName || '';
-    savingProfile.value = false;
-    visitorCompany.value = detail.visitorCompany || '';
-    contactName.value = detail.contactName || '';
-    contactPhone.value = detail.contactPhone || '';
-    travelMode.value = detail.travelMode || 'OTHER';
-    vehiclePlate.value = detail.vehiclePlate || '';
-    showToast('已带入本人信息，同行人员请按本次来访填写');
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : '常用资料加载失败');
-  } finally {
-    profileDetailLoadingCode.value = '';
-  }
-}
-
-async function disableProfile(profile: SiteVisitorProfile) {
-  const confirmed = await new Promise<boolean>((resolve) => uni.showModal({
-    title: '停用常用资料', content: `确认停用“${profile.profileName}”吗？`,
-    success: (result) => resolve(result.confirm), fail: () => resolve(false)
-  }));
-  if (!confirmed) return;
-  try {
-    await disablePublicGuardVisitorProfile(visitorSessionToken.value, profile.profileCode);
-    profiles.value = profiles.value.filter((item) => item.profileCode !== profile.profileCode);
-    if (selectedProfile.value?.profileCode === profile.profileCode) clearProfileSelection();
-    showToast('常用资料已停用');
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : '停用失败');
-  }
-}
-
-function clearProfileSelection() {
-  selectedProfile.value = undefined;
-  savingProfile.value = false;
-  profileName.value = '';
 }
 
 function addCompanion() {
@@ -356,7 +282,7 @@ function validate() {
   }
   if (travelMode.value === 'DRIVING' && !vehiclePlate.value.trim()) return '驾车来访请填写车牌号';
   if (!privacyAgreed.value) return '请阅读并同意隐私告知';
-  if (savingProfile.value && !visitorSessionToken.value) return '微信身份会话已失效，请重试';
+
   return '';
 }
 
@@ -379,12 +305,7 @@ async function submit() {
     visitorRemark: visitorRemark.value.trim() || undefined,
     meetingChoiceTokens: selectedMeetings.value,
     privacyAgreed: true,
-    rememberInfo: rememberInfo.value,
-    profileAction: savingProfile.value ? (selectedProfile.value ? 'UPDATE' : 'CREATE') : 'NONE',
-    profileCode: selectedProfile.value?.profileCode,
-    profileName: savingProfile.value ? profileName.value.trim() || undefined : undefined,
-    profileRetentionAgreed: savingProfile.value || undefined,
-    profileVersion: selectedProfile.value?.version
+
   };
   try {
     pass.value = await submitPublicGuardVisit(payload, visitorSessionToken.value);
@@ -405,11 +326,6 @@ async function submit() {
 function clearForm() {
   resetMeetings();
   meetingsNotice.value = '';
-  profileRequestId += 1;
-  profiles.value = [];
-  selectedProfile.value = undefined;
-  savingProfile.value = false;
-  profileName.value = '';
   visitorCompany.value = '';
   contactName.value = '';
   contactPhone.value = '';
@@ -446,13 +362,6 @@ function formatTime(value?: string | number, seconds = false) {
 
 function privacyChange(event: { detail: { value: string[] } }) {
   privacyAgreed.value = event.detail.value.includes('agreed');
-}
-
-function profileSaveChange(event: { detail: { value: string[] } }) {
-  savingProfile.value = event.detail.value.includes('save');
-  if (savingProfile.value && !profileName.value) {
-    profileName.value = selectedProfile.value?.profileName || `${contactName.value.trim() || '我的'}常用资料`;
-  }
 }
 
 async function openProjectProfile() {
@@ -533,7 +442,6 @@ function cleanup() {
   disposed = true;
   initializationId += 1;
   visitorSessionToken.value = '';
-  profileRequestId += 1;
   ready = false; pageVisible = false;
   if (stateTimer) clearInterval(stateTimer);
   stateTimer = undefined;
@@ -633,22 +541,6 @@ onBeforeUnmount(cleanup);
           <button class="project-info-button" @tap="openProjectProfile">项目信息</button>
         </view>
 
-        <view class="guard-card profile-card">
-          <view class="section-head">
-            <view><text class="section-title">常用来访资料</text><text class="section-subtitle">同一项目下可复用</text></view>
-            <button v-if="selectedProfile" @tap="clearProfileSelection">改为手工填写</button>
-          </view>
-          <text v-if="profilesLoading" class="empty-copy">正在安全读取常用资料...</text>
-          <text v-else-if="profileNotice" class="notice-copy">{{ profileNotice }}</text>
-          <text v-else-if="!profiles.length" class="empty-copy">暂无常用资料，本次可自愿保存。</text>
-          <view v-else class="profile-list">
-            <view v-for="profile in profiles" :key="profile.profileCode" class="profile-item" :class="{ selected: selectedProfile?.profileCode === profile.profileCode }" @tap="chooseProfile(profile)">
-              <view><text>{{ profile.profileName }}</text><text>{{ profile.visitorCompany }} · {{ profile.contactName }} {{ profile.maskedContactPhone }}</text><text>{{ profile.visitorCount }}人 · {{ profile.travelMode === 'DRIVING' ? (profile.vehiclePlate || '驾车') : '非驾车' }}</text></view>
-              <button :disabled="profileDetailLoadingCode === profile.profileCode" @tap.stop="disableProfile(profile)">停用</button>
-            </view>
-          </view>
-        </view>
-
         <view class="guard-card form-card">
           <text class="section-title">来访人员信息</text>
           <label class="field"><text>单位 *</text><input v-model="visitorCompany" maxlength="200" placeholder="请输入单位全称" placeholder-class="guard-placeholder" :cursor-spacing="24" /></label>
@@ -700,15 +592,9 @@ onBeforeUnmount(cleanup);
 
         <view class="guard-card privacy-card">
           <view class="personal-info-note" v-if="personalInfoApplied">已自动带入本人和车辆资料，请核对本次信息；同行人员另行填写。</view>
-          <checkbox-group class="remember-info-control" @change="rememberChange"><label><checkbox value="remember" :checked="rememberInfo" color="#315f86" /><text>记住本人和车辆信息，下次同项目扫码自动填写（提交后生效）</text></label></checkbox-group>
-          <checkbox-group @change="privacyChange"><label class="privacy-check"><checkbox value="agreed" :checked="privacyAgreed" color="#315f86" /><text>我已阅读并同意隐私告知</text></label></checkbox-group>
-          <text class="privacy-copy">系统将收集单位、姓名、手机号码和车辆信息，用于本项目门卫人工核验与外访登记。系统不采集身份证信息，也不会建立系统账号。</text>
-        </view>
 
-        <view class="guard-card profile-save-card">
-          <checkbox-group @change="profileSaveChange"><label class="privacy-check"><checkbox value="save" :checked="savingProfile" color="#315f86" /><text>{{ selectedProfile ? '用本次修改更新这份常用资料' : '将本次人员和车辆信息保存为常用资料' }}</text></label></checkbox-group>
-          <label v-if="savingProfile" class="field"><text>常用资料名称</text><input v-model="profileName" maxlength="100" placeholder="例如：张三来访资料" placeholder-class="guard-placeholder" :cursor-spacing="24" /></label>
-          <text class="privacy-copy">此项为单独、自愿的长期保存同意，仅限当前项目使用，以后可停用。</text>
+          <checkbox-group @change="privacyChange"><label class="privacy-check"><checkbox value="agreed" :checked="privacyAgreed" color="#315f86" /><text>我已阅读并同意隐私告知</text></label></checkbox-group>
+          <text class="privacy-copy">系统将收集单位、姓名、手机号码和车辆信息，用于本项目门卫人工核验与外访登记。本人单位、姓名、手机号码、出行方式和车牌在提交成功后保存，用于本小程序后续跨项目扫码自动填写。系统不采集身份证信息，也不会建立系统账号。</text>
         </view>
 
         <view v-if="errorMessage" class="submit-error">{{ errorMessage }}</view>
@@ -739,13 +625,6 @@ onBeforeUnmount(cleanup);
 .section-subtitle{display:block;margin-top:5rpx;color:var(--workspace-text-muted);font-size:19rpx}
 .empty-copy,.notice-copy{display:block;margin-top:18rpx;color:var(--workspace-text-muted);font-size:21rpx;line-height:1.6}
 .notice-copy{border-radius:14rpx;padding:14rpx;background:#fff8e9;color:#80602d}
-.profile-list{display:flex;flex-direction:column;gap:14rpx;margin-top:18rpx}
-.profile-item{display:flex;align-items:center;justify-content:space-between;gap:14rpx;padding:18rpx;border:1rpx solid var(--workspace-divider);border-radius:16rpx;background:#f9fbfc}
-.profile-item.selected{border-color:var(--workspace-accent-deep);background:#edf5fa}
-.profile-item>view{display:flex;min-width:0;flex:1;flex-direction:column;gap:6rpx}
-.profile-item>view text:first-child{font-size:23rpx;font-weight:800}
-.profile-item>view text:not(:first-child){color:var(--workspace-text-muted);font-size:19rpx}
-.profile-item>button{min-height:48rpx;padding:0 15rpx;border:1rpx solid #e8c7c4;border-radius:11rpx;background:#fff7f6;color:#a64d45;font-size:19rpx}
 .field{display:flex;flex-direction:column;gap:10rpx;margin-top:22rpx}
 .field>text{color:var(--workspace-text-secondary);font-size:24rpx;line-height:1.5;font-weight:650}
 .field input,.field textarea{box-sizing:border-box;display:block;width:100%;min-width:0;color:var(--workspace-text);border:1rpx solid #d5e0e7;border-radius:14rpx;background:#f9fbfc;font-size:28rpx}
@@ -756,7 +635,6 @@ onBeforeUnmount(cleanup);
 .travel-options{display:flex;gap:14rpx;margin-top:24rpx}
 .travel-options button{box-sizing:border-box;display:flex;align-items:center;justify-content:center;flex:1;min-width:0;height:80rpx;min-height:40px;margin:0;padding:0 16rpx;border:1rpx solid var(--workspace-divider);border-radius:14rpx;background:#eef3f7;color:var(--workspace-text-secondary);font-size:28rpx;line-height:1.2}.travel-options button.active{background:var(--workspace-accent-deep);border-color:var(--workspace-accent-deep);color:#fff}
 .privacy-card{background:#f8fbfd}
-.profile-save-card{background:#f7fbf8}
 .privacy-check{display:flex;align-items:flex-start;gap:12rpx;line-height:1.6;font-size:23rpx;font-weight:750}
 .privacy-copy{display:block;margin-top:15rpx;color:var(--workspace-text-muted);font-size:20rpx;line-height:1.75}
 .submit-error{border:1rpx solid #edc8c5;border-radius:14rpx;padding:18rpx;background:#fff4f3;color:#a63f3f;font-size:21rpx}
@@ -802,9 +680,6 @@ onBeforeUnmount(cleanup);
 .public-project-boundary{padding:8rpx 20rpx 20rpx;color:var(--workspace-text-muted);font-size:19rpx;line-height:1.7;text-align:center}
 
 .personal-info-note{padding:20rpx;margin:12rpx 0;border-radius:12rpx;background:#eef6ff;color:#285b83;font-size:25rpx;line-height:1.6}
-.remember-info-control{display:block;margin:24rpx 0;font-size:25rpx;color:#385366;line-height:1.7}
-.remember-info-control label{display:flex;align-items:flex-start;gap:10rpx}
-.remember-info-control text{flex:1;min-width:0}
 
 .meeting-choice{box-sizing:border-box;display:flex;align-items:flex-start;gap:14rpx;padding:20rpx;border:1rpx solid var(--workspace-divider);border-radius:16rpx;background:#f9fbfc}
 .meeting-choice>view{display:flex;flex:1;min-width:0;flex-direction:column;gap:8rpx}
@@ -826,4 +701,8 @@ onBeforeUnmount(cleanup);
 .pass-current{box-sizing:border-box;gap:16rpx;flex-wrap:wrap}
 .pass-grid{grid-template-columns:130rpx minmax(0,1fr)}
 .section-head button::after,.travel-options button::after,.submit-button::after{border:0}
+</style>
+
+<style scoped>
+@import "../../styles/publicVisitorForms.css";
 </style>

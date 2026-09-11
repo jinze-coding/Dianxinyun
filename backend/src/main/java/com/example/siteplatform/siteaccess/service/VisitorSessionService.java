@@ -103,7 +103,7 @@ public class VisitorSessionService {
         if (!SOURCE_INVITATION.equals(context.effectiveSourceType())
                 || !Objects.equals(context.effectiveSourceId(), invitation.getId())
                 || !context.projectId().equals(invitation.getProjectId())) {
-            throw BusinessException.of(403, "常用资料与当前邀请不匹配");
+            throw BusinessException.of(403, "微信访客会话与当前邀请不匹配");
         }
         return context;
     }

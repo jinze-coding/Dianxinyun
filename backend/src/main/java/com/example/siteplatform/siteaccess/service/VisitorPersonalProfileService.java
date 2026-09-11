@@ -1,6 +1,5 @@
 package com.example.siteplatform.siteaccess.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.siteaccess.entity.SiteVisitorPersonalProfile;
@@ -18,50 +17,37 @@ import java.time.ZoneId;
 public class VisitorPersonalProfileService {
     private final SiteVisitorPersonalProfileMapper mapper;
     private final ProjectInfoMapper projects;
-    private final VisitorProfileService namedProfiles;
     private final VisitorSessionService sessions;
     private final VisitorDataCryptoService crypto;
     private final ObjectMapper json;
 
     public VisitorPersonalProfileService(SiteVisitorPersonalProfileMapper mapper, ProjectInfoMapper projects,
-            VisitorProfileService namedProfiles, VisitorSessionService sessions,
+            VisitorSessionService sessions,
             VisitorDataCryptoService crypto, ObjectMapper json) {
         this.mapper = mapper;
         this.projects = projects;
-        this.namedProfiles = namedProfiles;
         this.sessions = sessions;
         this.crypto = crypto;
         this.json = json;
     }
 
     public VisitorPersonalInfoVO read(VisitorSessionService.VisitorSessionContext context) {
-        var profile = mapper.selectOne(new LambdaQueryWrapper<SiteVisitorPersonalProfile>()
-                .eq(SiteVisitorPersonalProfile::getProjectId, context.projectId())
-                .eq(SiteVisitorPersonalProfile::getWechatAppId, context.appId())
-                .eq(SiteVisitorPersonalProfile::getOwnerIdentityHash, identity(context)));
+        if (context == null) throw BusinessException.of(401, "请重新获取微信身份后读取");
+        var profile = mapper.selectLatestPersonalInfo(context.appId(), identity(context),
+                VisitorIdentitySupport.hash("single-registration", context, crypto, sessions),
+                VisitorIdentitySupport.hash("meeting-registration", context, crypto, sessions),
+                VisitorIdentitySupport.hash("guard-registration", context, crypto, sessions));
+        if (profile == null) profile = mapper.selectLatestNamedPersonalInfo(context.appId(), context.identityHash());
         var result = new VisitorPersonalInfoVO();
+        // 保留旧响应字段，但保存规则统一为成功提交后自动保存，不由客户端开关决定。
+        result.setRememberInfo(true);
         if (profile != null) {
-            result.setRememberInfo(Boolean.TRUE.equals(profile.getRememberEnabled()));
-            if (result.isRememberInfo()) {
-                result.setAvailable(true);
-                result.setVisitorCompany(profile.getVisitorCompany());
-                result.setContactName(profile.getContactName());
-                result.setContactPhone(crypto.decrypt(profile.getContactPhoneEncrypted()));
-                result.setTravelMode(profile.getTravelMode());
-                result.setVehiclePlate(profile.getVehiclePlate());
-            }
-            // A disabled row is also an explicit opt-out from legacy fallback.
-            return result;
-        }
-        var saved = namedProfiles.publicList(context);
-        if (!saved.isEmpty()) {
-            var detail = namedProfiles.publicDetail(context, saved.get(0).getProfileCode());
             result.setAvailable(true);
-            result.setVisitorCompany(detail.getVisitorCompany());
-            result.setContactName(detail.getContactName());
-            result.setContactPhone(detail.getContactPhone());
-            result.setTravelMode(detail.getTravelMode());
-            result.setVehiclePlate(detail.getVehiclePlate());
+            result.setVisitorCompany(profile.getVisitorCompany());
+            result.setContactName(profile.getContactName());
+            result.setContactPhone(crypto.decrypt(profile.getContactPhoneEncrypted()));
+            result.setTravelMode(profile.getTravelMode());
+            result.setVehiclePlate(profile.getVehiclePlate());
         }
         return result;
     }
@@ -72,8 +58,6 @@ public class VisitorPersonalProfileService {
         if (context == null) throw BusinessException.of(401, "请重新获取微信身份后提交");
         if (projects.selectByIdForUpdate(context.projectId()) == null) throw BusinessException.notFound("项目不存在");
         var profile = mapper.selectOwnerForUpdate(context.projectId(), context.appId(), identity(context));
-        if (rememberInfo == null && (profile == null || !Boolean.TRUE.equals(profile.getRememberEnabled()))) return;
-        boolean remember = rememberInfo == null || rememberInfo;
         LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Shanghai"));
         String before = profile == null ? null : snapshot(profile);
         boolean creating = profile == null;
@@ -88,18 +72,18 @@ public class VisitorPersonalProfileService {
         } else {
             profile.setVersion(profile.getVersion() + 1);
         }
-        profile.setRememberEnabled(remember);
-        profile.setVisitorCompany(remember ? submission.visitorCompany() : null);
-        profile.setContactName(remember ? submission.contactName() : null);
-        profile.setContactPhoneEncrypted(remember ? crypto.encrypt(submission.contactPhone()) : null);
-        profile.setTravelMode(remember ? submission.travelMode() : null);
-        profile.setVehiclePlate(remember ? submission.vehiclePlate() : null);
-        if (remember && profile.getPrivacyAgreedTime() == null) profile.setPrivacyAgreedTime(now);
+        profile.setRememberEnabled(true);
+        profile.setVisitorCompany(submission.visitorCompany());
+        profile.setContactName(submission.contactName());
+        profile.setContactPhoneEncrypted(crypto.encrypt(submission.contactPhone()));
+        profile.setTravelMode(submission.travelMode());
+        profile.setVehiclePlate(submission.vehiclePlate());
+        if (profile.getPrivacyAgreedTime() == null) profile.setPrivacyAgreedTime(now);
         profile.setLastSubmittedTime(now);
         profile.setUpdateTime(now);
         requireSingle(creating ? mapper.insert(profile) : mapper.updateById(profile));
         requireSingle(mapper.insertAudit(profile.getId(), profile.getProjectId(),
-                remember ? "REMEMBER" : "FORGET", before, snapshot(profile)));
+                "AUTO_SAVE", before, snapshot(profile)));
     }
 
     private String identity(VisitorSessionService.VisitorSessionContext context) {

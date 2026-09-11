@@ -26,6 +26,7 @@ import com.example.siteplatform.siteaccess.mapper.SiteMeetingVisitPersonMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteMeetingVisitRegistrationMapper;
 import com.example.siteplatform.siteaccess.mapper.SiteVisitInvitationMapper;
 import com.example.siteplatform.siteaccess.vo.PublicVisitorSessionVO;
+import com.example.siteplatform.siteaccess.vo.VisitorPersonalInfoVO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.BeforeEach;
@@ -72,6 +73,7 @@ class MeetingCheckinServiceTest {
     @Mock private VisitorDataCryptoService cryptoService;
     @Mock private VisitorSessionService sessionService;
     @Mock private VisitorProfileService profileService;
+    @Mock private VisitorPersonalProfileService personalProfiles;
     @Mock private RedisRateLimitService rateLimitService;
     @Mock private WechatPlatformClient wechatPlatformClient;
     @Mock private OperationLogMapper operationLogMapper;
@@ -84,7 +86,7 @@ class MeetingCheckinServiceTest {
     void setUp() {
         service = new MeetingCheckinService(qrMapper, attendanceMapper, registrationMapper, personMapper,
                 auditMapper, invitationMapper, projectMapper, permissionService, cryptoService, sessionService,
-                profileService, rateLimitService, wechatPlatformClient, operationLogMapper, provisioner,
+                profileService, personalProfiles, rateLimitService, wechatPlatformClient, operationLogMapper, provisioner,
                 new ObjectMapper().findAndRegisterModules(), transactionTemplate,
                 "pages/public/meeting-check-in", "release");
         lenient().when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
@@ -109,6 +111,57 @@ class MeetingCheckinServiceTest {
                     assertThat(error.getMessage()).contains("已停用");
                 });
         verify(sessionService, never()).issueMeetingCheckin(anyString(), any(), any());
+    }
+
+    @Test
+    void walkInSessionIncludesPersonalInfoWithoutInventingReservedAttendees() {
+        var context = prepareSessionCompletion();
+        VisitorPersonalInfoVO personalInfo = new VisitorPersonalInfoVO();
+        personalInfo.setAvailable(true);
+        personalInfo.setContactName("其他项目最近填写的本人");
+        when(personalProfiles.read(context)).thenReturn(personalInfo);
+
+        var result = service.completePublicSession(issuedSession(), 31L);
+
+        assertThat(result.getPageState()).isEqualTo("WALK_IN_FORM");
+        assertThat(result.getPersonalInfo()).isSameAs(personalInfo);
+        verify(personMapper, never()).selectList(any());
+    }
+
+    @Test
+    void reservedSessionKeepsOriginalAttendeesInsteadOfCrossProjectPersonalInfo() {
+        prepareSessionCompletion();
+        when(registrationMapper.selectOne(any())).thenReturn(registration());
+        when(personMapper.selectList(any())).thenReturn(List.of(person(81L, 21L, "预约时姓名")));
+        when(attendanceMapper.selectList(any())).thenReturn(List.of());
+
+        var result = service.completePublicSession(issuedSession(), 31L);
+
+        assertThat(result.getPageState()).isEqualTo("RESERVED_PENDING");
+        assertThat(result.getPersonalInfo()).isNull();
+        assertThat(result.getAttendees()).singleElement().satisfies(person ->
+                assertThat(person.getPersonName()).isEqualTo("预约时姓名"));
+        verify(personalProfiles, never()).read(any());
+    }
+
+    private VisitorSessionService.VisitorSessionContext prepareSessionCompletion() {
+        var context = new VisitorSessionService.VisitorSessionContext(null, 7L, "wx-app", "base-hash",
+                "openid-encrypted", VisitorSessionService.SOURCE_MEETING_CHECKIN_QR, 31L);
+        when(qrMapper.selectForUpdate(31L)).thenReturn(qr(MeetingCheckinService.QR_ENABLED));
+        when(invitationMapper.selectForUpdate(11L)).thenReturn(invitation());
+        when(projectMapper.selectById(7L)).thenReturn(project());
+        when(sessionService.requireMeetingCheckin("visitor-session", 31L, 7L)).thenReturn(context);
+        when(sessionService.decryptOpenid(context)).thenReturn("openid-a");
+        when(cryptoService.fingerprint(eq("site-access:meeting-registration:v1"), anyString()))
+                .thenReturn("registration-hash");
+        return context;
+    }
+
+    private PublicVisitorSessionVO issuedSession() {
+        var issued = new PublicVisitorSessionVO();
+        issued.setVisitorSessionToken("visitor-session");
+        issued.setExpiresInSeconds(1800L);
+        return issued;
     }
 
     @Test
@@ -313,6 +366,7 @@ class MeetingCheckinServiceTest {
         assertThat(receipt.getRegistrationNo()).isEqualTo("MVR-1");
         verify(personMapper, never()).insert(any());
         verify(auditMapper, never()).insert(any());
+        verify(personalProfiles, never()).saveOnSubmission(any(), any(), any());
     }
 
     @Test

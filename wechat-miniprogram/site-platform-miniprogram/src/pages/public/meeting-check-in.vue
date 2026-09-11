@@ -1,19 +1,17 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import { onLoad } from '@dcloudio/uni-app';
+import { computed, onBeforeUnmount, ref } from 'vue';
+import { onLoad, onShow, onUnload } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
+import { useVisitorPersonalInfo } from '@/utils/visitorPersonalInfo';
 import {
   confirmPublicMeetingCheckin,
   createPublicMeetingCheckinSession,
-  getPublicMeetingCheckinProfile,
-  getPublicMeetingCheckinProfiles,
   submitPublicMeetingCheckinWalkIn,
   type MeetingCheckinLocationPayload,
   type PublicMeetingCheckinAttendee,
   type PublicMeetingCheckinMeeting,
   type PublicMeetingCheckinReceipt,
   type SiteVisitCompanionInput,
-  type SiteVisitorProfile
 } from '@/api/siteAccess';
 import { extractMeetingCheckinToken } from '@/utils/meetingCheckinScene';
 import { getFreshWechatCode } from '@/utils/wechat';
@@ -40,10 +38,12 @@ const contactPhone = ref('');
 const companions = ref<SiteVisitCompanionInput[]>([]);
 const travelMode = ref<'DRIVING' | 'OTHER'>('OTHER');
 const vehiclePlate = ref('');
+const { personalInfoApplied, applyPersonalInfo } = useVisitorPersonalInfo({ visitorCompany, contactName, contactPhone, travelMode, vehiclePlate });
 const visitorRemark = ref('');
+let initializationId = 0;
+let disposed = false;
+let ready = false;
 const privacyAgreed = ref(false);
-const profiles = ref<SiteVisitorProfile[]>([]);
-const profilesLoading = ref(false);
 
 const pendingAttendees = computed(() => attendees.value.filter((person) => person.attendanceStatus !== 'CHECKED_IN'));
 const completed = computed(() => attendees.value.length > 0 && pendingAttendees.value.length === 0);
@@ -57,10 +57,20 @@ onLoad(async (options) => {
   // #endif
   sceneToken.value = extractMeetingCheckinToken(options as Record<string, unknown>);
   await initialize();
+  ready = true;
 });
+onShow(() => { if (ready && !submitting.value) void initialize(); });
+onUnload(cleanup);
+onBeforeUnmount(cleanup);
+function cleanup() { disposed = true; initializationId += 1; }
+function handleBack() {
+  if (getCurrentPages().length > 1) uni.navigateBack();
+  else uni.exitMiniProgram();
+}
 
 async function initialize() {
-  loading.value = true;
+  const requestId = ++initializationId;
+  loading.value = !meeting.value;
   errorMessage.value = '';
   if (!sceneToken.value) {
     errorMessage.value = '当前二维码不是有效的会议现场签到码';
@@ -69,6 +79,7 @@ async function initialize() {
   }
   try {
     const session = await createPublicMeetingCheckinSession(sceneToken.value, await getFreshWechatCode());
+    if (disposed || requestId !== initializationId) return;
     visitorSessionToken.value = session.visitorSessionToken;
     meeting.value = session.meeting;
     attendees.value = session.attendees || [];
@@ -77,31 +88,14 @@ async function initialize() {
     registrationSource.value = session.registrationSource || '';
     selectedIds.value = pendingAttendees.value.map((person) => person.personId);
     completedNames.value = Object.fromEntries(pendingAttendees.value.map((person) => [person.personId, person.personName || '']));
-    if (session.pageState === 'WALK_IN_FORM') void loadProfiles();
+    if (session.pageState === 'WALK_IN_FORM') applyPersonalInfo(session.personalInfo);
   } catch (error) {
+    if (disposed || requestId !== initializationId) return;
+    visitorSessionToken.value = '';
     errorMessage.value = error instanceof Error ? error.message : '会议签到入口加载失败';
   } finally {
-    loading.value = false;
+    if (requestId === initializationId && !disposed) loading.value = false;
   }
-}
-
-async function loadProfiles() {
-  profilesLoading.value = true;
-  try { profiles.value = await getPublicMeetingCheckinProfiles(visitorSessionToken.value); }
-  catch { profiles.value = []; }
-  finally { profilesLoading.value = false; }
-}
-
-async function chooseProfile(profile: SiteVisitorProfile) {
-  try {
-    const detail = await getPublicMeetingCheckinProfile(visitorSessionToken.value, profile.profileCode);
-    visitorCompany.value = detail.visitorCompany || '';
-    contactName.value = detail.contactName || '';
-    contactPhone.value = detail.contactPhone || '';
-    travelMode.value = detail.travelMode || 'OTHER';
-    vehiclePlate.value = detail.vehiclePlate || '';
-    showToast('已带入本人信息，同行人员请按本次到场填写');
-  } catch (error) { showToast(error instanceof Error ? error.message : '常用资料加载失败'); }
 }
 
 function togglePerson(personId: number) {
@@ -162,6 +156,7 @@ async function confirmReserved() {
 }
 
 function validateWalkIn() {
+  if (!visitorSessionToken.value) return '微信身份会话已失效，请重新识别';
   if (!visitorCompany.value.trim()) return '请填写单位';
   if (!contactName.value.trim()) return '请填写姓名';
   if (!/^1[3-9]\d{9}$/.test(contactPhone.value.trim())) return '请填写正确的手机号码';
@@ -221,13 +216,13 @@ function locationLabel(value?: string) {
 
 <template>
   <view class="checkin-shell">
-    <AppNavBar title="会议现场签到" :show-back="true" />
+    <view class="checkin-navbar"><AppNavBar title="会议现场签到" @back="handleBack" /></view>
     <view v-if="loading" class="checkin-card state-card">正在识别会议和微信身份...</view>
     <view v-else-if="errorMessage && !meeting" class="checkin-card state-card error"><text>无法进入签到</text><text>{{ errorMessage }}</text><button @click="initialize">重新识别</button></view>
     <view v-else-if="meeting" class="checkin-content">
       <view class="checkin-card meeting-card"><text class="eyebrow">会场签到专用入口</text><text class="meeting-title">{{ meeting.purpose }}</text><view class="meeting-grid"><text>项目</text><text>{{ meeting.projectShortName || meeting.projectName }}</text><text>会议时间</text><text>{{ formatTime(meeting.visitStartTime) }} 至 {{ formatTime(meeting.visitEndTime) }}</text><text>会议地点</text><text>{{ meeting.visitLocation }}</text><text>接待人</text><text>{{ meeting.hostName }}</text><text>签到窗口</text><text>{{ formatTime(meeting.checkinStartTime) }} 至 {{ formatTime(meeting.checkinEndTime) }}</text></view></view>
       <view class="location-notice"><text>定位说明</text><text>{{ locationNotice }}</text></view>
-      <view v-if="errorMessage" class="error-banner" @click="errorMessage = ''">{{ errorMessage }}</view>
+      <view v-if="errorMessage" class="error-banner"><text>{{ errorMessage }}</text><button :disabled="loading || submitting" @click="initialize">重新识别微信身份</button></view>
 
       <view v-if="reservedMode" class="checkin-card">
         <view class="section-head"><view><text>{{ registrationSource === 'WALK_IN' ? '本次现场登记人员' : '我的预约人员' }}</text><text>登记编号 {{ registrationNo }}</text></view><text>{{ attendees.length - pendingAttendees.length }}/{{ attendees.length }} 已签到</text></view>
@@ -241,10 +236,9 @@ function locationLabel(value?: string) {
 
       <template v-if="!reservedMode">
         <view class="checkin-card"><view class="section-head"><view><text>现场补录签到</text><text>未查到当前微信的预约登记，补充到场信息后即可完成签到</text></view></view></view>
-        <view v-if="profilesLoading" class="checkin-card profile-card">正在读取常用资料...</view>
-        <view v-else-if="profiles.length" class="checkin-card profile-card"><text class="block-title">选择常用资料快速填写</text><scroll-view scroll-x><view class="profile-row"><button v-for="profile in profiles" :key="profile.profileCode" @click="chooseProfile(profile)"><text>{{ profile.profileName }}</text><text>{{ profile.visitorCompany }} · {{ profile.visitorCount }}人</text></button></view></scroll-view></view>
         <view class="checkin-card form-card">
           <text class="block-title">来访人员信息</text>
+          <text v-if="personalInfoApplied" class="field-hint">已带入上次本人信息，请核对；同行人员另行填写。</text>
           <label class="checkin-field"><text>单位 *</text><input v-model="visitorCompany" maxlength="200" placeholder="请输入单位" placeholder-class="checkin-placeholder" :cursor-spacing="24" /></label>
           <label class="checkin-field"><text>姓名 *</text><input v-model="contactName" maxlength="50" placeholder="请输入姓名" placeholder-class="checkin-placeholder" :cursor-spacing="24" /></label>
           <label class="checkin-field"><text>手机号码 *</text><input v-model="contactPhone" type="number" maxlength="11" placeholder="请输入手机号码" placeholder-class="checkin-placeholder" :cursor-spacing="24" /></label>
@@ -265,7 +259,7 @@ function locationLabel(value?: string) {
           <label v-if="travelMode === 'DRIVING'" class="checkin-field"><text>车牌号 *</text><input v-model="vehiclePlate" maxlength="20" placeholder="请输入车牌号" placeholder-class="checkin-placeholder" :cursor-spacing="24" /></label>
           <label class="checkin-field"><text>现场备注</text><textarea v-model="visitorRemark" maxlength="500" placeholder="选填，可填写本次到场说明" placeholder-class="checkin-placeholder" :cursor-spacing="24" /></label>
         </view>
-        <view class="checkin-card privacy-card"><label><checkbox :checked="privacyAgreed" @click="privacyAgreed = !privacyAgreed" /><text>我已阅读并同意现场签到隐私告知</text></label><text>系统保存姓名、单位、手机号码、签到时间、距离与定位精度；原始经纬度仅用于本次距离计算，不写入数据库或普通日志。定位拒绝、失败或超距均不阻断签到。</text></view>
+        <view class="checkin-card privacy-card"><label><checkbox :checked="privacyAgreed" @click="privacyAgreed = !privacyAgreed" /><text>我已阅读并同意现场签到隐私告知</text></label><text>系统保存姓名、单位、手机号码、签到时间、距离与定位精度；本人单位、姓名、手机号码、出行方式和车牌在提交成功后保存，用于本小程序后续跨项目扫码自动填写；原始经纬度仅用于本次距离计算，不写入数据库或普通日志。定位拒绝、失败或超距均不阻断签到。</text></view>
         <button class="primary-button page-button" :disabled="submitting" @click="submitWalkIn">{{ submitting ? '提交中...' : '现场补录并完成签到' }}</button>
       </template>
 
@@ -277,6 +271,8 @@ function locationLabel(value?: string) {
 <style scoped>
 /* 原生 input 使用明确高度及水平内边距，防止文字被上下 padding 裁切。 */
 .checkin-shell{min-height:100vh;background:#f2f6fa;color:#172033}
+.checkin-navbar{position:sticky;top:0;z-index:20;background:#f2f6fa}
+.error-banner button{margin-top:16rpx;font-size:24rpx;color:#315f86}
 .checkin-content{display:flex;flex-direction:column;gap:20rpx;padding:20rpx 24rpx calc(46rpx + env(safe-area-inset-bottom))}
 .checkin-card{box-sizing:border-box;min-width:0;border:1rpx solid #dce5ed;border-radius:22rpx;background:#fff;padding:26rpx;box-shadow:0 8rpx 28rpx rgba(25,52,75,.07)}
 .state-card{display:flex;min-height:360rpx;align-items:center;justify-content:center;flex-direction:column;gap:20rpx;margin:24rpx;text-align:center;color:#607086}
@@ -306,11 +302,6 @@ function locationLabel(value?: string) {
 .primary-button{display:flex;align-items:center;justify-content:center;width:100%;height:88rpx;min-height:44px;margin:26rpx 0 0;padding:0 18rpx;border-radius:16rpx;background:#176b9f;color:#fff;font-size:28rpx;font-weight:800;line-height:1.3}
 .primary-button[disabled]{opacity:.6}
 .page-button{width:100%;margin:0}
-.profile-card{color:#607086;font-size:22rpx}
-.profile-row{display:flex;gap:14rpx;margin-top:18rpx}
-.profile-row button{display:flex;width:360rpx;flex:none;flex-direction:column;align-items:flex-start;gap:8rpx;border:1rpx solid #d5e2ec;border-radius:14rpx;padding:18rpx;background:#f7fafc;font-size:21rpx}
-.profile-row button text:first-child{font-weight:800}
-.profile-row button text:last-child{color:#718091}
 .companion-card{margin-top:20rpx;border:1rpx solid #e0e8ee;border-radius:16rpx;padding:20rpx;background:#f9fbfc}
 .travel-tabs{display:flex;gap:14rpx;margin-top:20rpx}
 .travel-tabs button{box-sizing:border-box;display:flex;align-items:center;justify-content:center;flex:1;min-width:0;height:80rpx;min-height:40px;margin:0;padding:0 16rpx;border:1rpx solid #dce5ed;border-radius:14rpx;background:#eef3f7;color:#526476;font-size:28rpx;font-weight:600;line-height:1.2}
@@ -335,4 +326,8 @@ function locationLabel(value?: string) {
 .privacy-card checkbox{flex-shrink:0}
 .privacy-card label>text{flex:1;min-width:0}
 .travel-tabs button::after,.section-head>button::after,.companion-head button::after,.primary-button::after{border:0}
+</style>
+
+<style scoped>
+@import "../../styles/publicVisitorForms.css";
 </style>

@@ -391,7 +391,7 @@ public class SiteAccessService {
         SiteVisitInvitation invitation = findByToken(request.getInviteToken(), false);
         if (!isSingle(invitation)) throw BusinessException.of(403, "会议邀请必须使用微信身份登记会话");
         if (!STATUS_PENDING.equals(effectiveStatus(invitation))) {
-            throw stateConflict("当前邀请不能获取常用资料");
+            throw stateConflict("当前邀请不能获取微信登记会话");
         }
         PublicVisitorSessionVO issued = visitorSessionService.issue(request.getWechatCode(), invitation);
         issued.setPersonalInfo(personalProfileService.read(
@@ -459,7 +459,19 @@ public class SiteAccessService {
         if (invitation == null) throw BusinessException.notFound("邀请不存在或已失效");
         if (!isSingle(invitation)) throw BusinessException.of(403, "会议邀请不能使用单次预约提交接口");
         String status = effectiveStatus(invitation);
-        if (STATUS_SUBMITTED.equals(status)) throw stateConflict("本次邀请已经提交，不能重复填写");
+        if (STATUS_SUBMITTED.equals(status)) {
+            // 只有原微信身份的重试可取得原回执；不重复写入，也不覆盖更新的本人信息。
+            if (!StringUtils.hasText(invitation.getWechatAppId()) || !StringUtils.hasText(invitation.getVisitorIdentityHash())) {
+                throw stateConflict("本次邀请已经提交，不能重复填写");
+            }
+            var owner = visitorSessionService.require(visitorSessionToken, invitation);
+            if (!Objects.equals(invitation.getWechatAppId(), owner.appId())
+                    || !Objects.equals(invitation.getVisitorIdentityHash(), VisitorIdentitySupport.hash(
+                            "single-registration", owner, cryptoService, visitorSessionService))) {
+                throw BusinessException.of(403, "本次邀请已由其他微信提交");
+            }
+            return resolvePublic(normalizedToken);
+        }
         if (STATUS_VOIDED.equals(status)) throw stateConflict("本次邀请已作废");
         if (STATUS_EXPIRED.equals(status)) throw stateConflict("本次邀请已过期");
         VisitorSubmissionNormalizer.Submission submission = normalizeSubmission(

@@ -324,8 +324,9 @@ public class GuardVisitService {
                 context, request.getProfileAction(), request.getProfileCode(), request.getProfileName(),
                 request.getProfileRetentionAgreed(), request.getProfileVersion(), toProfileSubmission(submission));
         if (existing != null) {
-            registerMeetings(existing, context, choices, submission);
-            personalProfiles.saveOnSubmission(context, request.getRememberInfo(), submission);
+            if (registerMeetings(existing, context, choices, submission) > 0) {
+                personalProfiles.saveOnSubmission(context, request.getRememberInfo(), submission);
+            }
             return toPass(existing, project, now);
         }
 
@@ -357,7 +358,7 @@ public class GuardVisitService {
         return toPass(registration, project, now);
     }
 
-    private void registerMeetings(SiteGuardVisitRegistration guard,
+    private int registerMeetings(SiteGuardVisitRegistration guard,
             VisitorSessionService.VisitorSessionContext context, List<GuardMeetingChoiceService.Choice> choices,
             VisitorSubmissionNormalizer.Submission submission) {
         int added = 0;
@@ -378,6 +379,7 @@ public class GuardVisitService {
         }
         if (added > 0) writeAudit(guard, "MEETING_RESERVATION", null, null, snapshot(guard),
                 "门卫登记关联" + added + "场会议预约；会场签到单独进行");
+        return added;
     }
 
     public List<SiteVisitorProfileVO> publicProfiles(String visitorSessionToken) {

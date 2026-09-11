@@ -485,6 +485,31 @@ class SiteAccessServiceTest {
     }
 
     @Test
+    void repeatedSingleSubmissionReturnsOriginalResultOnlyToSameWechatWithoutSavingAgain() {
+        SiteVisitInvitation invitation = pendingInvitation();
+        invitation.setStatus(SiteAccessService.STATUS_SUBMITTED);
+        invitation.setWechatAppId("wx-app");
+        invitation.setVisitorIdentityHash(crypto.fingerprint("site-access:single-registration:v1", "wx-app:openid"));
+        invitation.setContactName("首次提交的姓名");
+        stubPublicSubmission(invitation);
+        when(projectInfoMapper.selectById(10L)).thenReturn(project());
+
+        var repeated = service.submitPublic(validSubmission(), "visitor-session");
+        assertThat(repeated.getContactName()).isEqualTo("首次提交的姓名");
+        assertThat(repeated.getStatus()).isEqualTo(SiteAccessService.STATUS_SUBMITTED);
+        verify(personalProfileService, never()).saveOnSubmission(any(), any(), any());
+        verify(invitationMapper, never()).updateById(any());
+        verify(personMapper, never()).insert(any());
+        verify(auditLogMapper, never()).insert(any());
+
+        when(visitorSessionService.decryptOpenid(any())).thenReturn("another-openid");
+        BusinessException denied = assertThrows(BusinessException.class,
+                () -> service.submitPublic(validSubmission(), "visitor-session"));
+        assertThat(denied.getCode()).isEqualTo(403);
+        assertThat(denied.getMessage()).contains("其他微信");
+    }
+
+    @Test
     void submittedOrExpiredInvitationCannotBeSubmittedAgain() {
         SiteVisitInvitation invitation = pendingInvitation();
         invitation.setStatus(SiteAccessService.STATUS_SUBMITTED);

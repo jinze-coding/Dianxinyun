@@ -9,10 +9,7 @@ import MeetingServiceDialog from '@/components/MeetingServiceDialog.vue';
 import { ApiRequestError } from '@/api/request';
 import {
   createPublicMeetingVisitorSession,
-  disablePublicMeetingVisitorProfile,
   downloadPublicProjectRouteImage,
-  getPublicMeetingVisitorProfile,
-  getPublicMeetingVisitorProfiles,
   removePublicProjectRouteImage,
   resolvePublicSiteVisit,
   submitPublicMeetingVisit,
@@ -20,7 +17,6 @@ import {
   type PublicMeetingVisitSubmitPayload,
   type PublicSiteVisitInvitation,
   type SiteVisitCompanionInput,
-  type SiteVisitorProfile
 } from '@/api/siteAccess';
 import { extractMeetingInviteToken } from '@/utils/meetingInviteScene';
 import { createMeetingInviteRefreshCoordinator } from '@/utils/meetingInviteRefresh';
@@ -41,16 +37,10 @@ const contactPhone = ref('');
 const companions = ref<SiteVisitCompanionInput[]>([]);
 const travelMode = ref<'DRIVING' | 'OTHER'>('OTHER');
 const vehiclePlate = ref('');
-const { rememberInfo, personalInfoApplied, applyPersonalInfo, resetPersonalInfo, rememberChange } =
+const { personalInfoApplied, applyPersonalInfo, resetPersonalInfo } =
   useVisitorPersonalInfo({ visitorCompany, contactName, contactPhone, travelMode, vehiclePlate });
 const visitorRemark = ref('');
 const privacyAgreed = ref(false);
-const profiles = ref<SiteVisitorProfile[]>([]);
-const profilesLoading = ref(false);
-const selectedProfile = ref<SiteVisitorProfile>();
-const savingProfile = ref(false);
-const profileName = ref('');
-const profileNotice = ref('');
 const routeImagePath = ref('');
 const routeImageLoading = ref(false);
 const routeImageError = ref('');
@@ -71,8 +61,9 @@ let statusTask: Promise<void> | undefined;
 let statusTimer: ReturnType<typeof setInterval> | undefined;
 let serverOffset = 0;
 let clockTimer: ReturnType<typeof setInterval> | undefined;
-let profileRequestId = 0;
 let routeRequestId = 0;
+let initializationId = 0;
+let disposed = false;
 const refreshCoordinator = createMeetingInviteRefreshCoordinator();
 
 onLoad(async (options) => {
@@ -201,6 +192,7 @@ async function initialize(keepForm: boolean) {
 }
 
 async function performInitialize(keepForm: boolean) {
+  const requestId = ++initializationId;
   if (!keepForm || !invitation.value) loading.value = true;
   errorMessage.value = '';
   if (!token.value) {
@@ -210,6 +202,7 @@ async function performInitialize(keepForm: boolean) {
   }
   try {
     const publicInvitation = await resolvePublicSiteVisit(token.value);
+    if (disposed || requestId !== initializationId) return;
     publicAccessDenied.value = false;
     invitation.value = publicInvitation;
     syncClock(publicInvitation.serverTime);
@@ -220,6 +213,7 @@ async function performInitialize(keepForm: boolean) {
       return;
     }
     const session = await createPublicMeetingVisitorSession(token.value, await getFreshWechatCode());
+    if (disposed || requestId !== initializationId) return;
     visitorSessionToken.value = session.visitorSessionToken;
     applyPersonalInfo(session.personalInfo);
     invitation.value = session.invitation;
@@ -227,67 +221,19 @@ async function performInitialize(keepForm: boolean) {
     syncClock(session.registration?.serverTime || session.invitation.serverTime);
     if (session.pageState === 'FORM') {
       if (!keepForm) pass.value = undefined;
-      void loadProfiles();
+
     } else {
       clearForm();
     }
   } catch (error) {
+    if (disposed || requestId !== initializationId) return;
     visitorSessionToken.value = '';
     const message = error instanceof Error ? error.message : '会议邀请加载失败';
     if (message.includes('过期')) enterTerminalState('EXPIRED');
     else if (message.includes('作废')) enterTerminalState('VOIDED');
     else errorMessage.value = message;
   } finally {
-    loading.value = false;
-  }
-}
-
-async function loadProfiles() {
-  const requestId = ++profileRequestId;
-  profilesLoading.value = true;
-  profileNotice.value = '';
-  try {
-    const result = await getPublicMeetingVisitorProfiles(visitorSessionToken.value);
-    if (requestId !== profileRequestId) return;
-    profiles.value = result;
-  } catch {
-    if (requestId !== profileRequestId) return;
-    profiles.value = [];
-    profileNotice.value = '暂未读取到常用资料，可继续手工填写。';
-  } finally {
-    if (requestId === profileRequestId) profilesLoading.value = false;
-  }
-}
-
-async function chooseProfile(profile: SiteVisitorProfile) {
-  try {
-    const detail = await getPublicMeetingVisitorProfile(visitorSessionToken.value, profile.profileCode);
-    selectedProfile.value = detail;
-    profileName.value = detail.profileName || '';
-    visitorCompany.value = detail.visitorCompany || '';
-    contactName.value = detail.contactName || '';
-    contactPhone.value = detail.contactPhone || '';
-    travelMode.value = detail.travelMode || 'OTHER';
-    vehiclePlate.value = detail.vehiclePlate || '';
-    showToast('已带入本人信息，同行人员请按本次来访填写');
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : '常用资料加载失败');
-  }
-}
-
-async function disableProfile(profile: SiteVisitorProfile) {
-  const confirmed = await new Promise<boolean>((resolve) => uni.showModal({
-    title: '停用常用资料', content: `确认停用“${profile.profileName}”吗？`,
-    success: (result) => resolve(result.confirm), fail: () => resolve(false)
-  }));
-  if (!confirmed) return;
-  try {
-    await disablePublicMeetingVisitorProfile(visitorSessionToken.value, profile.profileCode);
-    profiles.value = profiles.value.filter((item) => item.profileCode !== profile.profileCode);
-    if (selectedProfile.value?.profileCode === profile.profileCode) selectedProfile.value = undefined;
-    showToast('常用资料已停用');
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : '停用失败');
+    if (!disposed && requestId === initializationId) loading.value = false;
   }
 }
 
@@ -331,12 +277,7 @@ async function submit() {
     vehiclePlate: travelMode.value === 'DRIVING' ? vehiclePlate.value.trim().toUpperCase() : undefined,
     visitorRemark: visitorRemark.value.trim() || undefined,
     privacyAgreed: true,
-    rememberInfo: rememberInfo.value,
-    profileAction: savingProfile.value ? (selectedProfile.value ? 'UPDATE' : 'CREATE') : 'NONE',
-    profileCode: selectedProfile.value?.profileCode,
-    profileName: savingProfile.value ? profileName.value.trim() || undefined : undefined,
-    profileRetentionAgreed: savingProfile.value || undefined,
-    profileVersion: selectedProfile.value?.version
+
   };
   try {
     pass.value = await submitPublicMeetingVisit(payload, visitorSessionToken.value);
@@ -387,11 +328,6 @@ function enterTerminalState(state: 'EXPIRED' | 'VOIDED') {
 }
 
 function clearForm() {
-  profileRequestId += 1;
-  profiles.value = [];
-  selectedProfile.value = undefined;
-  savingProfile.value = false;
-  profileName.value = '';
   visitorCompany.value = '';
   contactName.value = '';
   contactPhone.value = '';
@@ -429,12 +365,9 @@ function privacyChange(event: { detail: { value: string[] } }) {
   privacyAgreed.value = event.detail.value.includes('agreed');
 }
 
-function profileSaveChange(event: { detail: { value: string[] } }) {
-  savingProfile.value = event.detail.value.includes('save');
-  if (savingProfile.value && !profileName.value) profileName.value = `${contactName.value.trim() || '我的'}常用资料`;
-}
-
 function cleanup() {
+  disposed = true;
+  initializationId += 1;
   if (clockTimer) clearInterval(clockTimer);
   clockTimer = undefined;
   if (statusTimer) clearInterval(statusTimer);
@@ -456,7 +389,7 @@ onBeforeUnmount(cleanup);
 <template>
   <page-meta :page-style="activePanel ? 'overflow: hidden;' : ''" />
   <view class="meeting-shell">
-    <AppNavBar title="会议访客登记" @back="goBack" />
+    <view class="entry-navbar"><AppNavBar title="会议访客登记" @back="goBack" /></view>
     <view class="meeting-content">
     <view v-if="loading" class="meeting-card state-card"><text>正在识别微信身份...</text><text>确认登记状态后再显示页面</text></view>
     <view v-else-if="errorMessage" class="meeting-card state-card error"><text>{{ errorMessage }}</text><button @tap="initialize(true)">重新识别</button></view>
@@ -485,51 +418,34 @@ onBeforeUnmount(cleanup);
       <view v-if="pass" class="meeting-card pass-card"><text class="pass-check">✓</text><text class="pass-label">已完成预约登记</text><text class="pass-project">{{ pass.projectShortName || pass.projectName }}</text><view class="pass-current"><text>当前时间</text><text>{{ formatTime(currentTime, true) }}</text></view><view class="invite-grid"><text>登记编号</text><text>{{ pass.registrationNo }}</text><text>单位</text><text>{{ pass.visitorCompany }}</text><text>姓名</text><text>{{ pass.contactName }}</text><text>来访人数</text><text>{{ pass.visitorCount }} 人</text><text>车辆</text><text>{{ pass.travelMode === 'DRIVING' ? (pass.vehiclePlate || '驾车') : '非驾车' }}</text><text>登记时间</text><text>{{ formatTime(pass.registeredTime) }}</text><text>有效截止</text><text>{{ formatTime(pass.validUntil) }}</text></view><view class="pass-people"><text class="pass-people-title">本次登记人员</text><view v-for="(person, index) in pass.visitors" :key="`${person.personType}-${index}`" class="pass-person"><text>{{ person.personType === 'CONTACT' ? '本人' : `同行${index}` }}</text><text>{{ person.personName || '未填写姓名' }}{{ person.personCompany ? ` · ${person.personCompany}` : '' }}</text></view></view><text class="pass-hint">已完成预约，到场后请扫描会场签到码，并逐人确认实际到场人员。</text></view>
 
       <template v-else>
-        <view class="meeting-card profile-card">
-          <view class="section-head"><text>常用资料</text><text>{{ profilesLoading ? '读取中' : `${profiles.length} 条` }}</text></view>
-          <text v-if="profileNotice" class="notice">{{ profileNotice }}</text>
-          <text v-else-if="!profilesLoading && !profiles.length" class="field-hint">暂无常用资料，可继续手工填写。</text>
-          <view v-if="profiles.length" class="profile-list">
-            <view v-for="profile in profiles" :key="profile.profileCode" class="profile-item" :class="{ selected: selectedProfile?.profileCode === profile.profileCode }" @tap="chooseProfile(profile)">
-              <view class="profile-main">
-                <text class="profile-name">{{ profile.profileName }}</text>
-                <text class="profile-summary">{{ profile.visitorCompany }} · {{ profile.contactName }}</text>
-              </view>
-              <button class="profile-disable" @tap.stop="disableProfile(profile)">停用</button>
-            </view>
-          </view>
-          <text v-if="selectedProfile" class="selected-profile-copy">已带入“{{ selectedProfile.profileName }}”，请核对本次登记信息。</text>
-        </view>
+
         <view class="meeting-card form-card">
           <view class="section-head"><text>登记信息</text><text>本人及同行人</text></view>
-          <label class="meeting-field"><text>单位 *</text><input v-model="visitorCompany" maxlength="200" placeholder="请输入单位名称" /></label>
-          <label class="meeting-field"><text>姓名 *</text><input v-model="contactName" maxlength="50" placeholder="请输入姓名" /></label>
-          <label class="meeting-field"><text>手机号码 *</text><input v-model="contactPhone" type="number" maxlength="11" placeholder="请输入手机号码" /></label>
+          <label class="meeting-field"><text>单位 *</text><input v-model="visitorCompany" maxlength="200" placeholder="请输入单位名称" placeholder-class="entry-placeholder" :cursor-spacing="24" /></label>
+          <label class="meeting-field"><text>姓名 *</text><input v-model="contactName" maxlength="50" placeholder="请输入姓名" placeholder-class="entry-placeholder" :cursor-spacing="24" /></label>
+          <label class="meeting-field"><text>手机号码 *</text><input v-model="contactPhone" type="number" maxlength="11" placeholder="请输入手机号码" placeholder-class="entry-placeholder" :cursor-spacing="24" /></label>
 
           <view class="companion-head"><text>同行人员（{{ filledCompanionCount }}）</text><button :disabled="companions.length >= 49" @tap="addCompanion">添加</button></view>
           <text v-if="!companions.length" class="field-hint">没有同行人员可不添加，本人已计入总人数。</text>
           <view v-for="(person, index) in companions" :key="index" class="companion-card">
             <view class="companion-title"><text>同行人员 {{ index + 1 }}</text><button @tap="companions.splice(index, 1)">移除</button></view>
-            <label class="meeting-field"><text>单位（选填）</text><input v-model="person.personCompany" maxlength="200" placeholder="请输入同行人员单位" /></label>
-            <label class="meeting-field"><text>姓名（选填）</text><input v-model="person.personName" maxlength="50" placeholder="请输入同行人员姓名" /></label>
-            <label class="meeting-field"><text>手机号码（选填）</text><input v-model="person.personPhone" type="number" maxlength="11" placeholder="填写时校验手机号码格式" /></label>
+            <label class="meeting-field"><text>单位（选填）</text><input v-model="person.personCompany" maxlength="200" placeholder="请输入同行人员单位" placeholder-class="entry-placeholder" :cursor-spacing="24" /></label>
+            <label class="meeting-field"><text>姓名（选填）</text><input v-model="person.personName" maxlength="50" placeholder="请输入同行人员姓名" placeholder-class="entry-placeholder" :cursor-spacing="24" /></label>
+            <label class="meeting-field"><text>手机号码（选填）</text><input v-model="person.personPhone" type="number" maxlength="11" placeholder="填写时校验手机号码格式" placeholder-class="entry-placeholder" :cursor-spacing="24" /></label>
           </view>
           <text class="field-hint">本次已填写 {{ filledCompanionCount + 1 }} 人，最多登记50人；空白同行项不会保存。</text>
 
           <view class="travel-section">
             <text class="field-label">出行方式</text>
-            <view class="travel-tabs"><button :class="{ active: travelMode === 'OTHER' }" @tap="travelMode = 'OTHER'; vehiclePlate = ''">非驾车</button><button :class="{ active: travelMode === 'DRIVING' }" @tap="travelMode = 'DRIVING'">驾车</button></view>
+            <view class="travel-tabs"><button :class="{ active: travelMode === 'OTHER' }" @tap="travelMode = 'OTHER'">非驾车</button><button :class="{ active: travelMode === 'DRIVING' }" @tap="travelMode = 'DRIVING'">驾车</button></view>
           </view>
-          <label v-if="travelMode === 'DRIVING'" class="meeting-field"><text>车牌号 *</text><input v-model="vehiclePlate" maxlength="20" placeholder="请输入车牌号" /></label>
+          <label v-if="travelMode === 'DRIVING'" class="meeting-field"><text>车牌号 *</text><input v-model="vehiclePlate" maxlength="20" placeholder="请输入车牌号" placeholder-class="entry-placeholder" :cursor-spacing="24" /></label>
           <label class="meeting-field"><text>来访备注</text><textarea v-model="visitorRemark" maxlength="500" placeholder="可填写需要接待人提前了解的事项" /></label>
 
-          <view class="save-profile">
-            <checkbox-group @change="profileSaveChange"><label class="check-row"><checkbox value="save" :checked="savingProfile" color="#315f86" /><text>保存为当前项目常用资料</text></label></checkbox-group>
-            <label v-if="savingProfile" class="meeting-field"><text>常用资料名称</text><input v-model="profileName" maxlength="100" placeholder="例如：张三会议资料" /></label>
-          </view>
           <view class="personal-info-note" v-if="personalInfoApplied">已自动带入本人和车辆资料，请核对本次信息；同行人员另行填写。</view>
-          <checkbox-group class="remember-info-control" @change="rememberChange"><label><checkbox value="remember" :checked="rememberInfo" color="#315f86" /><text>记住本人和车辆信息，下次同项目扫码自动填写（提交后生效）</text></label></checkbox-group>
-          <checkbox-group @change="privacyChange"><label class="check-row privacy"><checkbox value="agreed" :checked="privacyAgreed" color="#315f86" /><text>我已阅读并同意访客隐私告知，仅用于本次来访登记与门卫核验。</text></label></checkbox-group>
+
+          <checkbox-group @change="privacyChange"><label class="check-row privacy"><checkbox value="agreed" :checked="privacyAgreed" color="#315f86" /><text>我已阅读并同意访客隐私告知。</text></label></checkbox-group>
+          <text class="privacy-copy">系统收集本人及同行信息用于本次来访登记与门卫核验。本人单位、姓名、手机号码、出行方式和车牌在提交成功后保存，用于本小程序后续跨项目扫码自动填写。</text>
           <button class="submit-button" :disabled="submitting" @tap="submit">{{ submitting ? '正在登记...' : '提交登记并生成放行凭证' }}</button>
         </view>
       </template>
@@ -921,5 +837,8 @@ onBeforeUnmount(cleanup);
 
 <style scoped>
 .personal-info-note{padding:20rpx;margin:12rpx 0;border-radius:12rpx;background:#eef6ff;color:#285b83;font-size:25rpx;line-height:1.6}
-.remember-info-control{display:block;margin:24rpx 0;font-size:25rpx;color:#385366;line-height:1.7}.remember-info-control label{display:flex;align-items:flex-start;gap:10rpx}.remember-info-control text{flex:1;min-width:0}
+</style>
+
+<style scoped>
+@import "../../styles/publicVisitorForms.css";
 </style>

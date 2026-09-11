@@ -1,0 +1,17 @@
+/* 四类扫码表单共用原生输入尺寸，避免 padding 占用文字高度。 */
+.entry-navbar{position:sticky;top:0;z-index:20;background:var(--workspace-page,#f2f6fa)}
+.visitor-field,.meeting-field,.field,.checkin-field{display:flex;min-width:0;flex-direction:column;gap:12rpx;margin-top:24rpx}
+.visitor-field>text,.meeting-field>text,.field>text,.checkin-field>text{display:block;margin:0;color:#536375;font-size:24rpx;line-height:1.5;font-weight:600}
+.visitor-field input,.meeting-field input,.field input,.checkin-field input{box-sizing:border-box;display:block;width:100%;min-width:0;height:88rpx;min-height:44px;padding:0 20rpx;border:1rpx solid #d5e0e7;border-radius:14rpx;background:#f9fbfc;color:#172033;font-size:28rpx;line-height:normal}
+.visitor-field textarea,.meeting-field textarea,.field textarea,.checkin-field textarea{box-sizing:border-box;display:block;width:100%;min-width:0;height:180rpx;min-height:90px;padding:18rpx 20rpx;border:1rpx solid #d5e0e7;border-radius:14rpx;background:#f9fbfc;color:#172033;font-size:28rpx;line-height:1.6}
+.entry-placeholder{color:#8a96a5;font-size:26rpx}
+.travel-tabs{display:flex;gap:14rpx;margin-top:20rpx}
+.travel-tabs button{box-sizing:border-box;display:flex;align-items:center;justify-content:center;flex:1;min-width:0;height:80rpx;min-height:40px;margin:0;padding:0 16rpx;border:1rpx solid #dce5ed;border-radius:14rpx;background:#eef3f7;color:#526476;font-size:28rpx;font-weight:600;line-height:1.2}
+.travel-tabs button.active{border-color:#315f86;background:#315f86;color:#fff}
+.travel-tabs button::after{border:0}
+.privacy-copy{display:block;margin-top:15rpx;color:#6d7d8d;font-size:22rpx;line-height:1.7}
+.privacy-check{align-items:flex-start;line-height:1.6}
+.privacy-check checkbox{flex-shrink:0}
+.privacy-check text{flex:1;min-width:0}
+.identity-status{padding:24rpx;color:#526476;font-size:24rpx;line-height:1.6}
+.identity-status button{margin-top:16rpx;background:#eef5fa;color:#315f86;font-size:24rpx}

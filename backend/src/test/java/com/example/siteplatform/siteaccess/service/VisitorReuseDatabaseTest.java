@@ -87,7 +87,7 @@ class VisitorReuseDatabaseTest {
         when(sessions.requireMeeting(anyString(),anyLong(),anyLong())).thenAnswer(call -> {var ctx=sessions.require(call.getArgument(0)); if(!"MEETING_INVITATION".equals(ctx.effectiveSourceType())||!Objects.equals(ctx.effectiveSourceId(),call.getArgument(1))||!Objects.equals(ctx.projectId(),call.getArgument(2)))throw BusinessException.of(403,"不匹配的会话"); return ctx;});
         when(sessions.decryptOpenid(any())).thenAnswer(call -> crypto.decrypt(((VisitorSessionService.VisitorSessionContext)call.getArgument(0)).openidEncrypted()));
         var named=mock(VisitorProfileService.class);
-        personal=transactional(new VisitorPersonalProfileService(mapper(SiteVisitorPersonalProfileMapper.class),mapper(ProjectInfoMapper.class),named,sessions,crypto,json));
+        personal=transactional(new VisitorPersonalProfileService(mapper(SiteVisitorPersonalProfileMapper.class),mapper(ProjectInfoMapper.class),sessions,crypto,json));
         matching=new GuardVisitorMatchingService(mapper(GuardVisitorMatchMapper.class),sessions,crypto);
         var redis=mock(StringRedisTemplate.class);
         @SuppressWarnings("unchecked") ValueOperations<String,String> values=mock(ValueOperations.class);
@@ -100,7 +100,7 @@ class VisitorReuseDatabaseTest {
         singles=transactional(new SiteAccessService(mapper(SiteVisitInvitationMapper.class),mapper(SiteVisitPersonMapper.class),mapper(SiteVisitAuditLogMapper.class),mapper(SiteMeetingVisitRegistrationMapper.class),mapper(ProjectInfoMapper.class),mock(SysUserMapper.class),mock(SysUserProjectMapper.class),permissions,profile,route,crypto,wechat,sessions,named,personal,mock(MeetingCheckinQrProvisioner.class),logs,json,"pages/public/visitor-invite","pages/public/meeting-invite","develop"));
         meetings=transactional(new MeetingVisitService(mapper(SiteMeetingVisitRegistrationMapper.class),mapper(SiteMeetingVisitPersonMapper.class),mapper(SiteMeetingVisitAuditLogMapper.class),mapper(SiteMeetingAttendanceMapper.class),mapper(SiteVisitInvitationMapper.class),mapper(ProjectInfoMapper.class),permissions,route,crypto,sessions,named,personal,singles,limiter,logs,json,new TransactionTemplate(transactions)));
         guards=transactional(new GuardVisitService(mapper(SiteGuardVisitQrMapper.class),mapper(SiteGuardVisitRegistrationMapper.class),mapper(SiteGuardVisitPersonMapper.class),mapper(SiteGuardVisitAuditLogMapper.class),mapper(ProjectInfoMapper.class),permissions,profile,crypto,sessions,named,personal,matching,choices,meetings,mapper(SiteGuardMeetingRegistrationMapper.class),wechat,limiter,logs,json,"pages/public/guard-visitor-register","develop"));
-        attendance=transactional(new MeetingCheckinService(mapper(SiteMeetingCheckinQrMapper.class),mapper(SiteMeetingAttendanceMapper.class),mapper(SiteMeetingVisitRegistrationMapper.class),mapper(SiteMeetingVisitPersonMapper.class),mapper(SiteMeetingVisitAuditLogMapper.class),mapper(SiteVisitInvitationMapper.class),mapper(ProjectInfoMapper.class),permissions,crypto,sessions,named,limiter,wechat,logs,mock(MeetingCheckinQrProvisioner.class),json,new TransactionTemplate(transactions),"pages/public/meeting-check-in","develop"));
+        attendance=transactional(new MeetingCheckinService(mapper(SiteMeetingCheckinQrMapper.class),mapper(SiteMeetingAttendanceMapper.class),mapper(SiteMeetingVisitRegistrationMapper.class),mapper(SiteMeetingVisitPersonMapper.class),mapper(SiteMeetingVisitAuditLogMapper.class),mapper(SiteVisitInvitationMapper.class),mapper(ProjectInfoMapper.class),permissions,crypto,sessions,named,personal,limiter,wechat,logs,mock(MeetingCheckinQrProvisioner.class),json,new TransactionTemplate(transactions),"pages/public/meeting-check-in","develop"));
     }
     private <T>T mapper(Class<T> type) { var config=sql.getConfiguration(); if(!config.hasMapper(type))config.addMapper(type); return sql.getMapper(type); }
     @SuppressWarnings("unchecked") private <T>T transactional(T service) { var proxy=new ProxyFactory(service); proxy.setProxyTargetClass(true); proxy.addAdvice(new TransactionInterceptor(transactions,new AnnotationTransactionAttributeSource())); return (T)proxy.getProxy(); }
@@ -132,7 +132,7 @@ class VisitorReuseDatabaseTest {
         assertThat(personal.read(contexts.get(token)).getContactName()).isEqualTo("张三");
         assertThat(guards.publicMeetings(token)).allMatch(PublicGuardMeetingChoiceVO::registered);
     }
-    @Test void singleInvitationIdentityMatchesOnlyInItsTimeWindowAndOptOutClearsStoredFields() {
+    @Test void singleInvitationIdentityMatchesOnlyInItsTimeWindowAndLegacyOptOutStillSaves() {
         var now=LocalDateTime.now().withNano(0);var invite=invitation("SINGLE",now.plusHours(1),now.plusHours(3));var singleToken=session("owner","INVITATION",invite.getId());
         var request=new PublicSiteVisitSubmitRequest();request.setInviteToken(crypto.decrypt(invite.getTokenEncrypted()));request.setVisitorCompany("预约单位");request.setContactName("王五");request.setContactPhone("13900000000");request.setTravelMode("DRIVING");request.setVehiclePlate("沪A12345");request.setPrivacyAgreed(true);request.setRememberInfo(true);
         singles.submitPublic(request,singleToken);
@@ -142,7 +142,7 @@ class VisitorReuseDatabaseTest {
         var other=contexts.get(session("other","GUARD_QR",qrId));assertThat(matching.find(other,invite.getVisitStartTime())).isEmpty();assertThat(personal.read(other).isAvailable()).isFalse();
         jdbc.update("UPDATE site_visit_invitation SET status='VOIDED' WHERE id=?",invite.getId());assertThat(matching.find(ctx,invite.getVisitStartTime())).isEmpty();
         var form=submit(List.of());form.setRememberInfo(false);guards.submitPublic(form,guardToken);
-        assertThat(personal.read(ctx).isAvailable()).isFalse();assertThat(jdbc.queryForObject("SELECT contact_phone_encrypted FROM site_visitor_personal_profile WHERE project_id=?",String.class,projectId)).isNull();
+        assertThat(personal.read(ctx).isAvailable()).isTrue();assertThat(jdbc.queryForObject("SELECT contact_phone_encrypted FROM site_visitor_personal_profile WHERE project_id=?",String.class,projectId)).startsWith("v1:");
     }
     @Test void opaqueMeetingChoicesCannotCrossSessionProjectOrQrLifecycle() {
         var now=LocalDateTime.now();invitation("MEETING",now,now.plusHours(1));var token=session("owner","GUARD_QR",qrId);var options=meetingTokens(token);

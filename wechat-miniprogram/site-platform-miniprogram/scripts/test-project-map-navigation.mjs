@@ -79,7 +79,7 @@ assert.match(visitorSource, /!invitationPassExpired && invitation\.projectLocati
 assert.match(visitorSource, /\['PENDING', 'SUBMITTED'\]\.includes\(invitation\.value\.status\)[\s\S]*startClock\(\)/, '待登记和已提交状态都必须按服务端时间持续判断过期');
 assert.match(visitorSource, /watch\(invitationExpired,[\s\S]*resetProjectRouteImage\(\)[\s\S]*closeProjectProfile\(\)/, '页面停留至预约过期时必须清理路线图并关闭项目信息');
 assert.equal((visitorSource.match(/:route-image-path="projectRouteImagePath"/g) || []).length, 2, '登记前和放行页应复用同一临时路线图');
-assert.match(visitorSource, /invitation\.value = await resolvePublicSiteVisit\(token\.value\);\s*void loadProjectRouteImage\(invitation\.value\)/, '解析邀请后应异步加载路线图');
+assert.match(visitorSource, /const current = await resolvePublicSiteVisit\(token\.value\);\s*if \(disposed \|\| requestId !== loadRequestId\) return;\s*invitation\.value = current;\s*void loadProjectRouteImage\(invitation\.value\)/, '解析邀请后应异步加载路线图');
 assert.match(visitorSource, /invitation\.value = data;[\s\S]*?void loadProjectRouteImage\(invitation\.value\)/, '提交成功后必须使用 ref 中的当前响应式对象刷新路线图');
 assert.doesNotMatch(visitorSource, /invitation\.value\s*!==\s*current|invitation\.value\s*===\s*current/, '路线图迟到响应只能使用请求序号判断，不能比较 Vue 原始对象与响应式代理');
 assert.match(visitorSource, /function resetProjectRouteImage\(\)[\s\S]*removePublicProjectRouteImage\(projectRouteImagePath\.value\)/, '替换或离开页面时必须删除临时路线图');

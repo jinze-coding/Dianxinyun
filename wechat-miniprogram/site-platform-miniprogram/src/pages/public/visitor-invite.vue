@@ -6,12 +6,9 @@ import { useVisitorPersonalInfo } from '@/utils/visitorPersonalInfo';
 import ProjectLocationCard from '@/components/ProjectLocationCard.vue';
 import {
   createPublicVisitorSession,
-  disablePublicVisitorProfile,
   downloadPublicProjectProfileImage,
   downloadPublicProjectRouteImage,
   getPublicProjectProfile,
-  getPublicVisitorProfile,
-  getPublicVisitorProfiles,
   removePublicProjectProfileImages,
   removePublicProjectRouteImage,
   resolvePublicSiteVisit,
@@ -20,11 +17,9 @@ import {
   type PublicSiteVisitSubmitPayload,
   type PublicProjectProfile,
   type SiteVisitCompanionInput,
-  type SiteVisitorProfile
 } from '@/api/siteAccess';
 import { extractVisitorInviteToken } from '@/utils/visitorInviteScene';
 import {
-  LatestProfileSelectionGuard,
   isVisitorSessionAuthorizationError
 } from '@/utils/visitorProfileFlow';
 import { showToast } from '@/utils/navigation';
@@ -41,20 +36,16 @@ const contactPhone = ref('');
 const companions = ref<SiteVisitCompanionInput[]>([]);
 const travelMode = ref<'DRIVING' | 'OTHER'>('OTHER');
 const vehiclePlate = ref('');
-const { rememberInfo, personalInfoApplied, applyPersonalInfo, resetPersonalInfo, rememberChange } =
+const { personalInfoApplied, applyPersonalInfo, resetPersonalInfo } =
   useVisitorPersonalInfo({ visitorCompany, contactName, contactPhone, travelMode, vehiclePlate });
 const visitorRemark = ref('');
 const privacyAgreed = ref(false);
 const visitorSessionToken = ref('');
-const profiles = ref<SiteVisitorProfile[]>([]);
-const profilesLoading = ref(false);
-const profileNotice = ref('');
-const selectedProfile = ref<SiteVisitorProfile>();
-const savingProfile = ref(false);
-const profileName = ref('');
-const profileDetailLoadingCode = ref('');
-const profileSelectionGuard = new LatestProfileSelectionGuard();
-let profileBootstrapRequestId = 0;
+const identityLoading = ref(false);
+const identityNotice = ref('');
+let identityRequestId = 0;
+let loadRequestId = 0;
+let disposed = false;
 const showingProjectProfile = ref(false);
 const projectProfile = ref<PublicProjectProfile>();
 const projectProfileLoading = ref(false);
@@ -128,9 +119,10 @@ onLoad(async (options) => {
 });
 
 async function load() {
+  const requestId = ++loadRequestId;
   loading.value = true;
   errorMessage.value = '';
-  invalidateProfileBootstrap();
+  invalidateIdentity();
   resetProjectRouteImage();
   if (!token.value) {
     errorMessage.value = '邀请小程序码无效';
@@ -138,131 +130,55 @@ async function load() {
     return;
   }
   try {
-    invitation.value = await resolvePublicSiteVisit(token.value);
+    const current = await resolvePublicSiteVisit(token.value);
+    if (disposed || requestId !== loadRequestId) return;
+    invitation.value = current;
     void loadProjectRouteImage(invitation.value);
     loading.value = false;
     if (['PENDING', 'SUBMITTED'].includes(invitation.value.status)) {
       syncServerClock(invitation.value.serverTime);
       startClock();
-      if (invitation.value.status === 'PENDING') void loadProfilesSilently();
+      if (invitation.value.status === 'PENDING') void loadVisitorIdentity();
     } else {
       stopClock();
     }
   } catch (error) {
+    if (disposed || requestId !== loadRequestId) return;
     invitation.value = undefined;
     errorMessage.value = error instanceof Error ? error.message : '邀请加载失败';
   } finally {
-    loading.value = false;
+    if (!disposed && requestId === loadRequestId) loading.value = false;
   }
 }
 
-async function loadProfilesSilently() {
-  const requestId = ++profileBootstrapRequestId;
-  profilesLoading.value = true;
-  profileNotice.value = '';
+async function loadVisitorIdentity() {
+  const requestId = ++identityRequestId;
+  identityLoading.value = true;
+  identityNotice.value = '';
   try {
     const session = await createPublicVisitorSession(token.value, await getFreshWechatCode());
-    if (requestId !== profileBootstrapRequestId) return;
+    if (requestId !== identityRequestId) return;
     visitorSessionToken.value = session.visitorSessionToken;
     applyPersonalInfo(session.personalInfo);
-    try {
-      const result = await getPublicVisitorProfiles(session.visitorSessionToken);
-      if (requestId === profileBootstrapRequestId) profiles.value = result;
-    } catch {
-      if (requestId === profileBootstrapRequestId) profileNotice.value = '历史常用资料暂不可用，可核对当前信息后提交。';
-    }
+
   } catch (error) {
-    if (requestId !== profileBootstrapRequestId) return;
-    resetVisitorProfileContext('微信身份识别失败，已保留填写内容，请重新识别后提交。', false);
+    if (requestId !== identityRequestId) return;
+    resetVisitorIdentity('微信身份识别失败，已保留填写内容，请重新识别后提交。', false);
   } finally {
-    if (requestId === profileBootstrapRequestId) profilesLoading.value = false;
+    if (requestId === identityRequestId) identityLoading.value = false;
   }
 }
 
-async function chooseProfile(profile: SiteVisitorProfile) {
-  if (!visitorSessionToken.value) return;
-  const ticket = profileSelectionGuard.begin(profile.profileCode);
-  if (!ticket) return;
-  profileDetailLoadingCode.value = profileSelectionGuard.activeKey();
-  try {
-    const detail = await getPublicVisitorProfile(visitorSessionToken.value, profile.profileCode);
-    if (!profileSelectionGuard.isCurrent(ticket)) return;
-    selectedProfile.value = detail;
-    profileName.value = detail.profileName || '';
-    savingProfile.value = false;
-    visitorCompany.value = detail.visitorCompany || '';
-    contactName.value = detail.contactName || '';
-    contactPhone.value = detail.contactPhone || '';
-    travelMode.value = detail.travelMode || 'OTHER';
-    vehiclePlate.value = detail.vehiclePlate || '';
-    showToast('已带入本人信息，同行人员请按本次来访填写');
-  } catch (error) {
-    if (!profileSelectionGuard.isCurrent(ticket)) return;
-    if (isVisitorSessionAuthorizationError(error)) {
-      resetVisitorProfileContext('微信身份会话已失效，当前已填写内容仍保留，请重新识别微信身份后提交。');
-      showToast('微信身份会话已失效，请重新识别');
-      return;
-    }
-    showToast(error instanceof Error ? error.message : '常用资料加载失败');
-  } finally {
-    if (profileSelectionGuard.finish(ticket)) profileDetailLoadingCode.value = '';
-  }
+function invalidateIdentity() {
+  identityRequestId += 1;
+  identityLoading.value = false;
 }
 
-function clearProfileSelection() {
-  invalidateProfileSelection();
-  selectedProfile.value = undefined;
-  savingProfile.value = false;
-  profileName.value = '';
-}
-
-function invalidateProfileSelection() {
-  profileSelectionGuard.invalidate();
-  profileDetailLoadingCode.value = '';
-}
-
-function invalidateProfileBootstrap() {
-  profileBootstrapRequestId += 1;
-  profilesLoading.value = false;
-}
-
-function resetVisitorProfileContext(notice = '', invalidateBootstrap = true) {
-  if (invalidateBootstrap) invalidateProfileBootstrap();
-  invalidateProfileSelection();
+function resetVisitorIdentity(notice = '', invalidateBootstrap = true) {
+  if (invalidateBootstrap) invalidateIdentity();
   visitorSessionToken.value = '';
-  profiles.value = [];
-  selectedProfile.value = undefined;
-  savingProfile.value = false;
-  profileName.value = '';
-  profileNotice.value = notice;
-  profilesLoading.value = false;
-}
-
-async function disableProfile(profile: SiteVisitorProfile) {
-  if (!visitorSessionToken.value) return;
-  const confirmed = await new Promise<boolean>((resolve) => {
-    uni.showModal({
-      title: '停用常用资料',
-      content: `确认停用“${profile.profileName}”吗？历史来访记录不会受影响。`,
-      success: (result) => resolve(result.confirm),
-      fail: () => resolve(false)
-    });
-  });
-  if (!confirmed) return;
-  try {
-    await disablePublicVisitorProfile(visitorSessionToken.value, profile.profileCode);
-    if (profileDetailLoadingCode.value === profile.profileCode) invalidateProfileSelection();
-    profiles.value = profiles.value.filter((item) => item.profileCode !== profile.profileCode);
-    if (selectedProfile.value?.profileCode === profile.profileCode) clearProfileSelection();
-    showToast('常用资料已停用');
-  } catch (error) {
-    if (isVisitorSessionAuthorizationError(error)) {
-      resetVisitorProfileContext('微信身份会话已失效，当前已填写内容仍保留，请重新识别微信身份后提交。');
-      showToast('微信身份会话已失效，请重新识别');
-      return;
-    }
-    showToast(error instanceof Error ? error.message : '停用失败');
-  }
+  identityNotice.value = notice;
+  identityLoading.value = false;
 }
 
 function syncServerClock(serverTime?: string) {
@@ -318,7 +234,7 @@ function validate() {
   }
   if (travelMode.value === 'DRIVING' && !vehiclePlate.value.trim()) return '驾车来访请填写车牌号';
   if (!privacyAgreed.value) return '请阅读并同意隐私告知';
-  if (savingProfile.value && !visitorSessionToken.value) return '当前无法保存常用资料，请取消保存后提交';
+
   return '';
 }
 
@@ -332,9 +248,6 @@ async function submit() {
   submitting.value = true;
   errorMessage.value = '';
   try {
-    const profileAction = savingProfile.value
-      ? (selectedProfile.value ? 'UPDATE' : 'CREATE')
-      : 'NONE';
     const payload: PublicSiteVisitSubmitPayload = {
       inviteToken: token.value,
       visitorCompany: visitorCompany.value.trim(),
@@ -349,12 +262,7 @@ async function submit() {
       vehiclePlate: travelMode.value === 'DRIVING' ? vehiclePlate.value.trim().toUpperCase() : undefined,
       visitorRemark: visitorRemark.value.trim() || undefined,
       privacyAgreed: true,
-      rememberInfo: rememberInfo.value,
-      profileAction,
-      profileCode: selectedProfile.value?.profileCode,
-      profileName: savingProfile.value ? profileName.value.trim() || undefined : undefined,
-      profileRetentionAgreed: savingProfile.value || undefined,
-      profileVersion: selectedProfile.value?.version
+
     };
     const data = await submitPublicSiteVisit(payload, visitorSessionToken.value);
     invitation.value = data;
@@ -366,7 +274,7 @@ async function submit() {
     clearSensitiveForm();
     showToast('外访信息提交成功');
   } catch (error) {
-    if (isVisitorSessionAuthorizationError(error)) resetVisitorProfileContext('微信身份已过期，请重新识别后提交；已填写内容仍保留。');
+    if (isVisitorSessionAuthorizationError(error)) resetVisitorIdentity('微信身份已过期，请重新识别后提交；已填写内容仍保留。');
     errorMessage.value = error instanceof Error ? error.message : '外访信息提交失败';
     showToast(errorMessage.value);
   } finally {
@@ -375,8 +283,7 @@ async function submit() {
 }
 
 function clearSensitiveForm() {
-  invalidateProfileBootstrap();
-  invalidateProfileSelection();
+  invalidateIdentity();
   visitorCompany.value = '';
   contactName.value = '';
   contactPhone.value = '';
@@ -384,24 +291,13 @@ function clearSensitiveForm() {
   vehiclePlate.value = '';
   visitorRemark.value = '';
   privacyAgreed.value = false;
-  profiles.value = [];
-  selectedProfile.value = undefined;
   visitorSessionToken.value = '';
-  savingProfile.value = false;
-  profileName.value = '';
-  profileNotice.value = '';
+  identityNotice.value = '';
   resetPersonalInfo();
 }
 
 function privacyChange(event: { detail: { value: string[] } }) {
   privacyAgreed.value = event.detail.value.includes('agreed');
-}
-
-function profileSaveChange(event: { detail: { value: string[] } }) {
-  savingProfile.value = event.detail.value.includes('save');
-  if (savingProfile.value && !profileName.value) {
-    profileName.value = selectedProfile.value?.profileName || `${contactName.value.trim() || '我的'}常用资料`;
-  }
 }
 
 const canViewProjectProfile = computed(() => {
@@ -524,6 +420,9 @@ onBackPress(() => {
 });
 
 function cleanup() {
+  disposed = true;
+  loadRequestId += 1;
+  invalidateIdentity();
   stopClock();
   resetProjectRouteImage();
   projectProfileRequestId += 1;
@@ -533,7 +432,7 @@ function cleanup() {
 
 watch(invitationExpired, (expired) => {
   if (!expired) return;
-  invalidateProfileBootstrap();
+  invalidateIdentity();
   resetProjectRouteImage();
   if (showingProjectProfile.value) closeProjectProfile();
 });
@@ -549,7 +448,7 @@ function goBack() {
 
 <template>
   <view class="visitor-shell">
-    <AppNavBar :title="showingProjectProfile ? '项目信息' : '外访登记'" @back="handleBack" />
+    <view class="entry-navbar"><AppNavBar :title="showingProjectProfile ? '项目信息' : '外访登记'" @back="handleBack" /></view>
     <view v-if="showingProjectProfile" class="project-profile-content">
       <view v-if="projectProfileLoading" class="visitor-card state-card">正在加载项目信息...</view>
       <view v-else-if="projectProfileError" class="visitor-card state-card error-state">
@@ -649,45 +548,16 @@ function goBack() {
         </view>
 
         <template v-else>
-          <view class="visitor-card profile-card">
-            <view class="section-head">
-              <view><text class="section-title">常用来访资料</text><text class="profile-subtitle">同一项目下可复用</text></view>
-              <button v-if="selectedProfile" @tap="clearProfileSelection">改为手工填写</button>
-            </view>
-            <button v-if="!visitorSessionToken" :disabled="profilesLoading" @tap="loadProfilesSilently">{{ profilesLoading ? '识别中...' : '重新识别微信身份' }}</button>
-            <text v-if="profilesLoading" class="empty-copy">正在安全读取历史常用资料...</text>
-            <text v-else-if="profileNotice" class="profile-notice">{{ profileNotice }}</text>
-            <text v-else-if="!profiles.length" class="empty-copy">暂无常用资料。本次填写时可自愿保存，下一次扫码直接选择。</text>
-            <view v-else class="profile-list">
-              <view
-                v-for="profile in profiles"
-                :key="profile.profileCode"
-                class="profile-item"
-                :class="{
-                  selected: selectedProfile?.profileCode === profile.profileCode,
-                  loading: profileDetailLoadingCode === profile.profileCode
-                }"
-                @tap="chooseProfile(profile)"
-              >
-                <view class="profile-main">
-                  <text>{{ profile.profileName }}</text>
-                  <text v-if="profileDetailLoadingCode === profile.profileCode" class="profile-loading-copy">正在读取完整资料...</text>
-                  <text>{{ profile.visitorCompany }} · {{ profile.contactName }} {{ profile.maskedContactPhone }}</text>
-                  <text>{{ profile.visitorCount }}人 · {{ profile.travelMode === 'DRIVING' ? (profile.vehiclePlate || '驾车') : '非驾车' }}</text>
-                </view>
-                <button :disabled="profileDetailLoadingCode === profile.profileCode" @tap.stop="disableProfile(profile)">停用</button>
-              </view>
-            </view>
-            <view v-if="selectedProfile" class="selected-profile-copy">
-              已带入“{{ selectedProfile.profileName }}”。你可以修改本次内容；只有下方主动勾选更新时，才会覆盖这份常用资料。
-            </view>
+          <view v-if="!visitorSessionToken" class="visitor-card identity-status">
+            <text>{{ identityNotice || '正在识别微信身份...' }}</text>
+            <button :disabled="identityLoading" @tap="loadVisitorIdentity">{{ identityLoading ? '识别中...' : '重新识别微信身份' }}</button>
           </view>
 
           <view class="visitor-card form-card">
             <text class="section-title">来访人员信息</text>
-            <label class="visitor-field"><text>单位 *</text><input v-model="visitorCompany" maxlength="200" placeholder="请输入单位全称" /></label>
-            <label class="visitor-field"><text>姓名 *</text><input v-model="contactName" maxlength="50" placeholder="请输入姓名" /></label>
-            <label class="visitor-field"><text>手机号码 *</text><input v-model="contactPhone" type="number" maxlength="11" placeholder="仅校验格式，不发送验证码" /></label>
+            <label class="visitor-field"><text>单位 *</text><input v-model="visitorCompany" maxlength="200" placeholder="请输入单位全称" placeholder-class="entry-placeholder" :cursor-spacing="24" /></label>
+            <label class="visitor-field"><text>姓名 *</text><input v-model="contactName" maxlength="50" placeholder="请输入姓名" placeholder-class="entry-placeholder" :cursor-spacing="24" /></label>
+            <label class="visitor-field"><text>手机号码 *</text><input v-model="contactPhone" type="number" maxlength="11" placeholder="仅校验格式，不发送验证码" placeholder-class="entry-placeholder" :cursor-spacing="24" /></label>
           </view>
 
           <view class="visitor-card form-card">
@@ -695,48 +565,31 @@ function goBack() {
             <text v-if="!companions.length" class="empty-copy">没有同行人员可不添加，本人已计入总人数。</text>
             <view v-for="(person, index) in companions" :key="index" class="companion-card">
               <view class="companion-title"><text>同行人员 {{ index + 1 }}</text><button @tap="removeCompanion(index)">移除</button></view>
-              <label class="visitor-field companion-field"><text>单位（选填）</text><input v-model="person.personCompany" maxlength="200" placeholder="请输入同行人员单位" /></label>
-              <label class="visitor-field companion-field"><text>姓名（选填）</text><input v-model="person.personName" maxlength="50" placeholder="请输入同行人员姓名" /></label>
-              <label class="visitor-field companion-field"><text>手机号码（选填）</text><input v-model="person.personPhone" type="number" maxlength="11" placeholder="填写时校验手机号码格式" /></label>
+              <label class="visitor-field companion-field"><text>单位（选填）</text><input v-model="person.personCompany" maxlength="200" placeholder="请输入同行人员单位" placeholder-class="entry-placeholder" :cursor-spacing="24" /></label>
+              <label class="visitor-field companion-field"><text>姓名（选填）</text><input v-model="person.personName" maxlength="50" placeholder="请输入同行人员姓名" placeholder-class="entry-placeholder" :cursor-spacing="24" /></label>
+              <label class="visitor-field companion-field"><text>手机号码（选填）</text><input v-model="person.personPhone" type="number" maxlength="11" placeholder="填写时校验手机号码格式" placeholder-class="entry-placeholder" :cursor-spacing="24" /></label>
             </view>
             <text class="limit-copy">本次已填写 {{ filledCompanionCount + 1 }} 人，最多登记50人；空白同行卡片不会保存。</text>
           </view>
 
           <view class="visitor-card form-card">
             <text class="section-title">车辆与备注</text>
-            <radio-group class="travel-options" @change="travelMode = $event.detail.value">
-              <label><radio value="OTHER" :checked="travelMode === 'OTHER'" color="#315f86" />非驾车</label>
-              <label><radio value="DRIVING" :checked="travelMode === 'DRIVING'" color="#315f86" />驾车</label>
-            </radio-group>
-            <label v-if="travelMode === 'DRIVING'" class="visitor-field"><text>车牌号 *</text><input v-model="vehiclePlate" maxlength="20" placeholder="请输入本次来访车辆车牌" /></label>
+            <view class="travel-tabs"><button :class="{ active: travelMode === 'OTHER' }" @tap="travelMode = 'OTHER'">非驾车</button><button :class="{ active: travelMode === 'DRIVING' }" @tap="travelMode = 'DRIVING'">驾车</button></view>
+            <label v-if="travelMode === 'DRIVING'" class="visitor-field"><text>车牌号 *</text><input v-model="vehiclePlate" maxlength="20" placeholder="请输入本次来访车辆车牌" placeholder-class="entry-placeholder" :cursor-spacing="24" /></label>
             <label class="visitor-field"><text>外访备注</text><textarea v-model="visitorRemark" maxlength="500" placeholder="可填写需要接待人提前了解的事项" /></label>
           </view>
 
           <view class="visitor-card privacy-card">
             <view class="personal-info-note" v-if="personalInfoApplied">已自动带入本人和车辆资料，请核对本次信息；同行人员另行填写。</view>
-          <checkbox-group class="remember-info-control" @change="rememberChange"><label><checkbox value="remember" :checked="rememberInfo" color="#315f86" /><text>记住本人和车辆信息，下次同项目扫码自动填写（提交后生效）</text></label></checkbox-group>
+
           <checkbox-group @change="privacyChange">
               <label class="privacy-check"><checkbox value="agreed" :checked="privacyAgreed" color="#315f86" /><text>我已阅读并同意隐私告知</text></label>
             </checkbox-group>
-            <text class="privacy-copy">为完成项目现场外访报备及后续接待，系统将收集姓名、手机号码、单位和车牌信息，仅授权项目人员可查看。系统不采集身份证信息，提交后访客不能自行修改。</text>
-          </view>
-
-          <view v-if="visitorSessionToken" class="visitor-card profile-save-card">
-            <checkbox-group @change="profileSaveChange">
-              <label class="privacy-check">
-                <checkbox value="save" :checked="savingProfile" color="#315f86" />
-                <text>{{ selectedProfile ? '用本次修改更新这份常用资料' : '将本次人员和车辆信息保存为常用资料' }}</text>
-              </label>
-            </checkbox-group>
-            <label v-if="savingProfile" class="visitor-field">
-              <text>常用资料名称</text>
-              <input v-model="profileName" maxlength="100" placeholder="例如：张三项目会议资料" />
-            </label>
-            <text class="privacy-copy">此项为单独、自愿的长期保存同意。保存内容仅限当前项目的单位、人员姓名、手机号码和车辆信息，不包含身份证、本次来访时间、事由、地点及备注；以后可停用。</text>
+            <text class="privacy-copy">为完成项目现场外访报备及后续接待，系统将收集姓名、手机号码、单位和车牌信息，仅授权项目人员可查看。本人单位、姓名、手机号码、出行方式和车牌在提交成功后保存，用于本小程序后续跨项目扫码自动填写。系统不采集身份证信息，提交后访客不能自行修改。</text>
           </view>
 
           <view v-if="errorMessage" class="submit-error">{{ errorMessage }}</view>
-          <button class="submit-button" :disabled="submitting || profilesLoading || !visitorSessionToken" @tap="submit">{{ submitting ? '正在提交...' : '确认提交外访信息' }}</button>
+          <button class="submit-button" :disabled="submitting || identityLoading || !visitorSessionToken" @tap="submit">{{ submitting ? '正在提交...' : '确认提交外访信息' }}</button>
           <text class="submit-hint">请确认所有入场人员信息准确，提交后将立即锁定。</text>
         </template>
       </template>
@@ -759,5 +612,8 @@ function goBack() {
 
 <style scoped>
 .personal-info-note{padding:20rpx;margin:12rpx 0;border-radius:12rpx;background:#eef6ff;color:#285b83;font-size:25rpx;line-height:1.6}
-.remember-info-control{display:block;margin:24rpx 0;font-size:25rpx;color:#385366;line-height:1.7}.remember-info-control label{display:flex;align-items:flex-start;gap:10rpx}.remember-info-control text{flex:1;min-width:0}
+</style>
+
+<style scoped>
+@import "../../styles/publicVisitorForms.css";
 </style>

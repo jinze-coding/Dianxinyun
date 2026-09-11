@@ -16,21 +16,18 @@ export function personalInfoPatch(info: VisitorPersonalInfo | undefined, edited:
 }
 
 export function useVisitorPersonalInfo(fields: PersonalFields) {
-  const rememberInfo = ref(false);
   const personalInfoApplied = ref(false);
   const edited = new Set<string>();
   let applying = false;
   for (const field of [...textFields, 'travelMode'] as const) {
     watch(fields[field], () => { if (!applying) edited.add(field); }, { flush: 'sync' });
   }
-  watch(rememberInfo, () => { if (!applying) edited.add('rememberInfo'); }, { flush: 'sync' });
 
   function applyPersonalInfo(info?: VisitorPersonalInfo) {
-    if (!info || (edited.has('rememberInfo') && !rememberInfo.value)) return;
+    if (!info?.available) return;
     const patch = personalInfoPatch(info, edited);
     applying = true;
     try {
-      if (!edited.has('rememberInfo')) rememberInfo.value = info.rememberInfo;
       for (const field of textFields) {
         if (patch[field] !== undefined) fields[field].value = patch[field]!;
       }
@@ -41,16 +38,11 @@ export function useVisitorPersonalInfo(fields: PersonalFields) {
 
   function resetPersonalInfo() {
     applying = true;
-    rememberInfo.value = false;
     personalInfoApplied.value = false;
     edited.clear();
     applying = false;
   }
 
-  function rememberChange(event: { detail: { value: string[] } }) {
-    edited.add('rememberInfo');
-    rememberInfo.value = event.detail.value.includes('remember');
-  }
 
-  return { rememberInfo, personalInfoApplied, applyPersonalInfo, resetPersonalInfo, rememberChange };
+  return { personalInfoApplied, applyPersonalInfo, resetPersonalInfo };
 }

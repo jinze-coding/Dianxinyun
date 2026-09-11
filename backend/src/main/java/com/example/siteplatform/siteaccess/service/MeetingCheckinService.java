@@ -110,6 +110,7 @@ public class MeetingCheckinService {
     private final VisitorDataCryptoService cryptoService;
     private final VisitorSessionService sessionService;
     private final VisitorProfileService profileService;
+    private final VisitorPersonalProfileService personalProfiles;
     private final RedisRateLimitService rateLimitService;
     private final WechatPlatformClient wechatPlatformClient;
     private final OperationLogMapper operationLogMapper;
@@ -130,6 +131,7 @@ public class MeetingCheckinService {
                                  VisitorDataCryptoService cryptoService,
                                  VisitorSessionService sessionService,
                                  VisitorProfileService profileService,
+                                 VisitorPersonalProfileService personalProfiles,
                                  RedisRateLimitService rateLimitService,
                                  WechatPlatformClient wechatPlatformClient,
                                  OperationLogMapper operationLogMapper,
@@ -149,6 +151,7 @@ public class MeetingCheckinService {
         this.cryptoService = cryptoService;
         this.sessionService = sessionService;
         this.profileService = profileService;
+        this.personalProfiles = personalProfiles;
         this.rateLimitService = rateLimitService;
         this.wechatPlatformClient = wechatPlatformClient;
         this.operationLogMapper = operationLogMapper;
@@ -354,6 +357,7 @@ public class MeetingCheckinService {
         vo.setMeeting(toPublicMeeting(invitation, qr, project, now));
         if (registration == null) {
             vo.setPageState("WALK_IN_FORM");
+            vo.setPersonalInfo(personalProfiles.read(context));
         } else {
             List<PublicMeetingCheckinAttendeeVO> people = publicAttendees(registration.getId());
             long checked = people.stream().filter(item -> ATTENDANCE_CHECKED_IN.equals(item.getAttendanceStatus())).count();
@@ -443,6 +447,7 @@ public class MeetingCheckinService {
         for (SiteMeetingVisitPerson person : people) {
             checkInPerson(invitation, registration, person, qr, context, METHOD_VENUE_QR, now, evidence, null, null);
         }
+        personalProfiles.saveOnSubmission(context, null, submission);
         return receipt(registration, evidence, now);
     }
 

@@ -1,15 +1,11 @@
 package com.example.siteplatform.siteaccess.service;
 
-import com.baomidou.mybatisplus.core.MybatisConfiguration;
-import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.mapper.ProjectInfoMapper;
 import com.example.siteplatform.siteaccess.entity.SiteVisitorPersonalProfile;
 import com.example.siteplatform.siteaccess.mapper.SiteVisitorPersonalProfileMapper;
-import com.example.siteplatform.siteaccess.vo.SiteVisitorProfileVO;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -26,16 +22,15 @@ import static org.mockito.Mockito.*;
 class VisitorPersonalProfileServiceTest {
     @Mock SiteVisitorPersonalProfileMapper mapper;
     @Mock ProjectInfoMapper projects;
-    @Mock VisitorProfileService named;
     @Mock VisitorSessionService sessions;
     VisitorDataCryptoService crypto;
     VisitorPersonalProfileService service;
+    ObjectMapper json = new ObjectMapper().findAndRegisterModules();
 
     @BeforeEach void setup() {
-        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "personal"), SiteVisitorPersonalProfile.class);
         var env = new MockEnvironment(); env.setActiveProfiles("test");
         crypto = new VisitorDataCryptoService("", env);
-        service = new VisitorPersonalProfileService(mapper, projects, named, sessions, crypto, new ObjectMapper().findAndRegisterModules());
+        service = new VisitorPersonalProfileService(mapper, projects, sessions, crypto, json);
         lenient().when(sessions.decryptOpenid(any())).thenAnswer(call -> crypto.decrypt(((VisitorSessionService.VisitorSessionContext)call.getArgument(0)).openidEncrypted()));
     }
     private VisitorSessionService.VisitorSessionContext context(Long project, String app, String openid, String source) {
@@ -49,66 +44,78 @@ class VisitorPersonalProfileServiceTest {
         lenient().when(mapper.insert(any(SiteVisitorPersonalProfile.class))).thenAnswer(call -> { ((SiteVisitorPersonalProfile)call.getArgument(0)).setId(1L); return 1; });
         lenient().when(mapper.insertAudit(anyLong(), anyLong(), anyString(), nullable(String.class), anyString())).thenReturn(1);
     }
-    @Test void noConsentDoesNotCreatePersonalData() {
-        when(projects.selectByIdForUpdate(7L)).thenReturn(new ProjectInfo());
-        service.saveOnSubmission(context(7L,"wx-app","a","INVITATION"), null, submission("张三"));
-        verify(mapper, never()).insert(any(SiteVisitorPersonalProfile.class));
-        verify(mapper, never()).insertAudit(any(), any(), any(), any(), any());
-    }
-    @Test void threeSourcesUseSameOwnerButProjectsAndAppsStaySeparate() {
+    @Test void allFourSourcesSaveWithoutSeparateConsentAndKeepEncryptedProjectArchive() {
         writable();
-        for (String source : List.of("INVITATION", "MEETING_INVITATION", "GUARD_QR")) {
-            service.saveOnSubmission(context(7L,"wx-app","a",source), true, submission("张三"));
+        for (String source : List.of("INVITATION", "MEETING_INVITATION", "GUARD_QR", "MEETING_CHECKIN_QR")) {
+            service.saveOnSubmission(context(7L,"wx-app","a",source), null, submission("张三"));
         }
         var rows = ArgumentCaptor.forClass(SiteVisitorPersonalProfile.class);
-        verify(mapper, times(3)).insert(rows.capture());
+        verify(mapper, times(4)).insert(rows.capture());
         assertThat(rows.getAllValues()).extracting(SiteVisitorPersonalProfile::getOwnerIdentityHash).containsOnly(rows.getValue().getOwnerIdentityHash());
-        assertThat(rows.getValue().getOwnerIdentityHash()).hasSize(64).doesNotContain("openid");
+        assertThat(rows.getValue().getOwnerIdentityHash()).hasSize(64);
+        assertThat(rows.getValue().getProjectId()).isEqualTo(7L);
+        assertThat(rows.getValue().getRememberEnabled()).isTrue();
         assertThat(rows.getValue().getContactPhoneEncrypted()).startsWith("v1:").doesNotContain("13800000000");
         assertThat(crypto.decrypt(rows.getValue().getContactPhoneEncrypted())).isEqualTo("13800000000");
-        var owner = rows.getValue().getOwnerIdentityHash();
-        service.read(context(8L,"wx-app","a","GUARD_QR"));
-        service.read(context(7L,"wx-other","a","GUARD_QR"));
-        service.read(context(7L,"wx-app","b","GUARD_QR"));
-        var queries = ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.Wrapper.class);
-        verify(mapper,times(3)).selectOne(queries.capture());
-        for (var query : queries.getAllValues()) query.getSqlSegment();
-        var first = (com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<?>)queries.getAllValues().get(0);
-        assertThat(first.getParamNameValuePairs().values()).contains(8L, "wx-app", owner);
-        for (int i=1;i<3;i++) {
-            var query = (com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<?>)queries.getAllValues().get(i);
-            assertThat(query.getParamNameValuePairs().values()).doesNotContain(owner);
-        }
+        var audit = ArgumentCaptor.forClass(String.class);
+        verify(mapper,times(4)).insertAudit(eq(1L),eq(7L),eq("AUTO_SAVE"),isNull(),audit.capture());
+        assertThat(audit.getValue()).startsWith("v1:").doesNotContain("张三");
     }
-    @Test void successfulUpdateUsesLatestValuesAndOptOutSuppressesLegacyFallback() {
+    @Test void projectIndependentLookupStillSeparatesAppAndWechatIdentityAndUsesPurposeHashes() {
+        service.read(context(7L,"wx-app","a","INVITATION"));
+        service.read(context(8L,"wx-app","a","GUARD_QR"));
+        service.read(context(7L,"wx-other","a","MEETING_CHECKIN_QR"));
+        service.read(context(7L,"wx-app","b","GUARD_QR"));
+        var apps=ArgumentCaptor.forClass(String.class); var own=ArgumentCaptor.forClass(String.class);
+        var single=ArgumentCaptor.forClass(String.class); var meeting=ArgumentCaptor.forClass(String.class); var guard=ArgumentCaptor.forClass(String.class);
+        verify(mapper,times(4)).selectLatestPersonalInfo(apps.capture(),own.capture(),single.capture(),meeting.capture(),guard.capture());
+        assertThat(apps.getAllValues()).containsExactly("wx-app","wx-app","wx-other","wx-app");
+        assertThat(own.getAllValues().get(0)).isEqualTo(own.getAllValues().get(1));
+        assertThat(own.getAllValues().get(2)).isNotEqualTo(own.getAllValues().get(0));
+        assertThat(own.getAllValues().get(3)).isNotEqualTo(own.getAllValues().get(0));
+        assertThat(List.of(own.getValue(),single.getValue(),meeting.getValue(),guard.getValue())).doesNotHaveDuplicates();
+    }
+    @Test void legacyFalseCannotDisableSavingOrEraseLatestFields() {
         writable();
-        var row = new SiteVisitorPersonalProfile(); row.setId(1L); row.setProjectId(7L); row.setVersion(4); row.setRememberEnabled(true);
+        var row = new SiteVisitorPersonalProfile(); row.setId(1L); row.setProjectId(7L); row.setVersion(4); row.setRememberEnabled(false);
         when(mapper.selectOwnerForUpdate(any(), any(), any())).thenReturn(row);
         when(mapper.updateById(row)).thenReturn(1);
-        var ctx = context(7L,"wx-app","a","GUARD_QR");
-        service.saveOnSubmission(ctx, null, submission("李四"));
+        service.saveOnSubmission(context(7L,"wx-app","a","GUARD_QR"), false, submission("李四"));
         assertThat(row.getContactName()).isEqualTo("李四");
         assertThat(row.getVersion()).isEqualTo(5);
-        service.saveOnSubmission(ctx, false, submission("赵六"));
-        assertThat(row.getRememberEnabled()).isFalse();
-        assertThat(row.getContactName()).isNull();
-        assertThat(row.getContactPhoneEncrypted()).isNull();
-        when(mapper.selectOne(any())).thenReturn(row);
-        var read = service.read(ctx);
-        assertThat(read.isRememberInfo()).isFalse(); assertThat(read.isAvailable()).isFalse();
-        verify(named,never()).publicList(any());
+        assertThat(row.getRememberEnabled()).isTrue();
+        assertThat(crypto.decrypt(row.getContactPhoneEncrypted())).isEqualTo("13800000000");
     }
-    @Test void firstPrefillUsesNamedProfileOnlyWithoutAssumingNewConsent() {
-        var profile = new SiteVisitorProfileVO(); profile.setProfileCode("existing-code"); profile.setContactName("张三"); profile.setVisitorCompany("已有单位");
-        when(named.publicList(any())).thenReturn(List.of(profile)); when(named.publicDetail(any(),eq("existing-code"))).thenReturn(profile);
-        var data = service.read(context(7L,"wx-app","a","INVITATION"));
-        assertThat(data.isAvailable()).isTrue(); assertThat(data.isRememberInfo()).isFalse();
-        assertThat(data.getContactName()).isEqualTo("张三");
+    @Test void historyWinsAndResponseDoesNotExposeSourceOrCompanions() throws Exception {
+        var row=new SiteVisitorPersonalProfile(); row.setId(81L); row.setProjectId(99L); row.setWechatAppId("wx-app");
+        row.setContactName("张三"); row.setContactPhoneEncrypted(crypto.encrypt("13800000000")); row.setRememberEnabled(false);
+        when(mapper.selectLatestPersonalInfo(any(),any(),any(),any(),any())).thenReturn(row);
+        var result=service.read(context(7L,"wx-app","a","GUARD_QR"));
+        assertThat(result.isAvailable()).isTrue(); assertThat(result.getContactName()).isEqualTo("张三");
+        assertThat(json.writeValueAsString(result)).doesNotContain("projectId","wechatAppId","ownerIdentityHash","companions","registration");
+        verify(mapper,never()).selectLatestNamedPersonalInfo(any(),any());
+    }
+    @Test void namedProfilesOnlySupplementMissingHistoryAndUnknownWechatIsEmpty() {
+        var row=new SiteVisitorPersonalProfile(); row.setContactName("张三"); row.setContactPhoneEncrypted(crypto.encrypt("13800000000"));
+        when(mapper.selectLatestNamedPersonalInfo("wx-app","legacy-owner")).thenReturn(row);
+        var data=service.read(context(7L,"wx-app","a","INVITATION"));
+        assertThat(data.isAvailable()).isTrue(); assertThat(data.getContactName()).isEqualTo("张三");
+        assertThat(service.read(context(7L,"wx-other","b","INVITATION")).isAvailable()).isFalse();
+    }
+    @Test void missingIdentityNeverReadsOrSavesData() {
+        assertThatThrownBy(() -> service.read(null)).isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> service.saveOnSubmission(null,null,submission("张三"))).isInstanceOf(BusinessException.class);
+        verifyNoInteractions(mapper);
     }
     @Test void zeroRowWriteThrowsConflictBeforeAudit() {
         writable(); when(mapper.insert(any(SiteVisitorPersonalProfile.class))).thenReturn(0);
         assertThatThrownBy(() -> service.saveOnSubmission(context(7L,"wx-app","a","INVITATION"), true, submission("张三")))
             .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getCode()).isEqualTo(409));
         verify(mapper,never()).insertAudit(any(),any(),any(),any(),any());
+    }
+    @Test void auditFailureFailsTheBusinessTransaction() {
+        writable(); when(mapper.insertAudit(anyLong(),anyLong(),anyString(),nullable(String.class),anyString())).thenReturn(0);
+        assertThatThrownBy(() -> service.saveOnSubmission(context(7L,"wx-app","a","INVITATION"),null,submission("张三")))
+            .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getCode()).isEqualTo(409));
     }
 }

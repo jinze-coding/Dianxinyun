@@ -10,6 +10,7 @@ public class PublicMeetingCheckinSessionVO {
     private String visitorSessionToken;
     private long expiresInSeconds;
     private String pageState;
+    private VisitorPersonalInfoVO personalInfo;
     private PublicMeetingCheckinMeetingVO meeting;
     private String registrationNo;
     private String registrationSource;

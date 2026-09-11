@@ -2891,7 +2891,7 @@ CREATE TABLE IF NOT EXISTS site_visitor_personal_profile (
     travel_mode VARCHAR(20),
     vehicle_plate VARCHAR(20),
     privacy_agreed_time DATETIME,
-    last_submitted_time DATETIME NOT NULL,
+    last_submitted_time DATETIME(6) NOT NULL,
     version INT NOT NULL DEFAULT 0,
     deleted TINYINT NOT NULL DEFAULT 0,
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -3024,3 +3024,11 @@ WHERE NOT EXISTS (SELECT 1 FROM sys_data_migration WHERE migration_key = '202609
 ON DUPLICATE KEY UPDATE permission_code = 'seal.application.export';
 
 INSERT IGNORE INTO sys_data_migration(migration_key) VALUES ('20260911_SEAL_FORM_MERGE_EXPORT_V1');
+
+-- 2026-09-11 微信本人信息跨项目查询索引
+ALTER TABLE site_visitor_personal_profile ADD INDEX idx_personal_app_identity_latest (wechat_app_id,owner_identity_hash,deleted,last_submitted_time,id);
+ALTER TABLE site_visit_invitation ADD INDEX idx_single_app_identity_latest (wechat_app_id,visitor_identity_hash,deleted,invite_type,status,submitted_time,id);
+ALTER TABLE site_meeting_visit_registration ADD INDEX idx_meeting_app_identity_latest (wechat_app_id,visitor_identity_hash,deleted,status,registered_time,id);
+ALTER TABLE site_guard_visit_registration ADD INDEX idx_guard_app_identity_latest (wechat_app_id,visitor_identity_hash,deleted,status,registered_time,id);
+ALTER TABLE site_visitor_profile ADD INDEX idx_named_app_identity_latest (wechat_app_id,owner_openid_hash,deleted,status,last_used_time,id);
+INSERT INTO sys_data_migration(migration_key) VALUES ('20260911_VISITOR_IDENTITY_AUTOFILL_V1');
