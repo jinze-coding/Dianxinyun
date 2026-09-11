@@ -97,6 +97,7 @@ wechat:
     recheck-template-id: ${WECHAT_RECHECK_TEMPLATE_ID:}
 
 site-access:
+  material-converter: ${MEETING_MATERIAL_CONVERTER:../scripts/meeting-material-convert.sh}
   # 生产环境必须通过 VISITOR_DATA_ENCRYPTION_KEY 注入至少32字节的独立随机密钥。
   encryption-key: ${VISITOR_DATA_ENCRYPTION_KEY:}
 

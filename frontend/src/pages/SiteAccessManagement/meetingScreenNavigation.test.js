@@ -29,6 +29,13 @@ test('screen return restores the originating project, filters, input, page and s
   assert.equal(readMeetingScreenReturn(storage, '?meetingScreen=19', 1, 3, 2000), null);
 });
 
+test('a screen opened from meeting details returns to the same meeting tab and keeps the list context', () => {
+  const storage = memoryStorage();
+  saveMeetingScreenReturn(storage, 'first', { ...context, filters: { ...context.filters, detailId: 19, detailTab: 'materials' } }, 1000);
+  assert.deepEqual(readMeetingScreenReturn(storage, search(), 1, 3, 2000).filters,
+    { ...context.filters, detailId: 19, detailTab: 'materials' });
+});
+
 test('separate screen windows retain their own originating list instead of overwriting one another', () => {
   const storage = memoryStorage();
   saveMeetingScreenReturn(storage, 'first', context, 1000);

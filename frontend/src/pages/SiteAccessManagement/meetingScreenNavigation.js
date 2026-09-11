@@ -15,6 +15,7 @@ function listState(value = {}) {
     keywordInput: String(value.keywordInput || '').slice(0, 500),
     pageNo: validId(value.pageNo) ? Number(value.pageNo) : 1,
     scrollTop: Math.max(0, Math.min(Number(value.scrollTop) || 0, 1000000)),
+    ...(validId(value.detailId) ? { detailId: Number(value.detailId), detailTab: ['registrations', 'checkin', 'materials', 'activity'].includes(value.detailTab) ? value.detailTab : 'checkin' } : {}),
   };
 }
 

@@ -4,6 +4,7 @@ import { onLoad, onShow, onUnload } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
 import { useVisitorPersonalInfo } from '@/utils/visitorPersonalInfo';
 import ProjectLocationCard from '@/components/ProjectLocationCard.vue';
+import PublicMeetingMaterials from '@/components/PublicMeetingMaterials.vue';
 import {
   createPublicMeetingVisitorSession,
   disablePublicMeetingVisitorProfile,
@@ -337,7 +338,7 @@ onBeforeUnmount(cleanup);
     <view class="meeting-content">
     <view v-if="loading" class="meeting-card state-card"><text>正在识别微信身份...</text><text>确认登记状态后再显示页面</text></view>
     <view v-else-if="errorMessage" class="meeting-card state-card error"><text>{{ errorMessage }}</text><button @tap="initialize(true)">重新识别</button></view>
-    <view v-else-if="terminalState || expired" class="meeting-card state-card expired"><text class="state-mark">!</text><text class="state-title">{{ terminalState === 'VOIDED' ? '会议邀请已作废' : '会议邀请已过期' }}</text><text>截止后不再展示历史放行凭证，请联系项目接待人。</text></view>
+    <view v-else-if="terminalState || expired" class="meeting-card state-card expired"><text class="state-mark">!</text><text class="state-title">{{ terminalState === 'VOIDED' ? '会议邀请已作废' : '会议已结束' }}</text><text>{{ terminalState === 'VOIDED' ? '预约、放行、签到及资料对外访问已关闭。' : '预约、放行和签到已结束，公开会议资料可继续在下方查看。' }}</text></view>
     <template v-else-if="invitation">
       <view class="meeting-card invite-card">
         <view class="invite-top">
@@ -406,6 +407,7 @@ onBeforeUnmount(cleanup);
 
       <ProjectLocationCard v-if="invitation.projectLocation" :location="invitation.projectLocation" :project-name="invitation.projectShortName || invitation.projectName" map-id="meeting-project-map" :route-image-path="routeImagePath" :route-image-loading="routeImageLoading" :route-image-error="routeImageError" />
     </template>
+    <PublicMeetingMaterials v-if="token && terminalState !== 'VOIDED'" :invite-token="token" />
     </view>
   </view>
 </template>

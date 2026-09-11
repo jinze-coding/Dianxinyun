@@ -241,6 +241,8 @@ class AdministrativeDeletionServiceTest {
         when(jdbc.query(org.mockito.ArgumentMatchers.argThat(
                         sql -> sql != null && sql.contains("SELECT id FROM site_meeting_visit_registration")),
                 any(RowMapper.class), any(Object[].class))).thenReturn(List.of(501L));
+        when(jdbc.query(org.mockito.ArgumentMatchers.eq("SELECT id FROM site_meeting_material WHERE invitation_id = ? FOR UPDATE"),
+                any(RowMapper.class), any(Object[].class))).thenReturn(List.of());
         when(jdbc.update("DELETE FROM site_guard_meeting_registration WHERE invitation_id = ?", 92L)).thenReturn(1);
         when(jdbc.update("DELETE FROM site_meeting_attendance WHERE invitation_id = ?", 92L)).thenReturn(2);
         when(jdbc.update("DELETE FROM `site_meeting_visit_person` WHERE `registration_id` IN (?)", 501L))

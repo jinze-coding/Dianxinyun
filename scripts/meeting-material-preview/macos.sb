@@ -1,0 +1,17 @@
+(version 1)
+(deny default)
+(allow process-fork process-exec signal mach-lookup sysctl-read)
+(allow file-read-metadata)
+(allow file-read-data file-map-executable
+  (subpath "/System") (subpath "/usr") (subpath "/Library/Fonts")
+  (subpath "/Library/Apple") (subpath "/private/var/db/dyld")
+  (subpath "/private/var/db/timezone")
+  (subpath "/opt/homebrew/Cellar") (subpath "/opt/homebrew/opt")
+  (subpath "/opt/homebrew/lib") (subpath "/opt/homebrew/share")
+  (subpath (param "TOOL_ROOT"))
+  (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom"))
+(allow file-read* file-write* (subpath (param "WORK")))
+(allow file-write-data (literal "/dev/null"))
+(deny network*)
+
+(allow file-read* (literal "/"))

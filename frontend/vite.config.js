@@ -25,7 +25,7 @@ export default defineConfig({
       '/api': {
         target: proxyTarget,
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '/api/v1'),
+        rewrite: (path) => path.replace(/^\/api(?!\/v1(?:\/|$))/, '/api/v1'),
         configure: (proxy) => {
           proxy.on('proxyReq', (proxyRequest) => {
             proxyRequest.setHeader('Origin', proxyTarget);

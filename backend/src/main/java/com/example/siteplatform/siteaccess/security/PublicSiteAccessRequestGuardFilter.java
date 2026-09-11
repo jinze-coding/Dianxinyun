@@ -123,7 +123,12 @@ public class PublicSiteAccessRequestGuardFilter extends OncePerRequestFilter {
             return;
         }
 
-        RateLimitRule rule = RULES.getOrDefault(path(request), UNKNOWN_PATH_RULE);
+        String route = path(request);
+        RateLimitRule rule = route.matches(BASE_PATH + "/meeting/materials/content/[a-f0-9]{32}")
+                ? new RateLimitRule("public-meeting-material-content", 1200, Duration.ofMinutes(10))
+                : route.equals(BASE_PATH + "/meeting/materials/resolve")
+                ? new RateLimitRule("public-meeting-material-list", 120, Duration.ofMinutes(10))
+                : RULES.getOrDefault(route, UNKNOWN_PATH_RULE);
         try {
             rateLimitService.check(rule.scope(), request.getRemoteAddr(), rule.maximum(), rule.window());
         } catch (BusinessException exception) {

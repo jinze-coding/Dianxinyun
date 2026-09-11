@@ -169,6 +169,10 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
             return read ? SystemPermissionCodes.QUALITY_VIEW : SystemPermissionCodes.QUALITY_MANAGE;
         }
         if (matchesModule(normalizedPath, SITE_ACCESS)) {
+            // Content uses a session-bound HttpOnly grant; its controller rechecks the live login and actual project.
+            if (read && normalizedPath.matches(SITE_ACCESS + "/material-versions/[0-9]+/content")) return null;
+            if (HttpMethod.POST.matches(method) && normalizedPath.matches(SITE_ACCESS + "/material-versions/[0-9]+/read-session"))
+                return SystemPermissionCodes.SITE_ACCESS_VIEW;
             if (normalizedPath.equals(SITE_ACCESS + "/visitors/export")
                     || normalizedPath.equals(SITE_ACCESS + "/meeting-registrations/export")
                     || normalizedPath.equals(SITE_ACCESS + "/meeting-attendance/export")

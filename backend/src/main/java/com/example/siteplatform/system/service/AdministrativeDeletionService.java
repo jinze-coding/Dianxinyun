@@ -45,7 +45,7 @@ public class AdministrativeDeletionService {
             "USER", "PROJECT", "ROLE", "REGISTRATION_APPLICATION",
             "DOCUMENT_FOLDER", "PROJECT_DOCUMENT", "FILE",
             "ELECTRIC_BOX", "INSPECTION_RECORD", "QUALITY_ISSUE",
-            "SITE_ACCESS_INVITATION");
+            "SITE_ACCESS_INVITATION", "MEETING_MATERIAL");
 
     private final JdbcTemplate jdbc;
     private final StringRedisTemplate redis;
@@ -115,6 +115,7 @@ public class AdministrativeDeletionService {
             case "INSPECTION_RECORD" -> deleteInspectionRecord(request.getTargetId());
             case "QUALITY_ISSUE" -> deleteQualityIssue(request.getTargetId());
             case "SITE_ACCESS_INVITATION" -> deleteSiteAccessInvitation(request.getTargetId());
+            case "MEETING_MATERIAL" -> deleteMeetingMaterial(request.getTargetId());
             default -> throw new BusinessException("不支持的删除类型");
         }
         recordDeletion(operator, current);
@@ -162,6 +163,7 @@ public class AdministrativeDeletionService {
             case "INSPECTION_RECORD" -> inspectionRecordImpact(impact, id);
             case "QUALITY_ISSUE" -> qualityIssueImpact(impact, id);
             case "SITE_ACCESS_INVITATION" -> siteAccessInvitationImpact(impact, id);
+            case "MEETING_MATERIAL" -> meetingMaterialImpact(impact, id);
             default -> throw new BusinessException("不支持的删除类型");
         }
         impact.setTotalAssociatedCount(impact.getItems().stream().mapToLong(DeletionImpactVO.Item::getCount).sum());
@@ -274,6 +276,8 @@ public class AdministrativeDeletionService {
                 + count("site_meeting_visit_person", "project_id", id)
                 + count("site_meeting_checkin_qr", "project_id", id)
                 + count("site_meeting_attendance", "project_id", id)
+                + count("site_meeting_material", "project_id", id)
+                + count("site_meeting_material_version", "project_id", id)
                 + count("site_meeting_visit_audit_log", "project_id", id);
         add(impact, "siteAccess", "外访邀请、常用资料、人员与审计", siteAccessCount);
         if (siteAccessCount > 0) {
@@ -492,6 +496,12 @@ public class AdministrativeDeletionService {
         add(impact, "meetingAttendance", "会议签到码与逐人签到记录",
                 count("site_meeting_checkin_qr", "invitation_id", id)
                         + count("site_meeting_attendance", "invitation_id", id));
+        add(impact,"meetingMaterials","会议资料及历史版本",count("site_meeting_material","invitation_id",id)
+                + count("site_meeting_material_version","invitation_id",id));
+        add(impact,"meetingPreviews","会议资料预览任务",count("site_meeting_material_preview","invitation_id",id));
+        setFileImpact(impact,jdbc.queryForMap("SELECT COUNT(*) file_count, COALESCE(SUM(f.file_size),0) file_bytes FROM file_resource f "
+                + "JOIN site_meeting_material m ON m.id=f.business_id WHERE m.invitation_id=? "
+                + "AND f.business_type IN ('MEETING_MATERIAL','MEETING_MATERIAL_PREVIEW')",id));
         add(impact, "preservedOperationLogs", "保留的平台操作日志", countSql("""
                 SELECT COUNT(*) FROM sys_operation_log
                 WHERE business_type IN ('SITE_ACCESS', 'SITE_ACCESS_MEETING_CHECKIN') AND business_id = ?
@@ -499,6 +509,10 @@ public class AdministrativeDeletionService {
     }
 
     private void lockTarget(String type, Long id) {
+        if ("MEETING_MATERIAL".equals(type)) {
+            Map<String,Object> material = requireRow("SELECT invitation_id FROM site_meeting_material WHERE id = ?", id, "资料不存在");
+            requireRow("SELECT id FROM site_visit_invitation WHERE id = ? FOR UPDATE", number(material.get("invitation_id")), "会议不存在");
+        }
         String table = switch (type) {
             case "USER" -> "sys_user";
             case "PROJECT" -> "project_info";
@@ -511,6 +525,7 @@ public class AdministrativeDeletionService {
             case "INSPECTION_RECORD" -> "inspection_record";
             case "QUALITY_ISSUE" -> "quality_issue";
             case "SITE_ACCESS_INVITATION" -> "site_visit_invitation";
+            case "MEETING_MATERIAL" -> "site_meeting_material";
             default -> throw new BusinessException("不支持的删除类型");
         };
         requireRow("SELECT id FROM `" + table + "` WHERE id = ? FOR UPDATE", id, "待删除数据不存在");
@@ -579,6 +594,8 @@ public class AdministrativeDeletionService {
                 + count("site_meeting_visit_person", "project_id", projectId)
                 + count("site_meeting_checkin_qr", "project_id", projectId)
                 + count("site_meeting_attendance", "project_id", projectId)
+                + count("site_meeting_material", "project_id", projectId)
+                + count("site_meeting_material_version", "project_id", projectId)
                 + count("site_meeting_visit_audit_log", "project_id", projectId);
         if (siteAccessCount > 0) {
             throw BusinessException.of(409, "项目存在需长期保留的外访数据，禁止物理删除；请停用项目并保留审计");
@@ -797,6 +814,9 @@ public class AdministrativeDeletionService {
     }
 
     private void deleteSiteAccessInvitation(Long invitationId) {
+        for (Long materialId : ids("SELECT id FROM site_meeting_material WHERE invitation_id = ? FOR UPDATE", List.of(invitationId))) {
+            deleteMeetingMaterial(materialId);
+        }
         List<Long> meetingRegistrationIds = ids(
                 "SELECT id FROM site_meeting_visit_registration WHERE invitation_id = ? FOR UPDATE",
                 List.of(invitationId));
@@ -810,6 +830,28 @@ public class AdministrativeDeletionService {
         update("DELETE FROM site_visit_audit_log WHERE invitation_id = ?", invitationId);
         requireSingle(update("DELETE FROM site_visit_invitation WHERE id = ? AND deleted = 0", invitationId),
                 "外访邀请状态已变化，请重新预览");
+    }
+
+    private void meetingMaterialImpact(DeletionImpactVO impact, Long id) {
+        Map<String,Object> row = requireRow("SELECT id,title,version FROM site_meeting_material WHERE id = ?", id, "会议资料不存在");
+        impact.setTargetName(text(row.get("title")));
+        add(impact,"materialRevision","资料修订版本",number(row.get("version")));
+        add(impact,"materialVersions","原文件版本",count("site_meeting_material_version","material_id",id));
+        List<FileResource> resources=meetingMaterialFiles(id);
+        impact.setFileCount(resources.size());
+        impact.setFileBytes(resources.stream().mapToLong(f->f.getFileSize()==null?0:f.getFileSize()).sum());
+    }
+
+    private List<FileResource> meetingMaterialFiles(Long id) {
+        return files("SELECT * FROM file_resource WHERE business_type IN ('MEETING_MATERIAL','MEETING_MATERIAL_PREVIEW') AND business_id = ?",id);
+    }
+
+    private void deleteMeetingMaterial(Long id) {
+        List<FileResource> resources=meetingMaterialFiles(id); stageFiles(resources);
+        update("DELETE p FROM site_meeting_material_preview p JOIN site_meeting_material_version v ON v.id=p.version_id WHERE v.material_id=?",id);
+        update("DELETE FROM site_meeting_material_version WHERE material_id=?",id);
+        requireSingle(update("DELETE FROM site_meeting_material WHERE id=?",id),"会议资料已变化，请重新预览");
+        registerCommittedFilePurge(resources);
     }
 
     private void reconcilePendingRegistrationApplications(Long projectId, SysUser operator) {

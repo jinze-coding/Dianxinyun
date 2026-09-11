@@ -29,6 +29,7 @@ public final class PathMultipartFile implements MultipartFile {
     @Override public long getSize() { return size(); }
     @Override public byte[] getBytes() throws IOException { return Files.readAllBytes(path); }
     @Override public InputStream getInputStream() throws IOException { return Files.newInputStream(path); }
+    @Override public FileSystemResource getResource() { return new FileSystemResource(path); }
     @Override public void transferTo(java.io.File dest) throws IOException {
         try (InputStream input = new FileSystemResource(path).getInputStream();
              java.io.OutputStream output = Files.newOutputStream(dest.toPath())) {

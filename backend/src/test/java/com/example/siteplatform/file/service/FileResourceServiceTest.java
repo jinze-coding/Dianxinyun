@@ -157,6 +157,17 @@ class FileResourceServiceTest {
     }
 
     @Test
+    void meetingFilesCannotBypassDedicatedPermissionRoutes() {
+        for (String type : java.util.List.of("MEETING_MATERIAL", "MEETING_MATERIAL_PREVIEW")) {
+            FileResource file = file(11L, 2L, 7L, type, 42L);
+            assertThrows(BusinessException.class, () -> service.checkRead(user(7L), file));
+            assertThrows(BusinessException.class, () -> service.checkWrite(user(7L), file));
+            assertThrows(BusinessException.class, () -> service.authorizeUpload(user(7L), 2L, type, 42L));
+            assertFalse(service.canReadInList(user(7L), file));
+        }
+    }
+
+    @Test
     void genericFileApiCannotReadSealEvidenceEvenWhenUserHasProjectAccess() {
         FileResource file = file(11L, 2L, 7L, "SEAL_SOURCE", 42L);
 

@@ -71,6 +71,55 @@ public final class FileUploadPolicy {
         validate(file, DOCUMENT_EXTENSIONS, MAX_DOCUMENT_BYTES, "工程资料");
     }
 
+    public static final long MAX_MEETING_BYTES = 1024L * 1024 * 1024;
+    private static final Set<String> MEETING_MEDIA = Set.of("mp4", "mov", "m4v", "webm", "mkv", "avi", "mp3", "m4a", "aac", "wav", "flac", "ogg");
+
+    public static void validateMeetingMetadata(String name, long size) {
+        String extension = extensionOf(safeOriginalFileName(name));
+        if (size <= 0 || size > MAX_MEETING_BYTES) throw BusinessException.of(413, "会议资料大小须为1字节至1GB");
+        if (!DOCUMENT_EXTENSIONS.contains(extension) && !MEETING_MEDIA.contains(extension)
+                && !Set.of("odt", "ods", "odp").contains(extension)) {
+            throw BusinessException.of(415, "不支持此会议资料格式");
+        }
+    }
+
+    public static void validateMeetingMaterial(MultipartFile file) {
+        if (file == null) throw new BusinessException("请选择会议资料");
+        validateMeetingMetadata(file.getOriginalFilename(), file.getSize());
+        validate(file, java.util.stream.Stream.of(DOCUMENT_EXTENSIONS, MEETING_MEDIA, Set.of("odt", "ods", "odp"))
+                .flatMap(Set::stream).collect(java.util.stream.Collectors.toSet()), MAX_MEETING_BYTES, "会议资料");
+        validateMeetingOfficeContainer(file);
+    }
+
+    private static void validateMeetingOfficeContainer(MultipartFile file) {
+        String extension=extensionOf(file.getOriginalFilename());
+        String required=switch(extension) {
+            case "docx" -> "word/document.xml";
+            case "xlsx" -> "xl/workbook.xml";
+            case "pptx" -> "ppt/presentation.xml";
+            case "odt", "ods", "odp" -> "content.xml";
+            default -> null;
+        };
+        if(required==null) return;
+        java.nio.file.Path temporary=null;
+        try {
+            java.io.File source;
+            if(file.getResource().isFile()) source=file.getResource().getFile();
+            else {
+                temporary=java.nio.file.Files.createTempFile("meeting-office-policy-", ".zip");
+                try(InputStream input=file.getInputStream()) { java.nio.file.Files.copy(input,temporary,java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
+                source=temporary.toFile();
+            }
+            // Read the central directory without inflating arbitrary archive entries.
+            try(var archive=new java.util.zip.ZipFile(source)) {
+                if(archive.getEntry(required)==null || archive.getEntry(extension.startsWith("od")?"mimetype":"[Content_Types].xml")==null
+                        || archive.stream().anyMatch(entry->entry.getName().toLowerCase(Locale.ROOT).endsWith("vbaproject.bin")))
+                    throw BusinessException.of(415,"Office 文件内容与扩展名不符或包含宏");
+            }
+        } catch(IOException e) { throw BusinessException.of(415,"Office 文件结构无效"); }
+        finally { if(temporary!=null) try {java.nio.file.Files.deleteIfExists(temporary);} catch(IOException ignored) { /* Temporary OS file cleanup can be retried externally. */ } }
+    }
+
     public static void validateCirculationDocument(MultipartFile file) {
         validate(file, DOCUMENT_EXTENSIONS, MAX_CIRCULATION_DOCUMENT_BYTES, "图纸或技术文件");
     }
@@ -185,7 +234,15 @@ public final class FileUploadPolicy {
             case "bmp" -> startsWithAscii(bytes, "BM");
             case "heic", "heif" -> isIsoBaseMediaImage(bytes);
             case "pdf" -> startsWithAscii(bytes, "%PDF-");
-            case "docx", "xlsx", "pptx", "ofd", "zip" -> isZip(bytes);
+            case "docx", "xlsx", "pptx", "ofd", "zip", "odt", "ods", "odp" -> isZip(bytes);
+            case "mp4", "mov", "m4v", "m4a" -> bytes.length >= 12 && asciiAt(bytes, 4, "ftyp");
+            case "webm", "mkv" -> startsWith(bytes, 0x1a, 0x45, 0xdf, 0xa3);
+            case "avi" -> startsWithAscii(bytes, "RIFF") && asciiAt(bytes, 8, "AVI ");
+            case "wav" -> startsWithAscii(bytes, "RIFF") && asciiAt(bytes, 8, "WAVE");
+            case "mp3", "aac" -> startsWithAscii(bytes, "ID3") || (bytes.length >= 2
+                    && (bytes[0] & 0xff) == 0xff && (bytes[1] & 0xe0) == 0xe0);
+            case "flac" -> startsWithAscii(bytes, "fLaC");
+            case "ogg" -> startsWithAscii(bytes, "OggS");
             case "doc", "xls", "ppt" -> isOle(bytes);
             case "wps", "et", "dps" -> isOle(bytes) || isZip(bytes);
             case "rtf" -> startsWithAscii(bytes, "{\\rtf");

@@ -17,6 +17,7 @@
     "check": "npm run lint && npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {
+    "@noble/hashes": "^1.8.0",
     "axios": "^1.19.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

@@ -33,8 +33,9 @@ function MeetingModal({ title, children, onClose, width = 760, className = '' })
   </div>;
 }
 
-export default function MeetingRegistrationPanel({ invitation, projectId, canManage, canExport, currentTime = Date.now(), onChanged }) {
-  const [section, setSection] = useState('checkin');
+export default function MeetingRegistrationPanel({ invitation, projectId, canManage, canExport, currentTime = Date.now(), onChanged, controlledSection }) {
+  const [internalSection, setSection] = useState('checkin');
+  const section = controlledSection || internalSection;
   const [filters, setFilters] = useState({ status: '', keyword: '' });
   const [pageNo, setPageNo] = useState(1);
   const [page, setPage] = useState({ records: [], total: 0 });
@@ -339,10 +340,10 @@ export default function MeetingRegistrationPanel({ invitation, projectId, canMan
 
   const totalPages = Math.max(1, Math.ceil(Number(page.total || 0) / PAGE_SIZE));
   return <div className="site-access-meeting-panel">
-    <div className="meeting-closed-loop">
+    {!controlledSection && <div className="meeting-closed-loop">
       {[['1', '创建会议'], ['2', '分享邀请'], ['3', '预约登记'], ['4', '会场签到'], ['5', '导出名单']].map(([step, label], index) => <React.Fragment key={step}><div className={index < 4 ? 'done' : ''}><span>{step}</span><b>{label}</b></div>{index < 4 && <i>→</i>}</React.Fragment>)}
-    </div>
-    <div className="meeting-workbench-tabs"><button type="button" className={section === 'registrations' ? 'active' : ''} onClick={() => setSection('registrations')}>预约登记管理</button><button type="button" className={section === 'checkin' ? 'active' : ''} onClick={() => setSection('checkin')}>会场签到管理</button><p>{section === 'registrations' ? '查看会前预约登记组，并在开放期内纠错或作废。' : '管理会场二维码、逐人签到、现场补录和签到名单导出。'}</p></div>
+    </div>}
+    {!controlledSection && <div className="meeting-workbench-tabs"><button type="button" className={section === 'registrations' ? 'active' : ''} onClick={() => setSection('registrations')}>预约登记管理</button><button type="button" className={section === 'checkin' ? 'active' : ''} onClick={() => setSection('checkin')}>会场签到管理</button><p>{section === 'registrations' ? '查看会前预约登记组，并在开放期内纠错或作废。' : '管理会场二维码、逐人签到、现场补录和签到名单导出。'}</p></div>}
     {section === 'checkin' && <MeetingCheckinPanel invitation={invitation} projectId={projectId} canManage={canManage} canExport={canExport} />}
     {section === 'registrations' && <>
     <div className="site-access-meeting-summary">

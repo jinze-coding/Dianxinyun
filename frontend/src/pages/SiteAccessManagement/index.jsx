@@ -35,6 +35,7 @@ import GuardVisitPanel from './GuardVisitPanel';
 import { meetingQrImage, meetingScreenUrl } from './meetingScreenModel';
 import { saveMeetingScreenReturn } from './meetingScreenNavigation';
 import MeetingRegistrationPanel from './MeetingRegistrationPanel';
+import MeetingDetailPage from './MeetingDetailPage';
 import {
   createSiteAccessRequestGuard,
   normalizeInvitationStatusForType,
@@ -45,6 +46,7 @@ import './siteAccessHostPicker.css';
 import './siteAccessProfiles.css';
 import './guardVisits.css';
 import './meetingVisits.css';
+import './meetingMaterials.css';
 
 const PAGE_SIZE = 20;
 const STATUS_LABELS = {
@@ -300,6 +302,8 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [detail, setDetail] = useState(null);
+  const [meetingTab, setMeetingTab] = useState(restoredState?.detailTab || 'checkin');
+  const listScrollRef = useRef(restoredState?.scrollTop || 0);
   const [qrCode, setQrCode] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportFilters, setExportFilters] = useState(null);
@@ -415,7 +419,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
 
   useEffect(() => {
     if (loading || !pageData.records?.length || !restoreScrollRef.current) return;
-    pageRef.current?.scrollTo({ top: restoreScrollRef.current });
+    if (!initialState?.filters?.detailId) pageRef.current?.scrollTo({ top: restoreScrollRef.current });
     restoreScrollRef.current = 0;
   }, [loading, pageData]);
 
@@ -425,7 +429,8 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
       returnContext = saveMeetingScreenReturn(window.localStorage, window.crypto.randomUUID(), {
         invitationId, projectId, userId: currentUser?.id,
         filters: { periodMode, anchorDate, customStart, customEnd, inviteType, status, keyword, keywordInput, pageNo,
-          scrollTop: pageRef.current?.scrollTop || 0 },
+          scrollTop: detail?.inviteType === 'MEETING' ? listScrollRef.current : pageRef.current?.scrollTop || 0,
+          detailId: detail?.inviteType === 'MEETING' ? detail.id : null, detailTab: meetingTab },
       });
     } catch { /* A restricted browser can still open the screen and return to its meeting's project. */ }
     window.open(meetingScreenUrl(invitationId, returnContext), '_blank', 'noopener,noreferrer');
@@ -456,7 +461,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
     }
   };
 
-  const openDetail = async (id) => {
+  const openDetail = async (id, nextTab = 'checkin', restoring = false) => {
     const requestProjectId = projectId;
     const requestTicket = invitationDetailRequestGuardRef.current.begin(requestProjectId);
     setError('');
@@ -465,6 +470,11 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
       const value = responseData(response, '外访详情加载失败');
       if (!invitationDetailRequestGuardRef.current.isCurrent(requestTicket, activeProjectIdRef.current)) return;
       if (String(value?.projectId ?? '') !== String(requestProjectId ?? '')) return;
+      if (detail?.id !== id && value.inviteType === 'MEETING') {
+        if (!restoring) listScrollRef.current = pageRef.current?.scrollTop || 0;
+        setMeetingTab(nextTab);
+        pageRef.current?.scrollTo({ top: 0 });
+      }
       setDetail(value);
     } catch (detailError) {
       if (invitationDetailRequestGuardRef.current.isCurrent(requestTicket, activeProjectIdRef.current)) {
@@ -472,6 +482,12 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
       }
     }
   };
+
+  useEffect(() => {
+    if (initialState?.projectId === Number(projectId) && initialState?.filters?.detailId) {
+      void openDetail(initialState.filters.detailId, initialState.filters.detailTab || 'checkin', true);
+    }
+  }, [initialState, projectId]);
 
   const openEdit = async (id) => {
     const requestProjectId = projectId;
@@ -575,8 +591,9 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
       setNotice(created
         ? (saved.inviteType === 'MEETING' ? '会议邀请已创建，请转发共享会议小程序码' : '邀请已创建，请转发专属小程序码')
         : '外访信息已保存并记录审计');
-      await load(1);
-      if (created) await showQr(saved.id);
+      await load(created ? 1 : pageNo);
+      if (saved.inviteType === 'MEETING' && (created || detail?.id === saved.id)) await openDetail(saved.id, created ? 'materials' : meetingTab);
+      else if (created) await showQr(saved.id);
     } catch (saveError) {
       if (invitationMutationRequestGuardRef.current.isCurrent(requestTicket, activeProjectIdRef.current)) {
         setError(saveError.message || '保存失败');
@@ -788,6 +805,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
 
   return (
     <div className="site-access-page" ref={pageRef} data-release-marker={WEB_RELEASE_MARKER} style={{ '--sa-accent': T.accent, '--sa-border': T.borderColor, '--sa-card': T.cardBg, '--sa-page': T.pageBg, '--sa-text': T.textPrimary, '--sa-secondary': T.textSecondary, '--sa-muted': T.textMuted }}>
+      <div hidden={detail?.inviteType === 'MEETING'}>
       <section className="site-access-title-card">
         <div>
           <h1>场内管理</h1>
@@ -900,6 +918,14 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
         canExport={canExport}
         onOpenProfiles={openProfiles}
       />}
+      </div>
+      {detail?.inviteType === 'MEETING' && <MeetingDetailPage invitation={detail} projectId={projectId} currentUser={currentUser}
+        canManage={canManage} canExport={canExport} canDelete={isPlatformAdmin(currentUser)} active={isInvitationActive(detail, clockNow)}
+        statusLabel={STATUS_LABELS[effectiveInvitationStatus(detail, clockNow)]} tab={meetingTab} onTabChange={setMeetingTab}
+        onBack={() => { setDetail(null); window.requestAnimationFrame(() => pageRef.current?.scrollTo({ top: listScrollRef.current })); }}
+        onQr={(checkin) => showQr(detail.id, checkin)} onEdit={() => openEdit(detail.id)} onScreen={() => openMeetingScreen(detail.id)}
+        onChanged={async () => { await load(pageNo); await openDetail(detail.id, meetingTab); }} />}
+      {detail?.inviteType === 'MEETING' && error && <div className="site-access-error" role="alert">{error}</div>}
 
       {exportFilters && <Modal title="筛选并导出登记人员" onClose={() => !exporting && setExportFilters(null)} width={620}>
         <div className="site-access-export-form">
@@ -1016,7 +1042,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
         <div className="site-access-modal-actions"><button type="button" onClick={() => setEditing(null)}>取消</button><button className="primary" type="button" disabled={saving} onClick={save}>{saving ? '保存中...' : '保存'}</button></div>
       </Modal>}
 
-      {detail && <div className="site-access-drawer-mask" onMouseDown={() => setDetail(null)}><aside className="site-access-drawer site-access-visitor-drawer" onMouseDown={(event) => event.stopPropagation()}>
+      {detail && detail.inviteType !== 'MEETING' && <div className="site-access-drawer-mask" onMouseDown={() => setDetail(null)}><aside className="site-access-drawer site-access-visitor-drawer" onMouseDown={(event) => event.stopPropagation()}>
         <div className="site-access-modal-head"><div><strong>{detail.inviteNo}</strong><span className={`site-access-invite-type ${String(detail.inviteType || 'SINGLE').toLowerCase()}`}>{detail.inviteType === 'MEETING' ? '会议邀请' : '单次预约'}</span><span className={`site-access-status ${String(effectiveInvitationStatus(detail, clockNow) || '').toLowerCase()}`}>{STATUS_LABELS[effectiveInvitationStatus(detail, clockNow)] || effectiveInvitationStatus(detail, clockNow)}</span></div><button type="button" onClick={() => setDetail(null)}>×</button></div>
         <div className="site-access-detail-grid">
           {(detail.inviteType === 'MEETING' ? [
