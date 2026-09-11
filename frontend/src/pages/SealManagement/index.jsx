@@ -771,7 +771,7 @@ export default function SealManagementPage({
         startDate: customRange ? (appliedFilters.startDate || undefined) : undefined,
         endDate: customRange ? (appliedFilters.endDate || undefined) : undefined,
       });
-      saveBlob(blob, `用印台账-${projectName}-${appliedFilters.startDate || '全部'}-${appliedFilters.endDate || '全部'}.xlsx`);
+      saveBlob(blob, `用印台账-${projectName}-${appliedFilters.startDate || '全部'}-${appliedFilters.endDate || '全部'}.docx`);
       setNotice('用印台账已生成');
     } catch (exportError) {
       setError(errorText(exportError, '用印台账导出失败'));
@@ -795,9 +795,9 @@ export default function SealManagementPage({
   return (
     <div className="seal-page" style={variables}>
       <section className="seal-page-head">
-        <div><span>{projectName}</span><h1>{mode === 'ledger' ? '用印台账' : '用印申请'}</h1><p>{mode === 'ledger' ? '查询已审批申请、盖章件和资料归档结果，并按审批完成时间导出 Excel。' : '申请人、审批人和抄送人通过同一申请详情协同，审批权限按管理员直接配置的用户执行。'}</p></div>
+        <div><span>{projectName}</span><h1>{mode === 'ledger' ? '用印台账' : '用印申请'}</h1><p>{mode === 'ledger' ? '查询已审批申请、盖章件和资料归档结果，并按审批完成时间导出 Word 台账。' : '申请人、审批人和抄送人通过同一申请详情协同，审批权限按管理员直接配置的用户执行。'}</p></div>
         <div className="seal-head-actions">
-          {mode === 'ledger' && <button className="primary" disabled={!canExport || busy} title={!canExport ? '没有用印台账导出权限' : ''} onClick={exportLedger}>导出 Excel 台账</button>}
+          {mode === 'ledger' && <button className="primary" disabled={!canExport || busy} title={!canExport ? '没有用印台账导出权限' : ''} onClick={exportLedger}>导出 Word 台账</button>}
           <button onClick={refreshAll} disabled={loading}>刷新</button>
         </div>
       </section>

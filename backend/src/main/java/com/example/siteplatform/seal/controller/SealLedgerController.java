@@ -2,6 +2,7 @@ package com.example.siteplatform.seal.controller;
 
 import com.example.siteplatform.auth.service.AuthService;
 import com.example.siteplatform.seal.service.SealLedgerService;
+import com.example.siteplatform.seal.service.SealLedgerWordRenderer;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ContentDisposition;
@@ -43,11 +44,12 @@ public class SealLedgerController {
                 keyword, status,
                 authService.getCurrentUser(token), request);
         return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .contentType(MediaType.parseMediaType(SealLedgerWordRenderer.CONTENT_TYPE))
                 .contentLength(export.content().length)
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
                         .filename(export.fileName(), StandardCharsets.UTF_8).build().toString())
                 .header("X-Content-Type-Options", "nosniff")
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
                 .body(export.content());
     }
 }

@@ -8,193 +8,134 @@ import com.example.siteplatform.common.BusinessException;
 import com.example.siteplatform.log.mapper.OperationLogMapper;
 import com.example.siteplatform.project.service.ProjectPermissionService;
 import com.example.siteplatform.seal.entity.SealApplication;
-import com.example.siteplatform.seal.entity.SealApplicationFile;
 import com.example.siteplatform.seal.entity.SealApplicationItem;
-import com.example.siteplatform.seal.mapper.SealApplicationFileMapper;
 import com.example.siteplatform.seal.mapper.SealApplicationItemMapper;
 import com.example.siteplatform.seal.mapper.SealApplicationMapper;
 import com.example.siteplatform.system.constant.SystemPermissionCodes;
-import com.example.siteplatform.workflow.entity.WorkflowCcRecipient;
-import com.example.siteplatform.workflow.mapper.WorkflowCcRecipientMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
-import org.mockito.ArgumentCaptor;
-import org.apache.poi.ss.usermodel.CellType;
-import org.apache.poi.ss.usermodel.PrintSetup;
-import org.apache.poi.xssf.usermodel.XSSFSheet;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 
-import java.io.ByteArrayInputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 class SealLedgerServiceTest {
+    private final SealApplicationMapper applications = mock(SealApplicationMapper.class);
+    private final SealApplicationItemMapper items = mock(SealApplicationItemMapper.class);
+    private final OperationLogMapper logs = mock(OperationLogMapper.class);
+    private final ProjectPermissionService permissions = mock(ProjectPermissionService.class);
+    private final SealLedgerWordRenderer renderer = mock(SealLedgerWordRenderer.class);
+    private final SealLedgerService service = new SealLedgerService(applications, items, logs, permissions, renderer);
+    private final SysUser user = new SysUser();
 
-    @Test
-    void workbookHasTwoAuditableSheetsAndNeutralizesFormulaText() throws Exception {
-        SealLedgerService service = new SealLedgerService(null, null, null, null, null, null, null);
-        SealApplication application = application();
-        SealApplicationItem item = new SealApplicationItem();
-        item.setApplicationId(42L);
-        item.setDocumentName("专项施工方案");
-        item.setCopies(3);
-        WorkflowCcRecipient recipient = new WorkflowCcRecipient();
-        recipient.setBusinessId(42L);
-        recipient.setUserName("抄送人王五");
-        SealApplicationFile file = new SealApplicationFile();
-        file.setApplicationId(42L);
-        file.setFileRole("STAMPED_RESULT");
-        file.setArchivedDocumentId(501L);
-        file.setArchivedVersionId(601L);
-        byte[] bytes = service.buildWorkbook(List.of(application),
-                new LedgerDateRange(LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31)),
-                Map.of(42L, List.of(item)), Map.of(42L, List.of(recipient)), Map.of(42L, List.of(file)));
-
-        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
-            assertEquals(List.of("用印台账", "文件明细"),
-                    java.util.stream.IntStream.range(0, workbook.getNumberOfSheets())
-                            .mapToObj(workbook::getSheetName).toList());
-            XSSFSheet ledger = workbook.getSheetAt(0);
-            XSSFSheet detail = workbook.getSheetAt(1);
-            assertTrue(ledger.getPaneInformation().isFreezePane());
-            assertTrue(detail.getPaneInformation().isFreezePane());
-            assertTrue(ledger.getCTWorksheet().isSetAutoFilter());
-            assertTrue(detail.getCTWorksheet().isSetAutoFilter());
-            assertNotNull(workbook.getPrintArea(0));
-            assertNotNull(workbook.getPrintArea(1));
-            assertEquals(PrintSetup.A3_PAPERSIZE, ledger.getPrintSetup().getPaperSize());
-            assertEquals(2, ledger.getPrintSetup().getFitWidth());
-            assertEquals(1, detail.getPrintSetup().getFitWidth());
-            assertTrue(ledger.getRow(0).getCell(0).getCellStyle().getWrapText());
-            assertNotNull(ledger.getRepeatingColumns());
-            assertNotNull(detail.getRepeatingColumns());
-            assertEquals(CellType.STRING, ledger.getRow(1).getCell(7).getCellType());
-            assertEquals("'=SUM(1,1)", ledger.getRow(1).getCell(7).getStringCellValue());
-            assertEquals("抄送人王五", ledger.getRow(1).getCell(12).getStringCellValue());
-            assertEquals("已上传 1 份", ledger.getRow(1).getCell(15).getStringCellValue());
-            assertTrue(ledger.getRow(1).getCell(16).getStringCellValue().contains("资料501-版本601"));
-            assertEquals("Microsoft YaHei", ledger.getRow(0).getCell(0).getCellStyle().getFont().getFontName());
-        }
-
-        Path artifact = Path.of("target", "test-artifacts", "seal-ledger-sample.xlsx");
-        Files.createDirectories(artifact.getParent());
-        Files.write(artifact, bytes);
+    @BeforeEach
+    void metadata() {
+        var assistant = new MapperBuilderAssistant(new MybatisConfiguration(), SealApplicationMapper.class.getName());
+        TableInfoHelper.initTableInfo(assistant, SealApplication.class);
+        TableInfoHelper.initTableInfo(assistant, SealApplicationItem.class);
+        user.setId(7L);
+        user.setUsername("ledger_exporter");
     }
 
     @Test
-    void missingStampedFilesDistinguishOptionalUploadFromApprovalRequirement() throws Exception {
-        SealLedgerService service = new SealLedgerService(null, null, null, null, null, null, null);
-        for (boolean required : new boolean[]{false, true}) {
-            SealApplication application = application();
-            application.setStampedResultRequired(required);
-            byte[] bytes = service.buildWorkbook(List.of(application),
-                    new LedgerDateRange(LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31)),
-                    Map.of(), Map.of(), Map.of());
-            try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
-                assertEquals(required ? "待上传（审批要求）" : "按需上传（未上传）",
-                        workbook.getSheetAt(0).getRow(1).getCell(15).getStringCellValue());
-            }
-        }
-    }
-
-    @Test
-    void safeCellTextProtectsAllSpreadsheetFormulaPrefixes() {
-        assertEquals("'=1+1", SealLedgerService.safeCellText("=1+1"));
-        assertEquals("'+cmd", SealLedgerService.safeCellText("+cmd"));
-        assertEquals("'-2", SealLedgerService.safeCellText("-2"));
-        assertEquals("'@SUM(A1)", SealLedgerService.safeCellText("@SUM(A1)"));
-        assertEquals("'   =1+1", SealLedgerService.safeCellText("   =1+1"));
-        assertEquals("'\t@SUM(A1)", SealLedgerService.safeCellText("\t@SUM(A1)"));
-        assertEquals("normal", SealLedgerService.safeCellText("normal"));
-    }
-
-    @Test
-    void exportUsesApprovedStatusAndHalfOpenApprovalTimeDayBoundary() {
-        TableInfoHelper.initTableInfo(
-                new MapperBuilderAssistant(new MybatisConfiguration(), SealApplicationMapper.class.getName()),
-                SealApplication.class);
-        SealApplicationMapper applicationMapper = mock(SealApplicationMapper.class);
-        SealApplicationItemMapper itemMapper = mock(SealApplicationItemMapper.class);
-        SealApplicationFileMapper fileMapper = mock(SealApplicationFileMapper.class);
-        WorkflowCcRecipientMapper ccMapper = mock(WorkflowCcRecipientMapper.class);
-        OperationLogMapper operationLogMapper = mock(OperationLogMapper.class);
-        ProjectPermissionService permissionService = mock(ProjectPermissionService.class);
-        SealLedgerService service = new SealLedgerService(applicationMapper, itemMapper, fileMapper, ccMapper,
-                operationLogMapper, permissionService, null);
-        when(applicationMapper.selectList(any())).thenReturn(List.of());
-        when(operationLogMapper.insert(any())).thenReturn(1);
-        SysUser operator = new SysUser();
-        operator.setId(7L);
-        operator.setUsername("ledger_exporter");
-
-        var export = service.export(9L, "DAY", LocalDate.of(2026, 8, 8), null, null,
-                null, null, operator, null);
-
-        @SuppressWarnings("rawtypes")
-        ArgumentCaptor<LambdaQueryWrapper> query = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
-        verify(applicationMapper).selectList(query.capture());
-        String sql = query.getValue().getSqlSegment().toLowerCase();
-        assertTrue(sql.contains("status"));
-        assertTrue(sql.contains("approval_time"));
-        assertTrue(sql.contains("approval_time <"));
-        assertTrue(query.getValue().getParamNameValuePairs().containsValue(SealApplicationService.APPROVED));
-        assertTrue(query.getValue().getParamNameValuePairs()
-                .containsValue(LocalDateTime.of(2026, 8, 8, 0, 0)));
-        assertTrue(query.getValue().getParamNameValuePairs()
-                .containsValue(LocalDateTime.of(2026, 8, 9, 0, 0)));
-        assertEquals(LocalDate.of(2026, 8, 8), export.range().startDate());
-        assertEquals(LocalDate.of(2026, 8, 8), export.range().endDate());
-        verify(permissionService).checkProjectPermission(7L, 9L);
-        verify(permissionService).requireSystemPermission(7L, 9L, SystemPermissionCodes.SEAL_EXPORT);
-        verify(operationLogMapper).insert(any());
-    }
-
-    @Test
-    void exportRejectsNonApprovedStatusBeforeQueryingLedgerRows() {
-        SealApplicationMapper applicationMapper = mock(SealApplicationMapper.class);
-        ProjectPermissionService permissionService = mock(ProjectPermissionService.class);
-        SealLedgerService service = new SealLedgerService(applicationMapper, mock(SealApplicationItemMapper.class),
-                mock(SealApplicationFileMapper.class), mock(WorkflowCcRecipientMapper.class),
-                mock(OperationLogMapper.class), permissionService, null);
-        SysUser operator = new SysUser();
-        operator.setId(7L);
-
-        BusinessException error = assertThrows(BusinessException.class,
-                () -> service.export(9L, "DAY", LocalDate.of(2026, 8, 8), null, null,
-                        null, "REJECTED", operator, null));
-
-        assertTrue(error.getMessage().contains("仅导出审批通过记录"));
-        verify(applicationMapper, never()).selectList(any());
-    }
-
-    private SealApplication application() {
-        SealApplication application = new SealApplication();
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void exportRetainsProjectKeywordAndApprovalDayFiltersAndStableDetailOrder() {
+        var application = new SealApplication();
         application.setId(42L);
-        application.setApplicationNo("YYSQ-20260808-00000042");
-        application.setApplicationDate(LocalDate.of(2026, 8, 8));
-        application.setApprovalTime(LocalDateTime.of(2026, 8, 8, 14, 30));
-        application.setDepartmentName("智慧营造演示项目");
-        application.setCompanyName("上海建工智慧营造有限公司");
-        application.setSealName("项目章");
-        application.setPurpose("=SUM(1,1)");
-        application.setApplicantName("张三");
-        application.setApplicantPhone("19900000000");
-        application.setApproverName("李四");
-        application.setApprovalOpinion("同意");
-        return application;
+        var first = new SealApplicationItem();
+        first.setApplicationId(42L);
+        first.setDocumentName("第一份文件");
+        var second = new SealApplicationItem();
+        second.setApplicationId(42L);
+        second.setDocumentName("第二份文件");
+        when(applications.selectList(any())).thenReturn(List.of(application));
+        when(items.selectList(any())).thenReturn(List.of(first, second));
+        when(renderer.render(anyList(), anyMap())).thenReturn(new byte[]{80, 75});
+        when(logs.insert(any())).thenReturn(1);
+
+        var export = export("APPROVED", "  合同  ");
+        ArgumentCaptor<LambdaQueryWrapper> query = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(applications).selectList(query.capture());
+        String sql = query.getValue().getSqlSegment().toLowerCase();
+        assertTrue(sql.contains("project_id"));
+        assertTrue(sql.contains("status"));
+        assertTrue(sql.contains("approval_time <"));
+        assertTrue(sql.contains("order by approval_time asc,application_no asc,id asc"));
+        assertTrue(sql.contains("limit 10001"));
+        assertTrue(query.getValue().getParamNameValuePairs().containsValue(9L));
+        assertTrue(query.getValue().getParamNameValuePairs().containsValue("APPROVED"));
+        assertTrue(query.getValue().getParamNameValuePairs().containsValue("%合同%"));
+        assertTrue(query.getValue().getParamNameValuePairs().containsValue(LocalDateTime.of(2026, 9, 11, 0, 0)));
+        assertTrue(query.getValue().getParamNameValuePairs().containsValue(LocalDateTime.of(2026, 9, 12, 0, 0)));
+        ArgumentCaptor<LambdaQueryWrapper> detailQuery = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(items).selectList(detailQuery.capture());
+        assertTrue(detailQuery.getValue().getSqlSegment().toLowerCase()
+                .contains("order by application_id asc,sort_order asc,id asc"));
+        verify(renderer).render(List.of(application), java.util.Map.of(42L, List.of(first, second)));
+        verify(permissions).checkProjectPermission(7L, 9L);
+        verify(permissions).requireSystemPermission(7L, 9L, SystemPermissionCodes.SEAL_EXPORT);
+        verify(logs).insert(any());
+        assertEquals("用印台账_2026-09-11_2026-09-11.docx", export.fileName());
+        assertArrayEquals(new byte[]{80, 75}, export.content());
+    }
+
+    @Test
+    void noMatchesSkipsItemQueryAndRendersEmptyLedger() {
+        when(applications.selectList(any())).thenReturn(List.of());
+        when(renderer.render(anyList(), anyMap())).thenReturn(new byte[]{80, 75});
+        when(logs.insert(any())).thenReturn(1);
+        export(null, null);
+        verifyNoInteractions(items);
+        verify(renderer).render(List.of(), java.util.Map.of());
+        verify(logs).insert(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"DRAFT", "PENDING_APPROVAL", "REJECTED", "WITHDRAWN"})
+    void nonApprovedStatusIsRejectedBeforeDataRead(String status) {
+        assertThrows(BusinessException.class, () -> export(status, null));
+        verifyNoInteractions(applications, items, renderer, logs);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void bothProjectAndExportPermissionAreRequired(boolean projectAllowed) {
+        if (projectAllowed) {
+            doThrow(BusinessException.forbidden("没有台账导出权限")).when(permissions)
+                    .requireSystemPermission(7L, 9L, SystemPermissionCodes.SEAL_EXPORT);
+        } else {
+            doThrow(BusinessException.forbidden("没有项目范围")).when(permissions).checkProjectPermission(7L, 9L);
+        }
+        assertThrows(BusinessException.class, () -> export(null, null));
+        verifyNoInteractions(applications, items, renderer, logs);
+    }
+
+    @Test
+    void applicationLimitIsEnforcedBeforeLoadingDetailsOrCreatingDocument() {
+        when(applications.selectList(any())).thenReturn(Collections.nCopies(10_001, new SealApplication()));
+        var error = assertThrows(BusinessException.class, () -> export(null, null));
+        assertTrue(error.getMessage().contains("10000"));
+        verifyNoInteractions(items, renderer, logs);
+    }
+
+    @Test
+    void auditWriteFailureDoesNotReturnAFile() {
+        when(applications.selectList(any())).thenReturn(List.of());
+        when(renderer.render(anyList(), anyMap())).thenReturn(new byte[]{80, 75});
+        when(logs.insert(any())).thenReturn(0);
+        assertThrows(BusinessException.class, () -> export(null, null));
+    }
+
+    private SealLedgerService.LedgerExport export(String status, String keyword) {
+        return service.export(9L, "DAY", LocalDate.of(2026, 9, 11), null, null, keyword, status, user, null);
     }
 }

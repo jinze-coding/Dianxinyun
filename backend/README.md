@@ -1,5 +1,13 @@
 # 电信云平台项目现场综合管理系统 - 后端
 
+## 2026-09-11 用印台账 Word 导出
+
+`GET /api/v1/seal/ledger/export` 及兼容 `/api/v1/seal/applications/export` 改为返回 DOCX。
+附件8原模板已纳入 `src/main/resources/templates/seal-ledger.docx`，由 Java 填充正文 XML，
+生成过程无需生产服务器安装 Office 或中文字体。查看/打印文件时需具备模板中文字体。
+项目范围、`seal.export`、审批日期筛选、10000 份申请限制及导出审计沿用现有规则；无数据库迁移。
+字段映射、版式与验证见 [用印台账 Word 导出](../docs/用印台账Word导出.md)。
+
 ## 2026-09-11 用印附件与审批回传要求
 
 用印提交允许没有源附件，逻辑文件明细仍必填；同意接口增加可选 `stampedResultRequired`，默认 false。
