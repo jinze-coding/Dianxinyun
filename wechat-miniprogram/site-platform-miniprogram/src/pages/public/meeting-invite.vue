@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue';
-import { onLoad, onShow, onUnload } from '@dcloudio/uni-app';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { onHide, onLoad, onPageScroll, onShow, onUnload } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
 import { useVisitorPersonalInfo } from '@/utils/visitorPersonalInfo';
 import ProjectLocationCard from '@/components/ProjectLocationCard.vue';
 import PublicMeetingMaterials from '@/components/PublicMeetingMaterials.vue';
+import MeetingServiceDialog from '@/components/MeetingServiceDialog.vue';
+import { ApiRequestError } from '@/api/request';
 import {
   createPublicMeetingVisitorSession,
   disablePublicMeetingVisitorProfile,
@@ -53,6 +55,20 @@ const routeImagePath = ref('');
 const routeImageLoading = ref(false);
 const routeImageError = ref('');
 const currentTime = ref(Date.now());
+const activePanel = ref<'navigation' | 'materials' | ''>('');
+const materialsOpened = ref(false);
+const foreground = ref(true);
+const navigationVerified = ref(false);
+const navigationError = ref('');
+const navigationScrollTarget = ref(0);
+const publicAccessDenied = ref(false);
+let navigationScrollTop = 0;
+let navigationRestoreTop: number | undefined;
+let pageScrollTop = 0;
+let returnScrollTop = 0;
+let statusEpoch = 0;
+let statusTask: Promise<void> | undefined;
+let statusTimer: ReturnType<typeof setInterval> | undefined;
 let serverOffset = 0;
 let clockTimer: ReturnType<typeof setInterval> | undefined;
 let profileRequestId = 0;
@@ -71,8 +87,22 @@ onLoad(async (options) => {
 });
 
 onShow(() => {
-  if (refreshCoordinator.shouldRefreshOnShow()) void initialize(true);
+  foreground.value = true;
+  if (refreshCoordinator.shouldRefreshOnShow()) {
+    void initialize(true).then(() => {
+      if (activePanel.value === 'navigation') void refreshPanelStatus(true);
+    });
+  }
 });
+onHide(() => {
+  if (activePanel.value === 'navigation') navigationRestoreTop = navigationScrollTop || undefined;
+  foreground.value = false;
+  navigationVerified.value = false;
+  statusEpoch += 1;
+  statusTask = undefined;
+  routeRequestId += 1;
+});
+onPageScroll((event) => { if (!activePanel.value) pageScrollTop = event.scrollTop; });
 
 const filledCompanionCount = computed(() => companions.value.filter(hasCompanionContent).length);
 const expired = computed(() => {
@@ -80,15 +110,99 @@ const expired = computed(() => {
   const end = new Date(invitation.value.visitEndTime).getTime();
   return Number.isFinite(end) && currentTime.value >= end;
 });
+const canShowNavigation = computed(() => Boolean(invitation.value?.projectLocation) && !expired.value && !publicAccessDenied.value);
+const canShowMaterials = computed(() => Boolean(token.value) && terminalState.value !== 'VOIDED' && !publicAccessDenied.value);
+
+async function restoreNavigationScroll() {
+  const target = navigationRestoreTop ?? navigationScrollTop;
+  navigationScrollTarget.value = -1;
+  await nextTick();
+  navigationScrollTarget.value = target;
+}
+
+function rememberNavigationScroll(event: { detail: { scrollTop: number } }) {
+  // 原生大图/地图返回时会暂时卸载地图，忽略内容收缩造成的归零事件。
+  if (foreground.value && navigationVerified.value && !routeImageLoading.value) {
+    // widthFix 图片尚未完成布局时，原生滚动位置会被临时夹到较小值；保留恢复目标直到实际到达。
+    if (navigationRestoreTop !== undefined && Math.abs(event.detail.scrollTop - navigationRestoreTop) > 2) return;
+    navigationRestoreTop = undefined;
+    navigationScrollTop = event.detail.scrollTop;
+  }
+}
+
+function openPanel(panel: 'navigation' | 'materials') {
+  if (panel === 'navigation' ? !canShowNavigation.value : !canShowMaterials.value) return;
+  uni.hideKeyboard();
+  if (!activePanel.value) returnScrollTop = pageScrollTop;
+  activePanel.value = panel;
+  if (panel === 'materials') materialsOpened.value = true;
+  else { navigationRestoreTop = navigationScrollTop || undefined; navigationVerified.value = false; navigationError.value = ''; }
+  void refreshPanelStatus(panel === 'navigation');
+}
+
+async function closePanel() {
+  if (!activePanel.value) return;
+  activePanel.value = '';
+  navigationVerified.value = false;
+  statusEpoch += 1;
+  statusTask = undefined;
+  routeRequestId += 1;
+  await nextTick();
+  if (!activePanel.value) uni.pageScrollTo({ scrollTop: returnScrollTop, duration: 0 });
+}
+
+function refreshPanelStatus(reloadRoute = false): Promise<void> {
+  if (!activePanel.value || !foreground.value) return Promise.resolve();
+  if (statusTask) return statusTask;
+  const ticket = statusEpoch;
+  let pending: Promise<void>;
+  pending = resolvePublicSiteVisit(token.value).then(async (current) => {
+    if (ticket !== statusEpoch || !foreground.value || !activePanel.value) return;
+    invitation.value = current;
+    syncClock(current.serverTime);
+    if (current.status === 'EXPIRED' || current.status === 'VOIDED') {
+      enterTerminalState(current.status);
+      return;
+    }
+    if (activePanel.value === 'navigation') {
+      navigationVerified.value = Boolean(current.projectLocation);
+      navigationError.value = current.projectLocation ? '' : '项目暂未提供访客导航';
+      if (reloadRoute) await loadRouteImage();
+      if (ticket === statusEpoch) void restoreNavigationScroll();
+    }
+  }).catch((error: unknown) => {
+    if (ticket !== statusEpoch || !foreground.value || !activePanel.value) return;
+    navigationVerified.value = false;
+    navigationError.value = error instanceof Error ? error.message : '会议状态核验失败，请重试';
+    if (error instanceof ApiRequestError && [400, 401, 403, 404, 410].includes(error.statusCode || error.code || 0)) {
+      publicAccessDenied.value = true;
+      errorMessage.value = navigationError.value;
+      clearRouteImage();
+      void closePanel();
+    }
+  }).finally(() => { if (statusTask === pending) statusTask = undefined; });
+  statusTask = pending;
+  return pending;
+}
+
+watch([activePanel, foreground], ([panel, shown]) => {
+  if (statusTimer) clearInterval(statusTimer);
+  statusTimer = undefined;
+  if (panel && shown) statusTimer = setInterval(() => { void refreshPanelStatus(); }, 30000);
+});
+watch(expired, (value) => {
+  if (!value) return;
+  clearRouteImage();
+  if (activePanel.value === 'navigation') void closePanel();
+}, { flush: 'sync' });
 
 async function initialize(keepForm: boolean) {
   await refreshCoordinator.run(() => performInitialize(keepForm));
 }
 
 async function performInitialize(keepForm: boolean) {
-  loading.value = true;
+  if (!keepForm || !invitation.value) loading.value = true;
   errorMessage.value = '';
-  terminalState.value = '';
   if (!token.value) {
     errorMessage.value = '会议邀请码无效';
     loading.value = false;
@@ -96,6 +210,7 @@ async function performInitialize(keepForm: boolean) {
   }
   try {
     const publicInvitation = await resolvePublicSiteVisit(token.value);
+    publicAccessDenied.value = false;
     invitation.value = publicInvitation;
     syncClock(publicInvitation.serverTime);
     startClock();
@@ -110,7 +225,6 @@ async function performInitialize(keepForm: boolean) {
     invitation.value = session.invitation;
     pass.value = session.registration;
     syncClock(session.registration?.serverTime || session.invitation.serverTime);
-    await loadRouteImage();
     if (session.pageState === 'FORM') {
       if (!keepForm) pass.value = undefined;
       void loadProfiles();
@@ -239,13 +353,14 @@ async function submit() {
 }
 
 async function loadRouteImage() {
+  if (activePanel.value !== 'navigation' || !foreground.value) return;
   if (!invitation.value?.projectLocation?.routeImageAvailable || expired.value) return clearRouteImage();
   const requestId = ++routeRequestId;
   routeImageLoading.value = true;
   routeImageError.value = '';
   try {
     const path = await downloadPublicProjectRouteImage(token.value);
-    if (requestId !== routeRequestId) return removePublicProjectRouteImage(path);
+    if (requestId !== routeRequestId || activePanel.value !== 'navigation' || !foreground.value || expired.value) return removePublicProjectRouteImage(path);
     removePublicProjectRouteImage(routeImagePath.value);
     routeImagePath.value = path;
   } catch {
@@ -268,6 +383,7 @@ function enterTerminalState(state: 'EXPIRED' | 'VOIDED') {
   visitorSessionToken.value = '';
   pass.value = undefined;
   clearRouteImage();
+  if (state === 'VOIDED' || activePanel.value === 'navigation') void closePanel();
 }
 
 function clearForm() {
@@ -321,10 +437,15 @@ function profileSaveChange(event: { detail: { value: string[] } }) {
 function cleanup() {
   if (clockTimer) clearInterval(clockTimer);
   clockTimer = undefined;
+  if (statusTimer) clearInterval(statusTimer);
+  statusTimer = undefined;
+  statusEpoch += 1;
+  statusTask = undefined;
   clearRouteImage();
 }
 
 function goBack() {
+  if (activePanel.value) { void closePanel(); return; }
   if (getCurrentPages().length > 1) uni.navigateBack();
   else uni.exitMiniProgram();
 }
@@ -333,12 +454,13 @@ onBeforeUnmount(cleanup);
 </script>
 
 <template>
+  <page-meta :page-style="activePanel ? 'overflow: hidden;' : ''" />
   <view class="meeting-shell">
     <AppNavBar title="会议访客登记" @back="goBack" />
     <view class="meeting-content">
     <view v-if="loading" class="meeting-card state-card"><text>正在识别微信身份...</text><text>确认登记状态后再显示页面</text></view>
     <view v-else-if="errorMessage" class="meeting-card state-card error"><text>{{ errorMessage }}</text><button @tap="initialize(true)">重新识别</button></view>
-    <view v-else-if="terminalState || expired" class="meeting-card state-card expired"><text class="state-mark">!</text><text class="state-title">{{ terminalState === 'VOIDED' ? '会议邀请已作废' : '会议已结束' }}</text><text>{{ terminalState === 'VOIDED' ? '预约、放行、签到及资料对外访问已关闭。' : '预约、放行和签到已结束，公开会议资料可继续在下方查看。' }}</text></view>
+    <view v-else-if="terminalState || expired" class="meeting-card state-card expired"><text class="state-mark">!</text><text class="state-title">{{ terminalState === 'VOIDED' ? '会议邀请已作废' : '会议已结束' }}</text><text>{{ terminalState === 'VOIDED' ? '预约、放行、签到及资料对外访问已关闭。' : '预约、放行和签到已结束，可点击“会议资料”查看公开资料。' }}</text></view>
     <template v-else-if="invitation">
       <view class="meeting-card invite-card">
         <view class="invite-top">
@@ -352,7 +474,14 @@ onBeforeUnmount(cleanup);
           <text>接待人</text><text>{{ invitation.hostName }} {{ invitation.hostPhone || '' }}</text>
         </view>
       </view>
+    </template>
 
+    <view v-if="canShowMaterials" class="meeting-services">
+      <button v-if="canShowNavigation" class="meeting-service-button" @tap="openPanel('navigation')">访客导航 <text class="meeting-service-arrow">›</text></button>
+      <button class="meeting-service-button" @tap="openPanel('materials')">会议资料 <text class="meeting-service-arrow">›</text></button>
+    </view>
+
+    <template v-if="!loading && !errorMessage && !expired && invitation">
       <view v-if="pass" class="meeting-card pass-card"><text class="pass-check">✓</text><text class="pass-label">已完成预约登记</text><text class="pass-project">{{ pass.projectShortName || pass.projectName }}</text><view class="pass-current"><text>当前时间</text><text>{{ formatTime(currentTime, true) }}</text></view><view class="invite-grid"><text>登记编号</text><text>{{ pass.registrationNo }}</text><text>单位</text><text>{{ pass.visitorCompany }}</text><text>姓名</text><text>{{ pass.contactName }}</text><text>来访人数</text><text>{{ pass.visitorCount }} 人</text><text>车辆</text><text>{{ pass.travelMode === 'DRIVING' ? (pass.vehiclePlate || '驾车') : '非驾车' }}</text><text>登记时间</text><text>{{ formatTime(pass.registeredTime) }}</text><text>有效截止</text><text>{{ formatTime(pass.validUntil) }}</text></view><view class="pass-people"><text class="pass-people-title">本次登记人员</text><view v-for="(person, index) in pass.visitors" :key="`${person.personType}-${index}`" class="pass-person"><text>{{ person.personType === 'CONTACT' ? '本人' : `同行${index}` }}</text><text>{{ person.personName || '未填写姓名' }}{{ person.personCompany ? ` · ${person.personCompany}` : '' }}</text></view></view><text class="pass-hint">已完成预约，到场后请扫描会场签到码，并逐人确认实际到场人员。</text></view>
 
       <template v-else>
@@ -405,12 +534,30 @@ onBeforeUnmount(cleanup);
         </view>
       </template>
 
-      <ProjectLocationCard v-if="invitation.projectLocation" :location="invitation.projectLocation" :project-name="invitation.projectShortName || invitation.projectName" map-id="meeting-project-map" :route-image-path="routeImagePath" :route-image-loading="routeImageLoading" :route-image-error="routeImageError" />
     </template>
-    <PublicMeetingMaterials v-if="token && terminalState !== 'VOIDED'" :invite-token="token" />
     </view>
+    <MeetingServiceDialog :visible="activePanel === 'navigation'" title="访客导航" @close="closePanel">
+      <scroll-view class="meeting-navigation-scroll" scroll-y :scroll-top="navigationScrollTarget" @scroll="rememberNavigationScroll" @touchstart="navigationRestoreTop = undefined" @touchmove.stop>
+        <view class="meeting-navigation-content">
+          <view v-if="navigationError" class="meeting-navigation-state"><text>{{ navigationError }}</text><button class="meeting-service-button" @tap="refreshPanelStatus(true)">重新加载</button></view>
+          <ProjectLocationCard v-else-if="foreground && navigationVerified && canShowNavigation && invitation?.projectLocation" :location="invitation.projectLocation" :project-name="invitation.projectShortName || invitation.projectName" map-id="meeting-project-map" :route-image-path="routeImagePath" :route-image-loading="routeImageLoading" :route-image-error="routeImageError" embedded @route-image-loaded="restoreNavigationScroll" />
+          <view v-else class="meeting-navigation-state">正在核验会议及导航信息…</view>
+        </view>
+      </scroll-view>
+    </MeetingServiceDialog>
+    <PublicMeetingMaterials v-if="materialsOpened && canShowMaterials" :visible="activePanel === 'materials'" :invite-token="token" @close="closePanel" @revalidate="refreshPanelStatus()" />
   </view>
 </template>
+
+<style scoped>
+.meeting-services{display:flex;gap:20rpx}
+.meeting-service-button{flex:1;display:flex;align-items:center;justify-content:center;gap:20rpx;min-height:84rpx;line-height:1.5;margin:0;padding:16rpx 20rpx;border-radius:16rpx;background:#edf5ff;color:var(--workspace-accent-deep,#315f86);font-size:28rpx;font-weight:700}
+.meeting-service-button::after{border:1rpx solid #d6e7f7;border-radius:16rpx}
+.meeting-service-arrow{font-size:38rpx;line-height:1;font-weight:400}
+.meeting-navigation-scroll{height:100%;width:100%}
+.meeting-navigation-content{padding:26rpx}
+.meeting-navigation-state{display:flex;flex-direction:column;gap:24rpx;padding:40rpx 0;color:#617086;font-size:26rpx;line-height:1.7;word-break:break-word}
+</style>
 
 <style scoped>
 .meeting-shell{min-height:100vh;background:#f3f6fa;color:#172033;padding-bottom:40rpx}.meeting-card{margin:24rpx;border-radius:22rpx;background:#fff;padding:28rpx;box-shadow:0 8rpx 28rpx rgba(24,48,68,.08)}.state-card{min-height:300rpx;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:20rpx;text-align:center;color:#617086}.state-card.error{color:#b42318}.state-card.expired{color:#7a4f12}.state-mark,.pass-check{display:flex;width:92rpx;height:92rpx;border-radius:50%;align-items:center;justify-content:center;background:#fff1d6;font-size:52rpx;font-weight:800}.state-title,.pass-label{font-size:38rpx;font-weight:800}.invite-card{background:linear-gradient(135deg,#132e48,#1f5277);color:#fff}.invite-top,.section-head,.companion-head,.pass-current{display:flex;justify-content:space-between;align-items:center}.invite-top{font-size:22rpx;opacity:.78}.invite-title{display:block;font-size:38rpx;font-weight:800;margin:24rpx 0}.invite-grid{display:grid;grid-template-columns:150rpx 1fr;gap:18rpx 16rpx;font-size:26rpx}.invite-grid>text:nth-child(odd){color:#8290a0}.invite-card .invite-grid>text:nth-child(odd){color:rgba(255,255,255,.65)}.pass-card{text-align:center;border:2rpx solid #8ed2a7}.pass-check{margin:0 auto;background:#e6f8ec;color:#15803d}.pass-label{display:block;color:#15803d;margin:18rpx 0}.pass-project{display:block;font-size:30rpx;font-weight:700;margin-bottom:20rpx}.pass-current{background:#effbf3;padding:18rpx;border-radius:14rpx;margin-bottom:20rpx}.pass-card .invite-grid{text-align:left}.pass-people{margin-top:24rpx;padding-top:20rpx;border-top:2rpx solid #e7efe9;text-align:left}.pass-people-title{display:block;margin-bottom:12rpx;font-weight:700}.pass-person{display:grid;grid-template-columns:120rpx 1fr;gap:12rpx;padding:10rpx 0;font-size:25rpx}.pass-person>text:first-child{color:#708079}.pass-hint{display:block;margin-top:22rpx;color:#607263;font-size:24rpx}.section-head{font-size:30rpx;font-weight:700;margin-bottom:22rpx}.notice{display:block;color:#86621f;font-size:24rpx}.profile-list{white-space:nowrap}.profile-row{display:flex;gap:16rpx}.profile-item{display:inline-flex;vertical-align:top;flex-direction:column;gap:10rpx;width:390rpx;border:2rpx solid #dbe3eb;border-radius:16rpx;padding:20rpx;white-space:normal}.profile-item.selected{border-color:#1677c8;background:#eff8ff}.form-card label>text{display:block;margin:20rpx 0 10rpx;color:#506071;font-size:25rpx}.form-card input,.form-card textarea{box-sizing:border-box;width:100%;border:2rpx solid #dbe3eb;border-radius:12rpx;padding:18rpx;background:#fafcfe}.form-card textarea{height:150rpx}.two-columns{display:grid;grid-template-columns:1fr 1fr;gap:16rpx}.companion-head{margin:28rpx 0 10rpx}.companion-card{display:grid;grid-template-columns:1fr 1fr;gap:12rpx;border:2rpx solid #e4eaf0;border-radius:14rpx;padding:14rpx;margin-bottom:14rpx}.companion-card input:first-child{grid-column:1/3}.travel-tabs{display:flex;gap:16rpx;margin:24rpx 0}.travel-tabs button{flex:1;background:#f0f4f8}.travel-tabs button.active{background:#1677c8;color:#fff}.save-profile{display:block;margin:20rpx 0}.privacy{display:flex;align-items:flex-start;font-size:24rpx;color:#5d6875}.submit-button{margin-top:28rpx;background:#1677c8;color:#fff;font-weight:700}

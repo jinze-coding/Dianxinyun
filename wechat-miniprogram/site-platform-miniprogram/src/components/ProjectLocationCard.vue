@@ -16,7 +16,9 @@ const props = defineProps<{
   routeImagePath?: string;
   routeImageLoading?: boolean;
   routeImageError?: string;
+  embedded?: boolean;
 }>();
+const emit = defineEmits<{ (event: 'routeImageLoaded'): void }>();
 
 const componentInstance = getCurrentInstance();
 const opening = ref(false);
@@ -78,10 +80,10 @@ function previewRouteImage() {
 </script>
 
 <template>
-  <view class="project-location-card">
+  <view class="project-location-card" :class="{ 'is-embedded': embedded }">
     <view class="project-location-head">
       <view>
-        <text class="project-location-title">访客导航</text>
+        <text v-if="!embedded" class="project-location-title">访客导航</text>
         <text class="project-location-subtitle">项目地址、附近地标与到访路线参考</text>
       </view>
       <text class="project-location-badge">{{ canNavigate ? 'GCJ-02' : '未定位' }}</text>
@@ -119,6 +121,7 @@ function previewRouteImage() {
         class="project-route-image"
         :src="props.routeImagePath"
         mode="widthFix"
+        @load="emit('routeImageLoaded')"
         @tap="previewRouteImage"
       />
       <text v-if="props.routeImageError" class="project-route-image-error">{{ props.routeImageError }}</text>
@@ -137,6 +140,7 @@ function previewRouteImage() {
 
 <style scoped>
 .project-location-card{overflow:hidden;border:1rpx solid var(--workspace-divider);border-radius:22rpx;padding:24rpx;background:#fff;box-shadow:var(--workspace-shadow)}
+.project-location-card.is-embedded{border:0;border-radius:0;padding:0;box-shadow:none}
 .project-location-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18rpx}
 .project-location-head>view{display:flex;min-width:0;flex-direction:column;gap:6rpx}
 .project-location-title{color:var(--workspace-text);font-size:28rpx;font-weight:850}
