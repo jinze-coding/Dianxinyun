@@ -35,10 +35,20 @@ function retake(){visible=true;result.value=undefined;cameraReady.value=false;er
 function permissions(){uni.openSetting({success:r=>{allowed.value=Boolean(r.authSetting['scope.camera']);if(allowed.value)error.value='';}});}
 </script>
 <template><view class="committee-page capture-page"><AppNavBar title="现场拍摄" @back="runtime.navigateBack()"/>
- <view v-if="error" class="committee-error">{{error}}<button @tap="permissions">权限设置</button></view>
- <template v-if="result"><video v-if="kind==='video'" class="camera-view" :src="result.path" controls :autoplay="false"/><image v-else class="camera-view" :src="result.path" mode="aspectFit"/><view class="committee-actions"><button @tap="retake">重拍</button><button class="committee-primary" @tap="confirm">确认使用</button></view></template>
+ <view v-if="error" class="committee-error capture-error">{{error}}<button class="committee-button" @tap="permissions">权限设置</button></view>
+ <template v-if="result"><video v-if="kind==='video'" class="camera-view" :src="result.path" controls :autoplay="false"/><image v-else class="camera-view" :src="result.path" mode="aspectFit"/><view class="committee-actions capture-actions"><button class="committee-button committee-action-button" @tap="retake">重拍</button><button class="committee-button committee-action-button committee-primary" @tap="confirm">确认使用</button></view></template>
  <template v-else><camera v-if="allowed" class="camera-view" device-position="back" flash="off" @initdone="cameraReady=true" @error="failure" @stop="interrupt"/><view v-else class="committee-empty">允许相机权限后开始拍摄</view>
  <view class="shutter-area"><text>{{recording?`正在录像 ${seconds}s / 300s`:'轻点拍照 · 长按录像 · 松手结束'}}</text><view class="shutter" :class="{recording}" @touchstart.stop.prevent="press" @touchend.stop.prevent="release" @touchcancel.stop.prevent="cancelPress"><view/></view><text>{{busy&&!recording?'正在处理…':'录像最长 5 分钟'}}</text></view></template>
  </view></template>
-<style>@import "./committee.css";</style>
-<style scoped>.capture-page{padding:0 20rpx 40rpx;background:#101e32;color:#fff;box-sizing:border-box}.camera-view{display:block;width:100%;height:62vh;background:#071321;border-radius:16rpx}.shutter-area{display:flex;flex-direction:column;align-items:center;gap:20rpx;padding:30rpx 0;font-size:25rpx}.shutter{width:132rpx;height:132rpx;border:6rpx solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;touch-action:none}.shutter>view{background:#fff;width:108rpx;height:108rpx;border-radius:50%}.shutter.recording{border-color:#ff6363}.shutter.recording>view{width:58rpx;height:58rpx;background:#ff6363;border-radius:12rpx}</style>
+<style scoped src="./committee.css"></style>
+<style scoped>
+.capture-page{--workspace-text:#fff;padding:0 0 calc(30rpx + env(safe-area-inset-bottom));background:#101e32;color:#fff;box-sizing:border-box}
+.camera-view{display:block;width:calc(100% - 40rpx);height:62vh;margin:0 20rpx;background:#071321;border-radius:16rpx}
+.capture-error{margin:20rpx}
+.capture-actions{margin-right:20rpx;margin-left:20rpx}
+.shutter-area{display:flex;flex-direction:column;align-items:center;gap:20rpx;padding:30rpx 0;font-size:25rpx}
+.shutter{width:132rpx;height:132rpx;border:6rpx solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;touch-action:none}
+.shutter>view{background:#fff;width:108rpx;height:108rpx;border-radius:50%}
+.shutter.recording{border-color:#ff6363}
+.shutter.recording>view{width:58rpx;height:58rpx;background:#ff6363;border-radius:12rpx}
+</style>

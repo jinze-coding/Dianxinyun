@@ -15,4 +15,4 @@ onShow(()=>{visible=true;void load();});onHide(()=>{visible=false;generation++;u
 onBeforeUnmount(()=>{visible=false;generation++;});
 </script>
 <template><view class="committee-thumbnail" @tap.stop="emit('open')"><image class="committee-thumbnail-image" v-if="url" :src="url" mode="aspectFill"/><text v-else>{{attachment.previewKind==='VIDEO'?'▶':attachment.extension.toUpperCase()}}</text></view></template>
-<style scoped>.committee-thumbnail{width:92rpx;height:92rpx;flex:0 0 92rpx;border-radius:12rpx;background:#eaf2fc;color:#476a95;display:flex;align-items:center;justify-content:center;font-size:22rpx;overflow:hidden}.committee-thumbnail-image{width:100%;height:100%}</style>
+<style scoped>.committee-thumbnail{width:92rpx;height:92rpx;flex:0 0 92rpx;border-radius:12rpx;background:var(--workspace-tint);color:var(--workspace-accent-deep);display:flex;align-items:center;justify-content:center;font-size:22rpx;overflow:hidden}.committee-thumbnail-image{width:100%;height:100%}</style>

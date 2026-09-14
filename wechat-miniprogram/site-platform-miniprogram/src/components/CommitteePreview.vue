@@ -74,13 +74,14 @@ onBeforeUnmount(()=>{alive=false;stop();clearTemporary();});
 </script>
 <template>
   <view class="committee-preview" :style="previewStyle">
-    <view class="committee-row"><button @tap="download(true)">下载原件</button><button @tap="close">关闭预览</button></view>
-    <view v-if="downloaded" class="committee-actions"><button v-if="['VIDEO','IMAGE','HEIF'].includes(file.previewKind)" @tap="saveMedia">保存到相册</button><button @tap="exportOriginal">导出文件</button></view>
-    <text class="preview-title">{{file.fileName}}</text>
+    <view class="committee-row"><button class="committee-button committee-preview-button" @tap="download(true)">下载原件</button><button class="committee-button committee-preview-button" @tap="close">关闭预览</button></view>
+    <view v-if="downloaded" class="committee-actions"><button class="committee-button committee-action-button committee-preview-button" v-if="['VIDEO','IMAGE','HEIF'].includes(file.previewKind)" @tap="saveMedia">保存到相册</button><button class="committee-button committee-action-button committee-preview-button" @tap="exportOriginal">导出文件</button></view>
+    <text class="committee-preview-title">{{file.fileName}}</text>
     <view v-if="message" class="committee-error">{{message}}</view>
-    <view v-if="file.previewStatus!=='READY'" class="preview-message"><text>{{file.previewStatus==='FAILED'?'预览生成失败':'预览处理中…'}}</text><text>{{file.failureMessage || '完成后自动显示，可先下载原件'}}</text><button v-if="canRetry && file.previewStatus==='FAILED'" @tap="retry">重新生成预览</button></view>
-    <video v-else-if="url && file.previewKind==='VIDEO'" :src="url" controls :autoplay="false" :show-fullscreen-btn="true" @error="message='播放中断，请关闭后重新打开'" />
-    <image v-else-if="url && ['IMAGE','HEIF'].includes(file.previewKind)" :src="url" mode="aspectFit" @tap="runtime.previewImage({urls:[url],current:url})" />
-    <view v-else class="preview-message"><text>{{downloading?'正在下载…':'文档预览'}}</text><button :disabled="downloading" @tap="download(false)">打开文档</button></view>
+    <view v-if="file.previewStatus!=='READY'" class="committee-preview-message"><text>{{file.previewStatus==='FAILED'?'预览生成失败':'预览处理中…'}}</text><text>{{file.failureMessage || '完成后自动显示，可先下载原件'}}</text><button class="committee-button committee-preview-button" v-if="canRetry && file.previewStatus==='FAILED'" @tap="retry">重新生成预览</button></view>
+    <video v-else-if="url && file.previewKind==='VIDEO'" class="committee-preview-video" :src="url" controls :autoplay="false" :show-fullscreen-btn="true" @error="message='播放中断，请关闭后重新打开'" />
+    <image v-else-if="url && ['IMAGE','HEIF'].includes(file.previewKind)" class="committee-preview-image" :src="url" mode="aspectFit" @tap="runtime.previewImage({urls:[url],current:url})" />
+    <view v-else class="committee-preview-message"><text>{{downloading?'正在下载…':'文档预览'}}</text><button class="committee-button committee-preview-button" :class="{'committee-button-disabled':downloading}" :disabled="downloading" @tap="download(false)">打开文档</button></view>
   </view>
 </template>
+<style scoped src="../pages/safety-committee/committee.css"></style>
