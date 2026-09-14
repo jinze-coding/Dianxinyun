@@ -630,7 +630,7 @@ function goBack() {
         </view>
 
         <button v-if="invitation.status === 'PENDING' && canShowNavigation" class="visitor-navigation-button" @tap="openNavigation">
-          访客导航 <text class="visitor-navigation-arrow">›</text>
+          <image class="service-entry-icon" src="/static/navigation/entry-navigation.png" mode="aspectFit" />访客导航 <text class="visitor-navigation-arrow">›</text>
         </button>
 
         <template v-if="invitation.status === 'SUBMITTED'">
@@ -653,7 +653,7 @@ function goBack() {
             <button v-if="canViewProjectProfile" class="project-info-button" @tap="openProjectProfile">项目信息</button>
           </view>
           <button v-if="canShowNavigation" class="visitor-navigation-button" @tap="openNavigation">
-            访客导航 <text class="visitor-navigation-arrow">›</text>
+            <image class="service-entry-icon" src="/static/navigation/entry-navigation.png" mode="aspectFit" />访客导航 <text class="visitor-navigation-arrow">›</text>
           </button>
         </template>
 
@@ -725,7 +725,7 @@ function goBack() {
             :route-image-loading="projectRouteImageLoading"
             :route-image-error="projectRouteImageError"
             embedded
-            @route-image-loaded="restoreNavigationScroll"
+            @route-image-loaded="restoreNavigationScroll" @retry-route-image="refreshNavigation(true)"
           />
           <view v-else class="visitor-navigation-state">正在核验来访及导航信息…</view>
         </view>
@@ -735,8 +735,9 @@ function goBack() {
 </template>
 
 <style scoped>
-.visitor-navigation-button{width:100%;display:flex;align-items:center;justify-content:center;gap:20rpx;min-height:84rpx;line-height:1.5;margin:0;padding:16rpx 20rpx;border-radius:16rpx;background:#edf5ff;color:var(--workspace-accent-deep,#315f86);font-size:28rpx;font-weight:700}
-.visitor-navigation-button::after{border:1rpx solid #d6e7f7;border-radius:16rpx}
+.service-entry-icon{width:34rpx;height:34rpx;flex-shrink:0}
+.visitor-navigation-button{width:100%;display:flex;align-items:center;justify-content:center;gap:14rpx;min-height:48px;line-height:1.5;margin:0;padding:16rpx 20rpx;border-radius:16rpx;background:#1264db;color:#fff;font-size:28rpx;font-weight:800;box-shadow:0 8rpx 18rpx rgba(18,100,219,.18)}
+.visitor-navigation-button::after{border:0;border-radius:16rpx}
 .visitor-navigation-arrow{font-size:38rpx;line-height:1;font-weight:400}
 .visitor-navigation-scroll{height:100%;width:100%}
 .visitor-navigation-content{padding:26rpx}

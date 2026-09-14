@@ -75,6 +75,9 @@ try {
   const s = pageApp.vm; s.token = 'synthetic-invitation'; await s.initialize(false); await flush(); assert.equal(routeCalls, 0);
   s.visitorCompany = '测试单位'; s.contactName = '未提交访客'; s.visitorRemark = '保留草稿'; q.hooks.scroll.forEach((fn) => fn({ scrollTop: 380 }));
   s.openPanel('navigation'); await flush(); assert.equal(routeCalls, 1); assert.equal(s.navigationVerified, true);
+  routeDownload = async () => { throw Error('image failed'); }; await s.refreshPanelStatus(true); await flush(); assert.ok(s.navigationVerified); assert.match(s.routeImageError, /加载失败/);
+  routeDownload = async () => '/tmp/retried-route.png'; await s.refreshPanelStatus(true); await flush(); assert.equal(s.routeImageError, ''); assert.equal(s.routeImagePath, '/tmp/retried-route.png');
+  meeting = { ...invitation, projectLocation: { routeImageAvailable: false } }; const beforeMissing = routeCalls; await s.refreshPanelStatus(true); await flush(); assert.equal(routeCalls, beforeMissing); assert.equal(s.routeImagePath, ''); assert.ok(s.navigationVerified); meeting = { ...invitation };
   s.rememberNavigationScroll({ detail: { scrollTop: 280 } });
   q.hooks.hide.forEach((fn) => fn()); s.rememberNavigationScroll({ detail: { scrollTop: 0 } });
   s.foreground = true; await s.refreshPanelStatus(true); await flush();

@@ -410,8 +410,8 @@ onBeforeUnmount(cleanup);
     </template>
 
     <view v-if="canShowMaterials" class="meeting-services">
-      <button v-if="canShowNavigation" class="meeting-service-button" @tap="openPanel('navigation')">访客导航 <text class="meeting-service-arrow">›</text></button>
-      <button class="meeting-service-button" @tap="openPanel('materials')">会议资料 <text class="meeting-service-arrow">›</text></button>
+      <button v-if="canShowNavigation" class="meeting-service-button" @tap="openPanel('navigation')"><image class="service-entry-icon" src="/static/navigation/entry-navigation.png" mode="aspectFit" />访客导航 <text class="meeting-service-arrow">›</text></button>
+      <button class="meeting-service-button" @tap="openPanel('materials')"><image class="service-entry-icon" src="/static/navigation/entry-materials.png" mode="aspectFit" />会议资料 <text class="meeting-service-arrow">›</text></button>
     </view>
 
     <template v-if="!loading && !errorMessage && !expired && invitation">
@@ -456,7 +456,7 @@ onBeforeUnmount(cleanup);
       <scroll-view class="meeting-navigation-scroll" scroll-y :scroll-top="navigationScrollTarget" @scroll="rememberNavigationScroll" @touchstart="navigationRestoreTop = undefined" @touchmove.stop>
         <view class="meeting-navigation-content">
           <view v-if="navigationError" class="meeting-navigation-state"><text>{{ navigationError }}</text><button class="meeting-service-button" @tap="refreshPanelStatus(true)">重新加载</button></view>
-          <ProjectLocationCard v-else-if="foreground && navigationVerified && canShowNavigation && invitation?.projectLocation" :location="invitation.projectLocation" :project-name="invitation.projectShortName || invitation.projectName" map-id="meeting-project-map" :route-image-path="routeImagePath" :route-image-loading="routeImageLoading" :route-image-error="routeImageError" embedded @route-image-loaded="restoreNavigationScroll" />
+          <ProjectLocationCard v-else-if="foreground && navigationVerified && canShowNavigation && invitation?.projectLocation" :location="invitation.projectLocation" :project-name="invitation.projectShortName || invitation.projectName" map-id="meeting-project-map" :route-image-path="routeImagePath" :route-image-loading="routeImageLoading" :route-image-error="routeImageError" embedded @route-image-loaded="restoreNavigationScroll" @retry-route-image="refreshPanelStatus(true)" />
           <view v-else class="meeting-navigation-state">正在核验会议及导航信息…</view>
         </view>
       </scroll-view>
@@ -466,9 +466,10 @@ onBeforeUnmount(cleanup);
 </template>
 
 <style scoped>
+.service-entry-icon{width:34rpx;height:34rpx;flex-shrink:0}
 .meeting-services{display:flex;gap:20rpx}
-.meeting-service-button{flex:1;display:flex;align-items:center;justify-content:center;gap:20rpx;min-height:84rpx;line-height:1.5;margin:0;padding:16rpx 20rpx;border-radius:16rpx;background:#edf5ff;color:var(--workspace-accent-deep,#315f86);font-size:28rpx;font-weight:700}
-.meeting-service-button::after{border:1rpx solid #d6e7f7;border-radius:16rpx}
+.meeting-service-button{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:14rpx;min-height:48px;line-height:1.5;margin:0;padding:16rpx 20rpx;border-radius:16rpx;background:#1264db;color:#fff;font-size:28rpx;font-weight:800;box-shadow:0 8rpx 18rpx rgba(18,100,219,.18)}
+.meeting-service-button::after{border:0;border-radius:16rpx}
 .meeting-service-arrow{font-size:38rpx;line-height:1;font-weight:400}
 .meeting-navigation-scroll{height:100%;width:100%}
 .meeting-navigation-content{padding:26rpx}

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
   isNavigableProjectLocation,
-  openProjectMapNavigation
+  openProjectMapNavigation, projectMapChoices
 } from '../src/utils/projectMapNavigation.ts';
 
 const location = {
@@ -19,55 +19,54 @@ assert.equal(isNavigableProjectLocation({ ...location, navigable: false }), fals
 assert.equal(isNavigableProjectLocation({ ...location, latitude: 91 }), false);
 assert.equal(isNavigableProjectLocation({ ...location, longitude: Number.NaN }), false);
 
-let preferredOptions;
-let preferredFallbackCalls = 0;
-const preferredResult = await openProjectMapNavigation(location, '测试项目', 'map-a', {
-  createMapContext: (mapId) => ({
-    openMapApp: (options) => {
-      assert.equal(mapId, 'map-a');
-      preferredOptions = options;
-      options.success?.();
-    }
-  }),
-  openLocation: () => { preferredFallbackCalls += 1; }
+for (const platform of ['ios', 'iOS', 'android', 'devtools', '', undefined]) {
+  const choices = projectMapChoices(platform);
+  assert.deepEqual(choices.slice(0, 3).map(c => c.provider), ['tencent', 'amap', 'baidu']);
+  assert.equal(choices[3].provider, platform?.toLowerCase() === 'ios' ? 'apple' : 'system');
+  assert.equal(choices[3].label, platform?.toLowerCase() === 'ios' ? '苹果地图' : '系统地图');
+}
+const deps = overrides => ({
+  createMapContext: () => ({}), openLocation: () => assert.fail('unexpected system map'),
+  confirmSystemMapFallback: () => assert.fail('unexpected fallback'), isActive: () => true, ...overrides
 });
-assert.equal(preferredResult, 'baidu-preferred');
-assert.equal(preferredOptions.preferApplication, 'baidu');
-assert.equal(preferredOptions.destination, '测试项目');
-assert.equal(preferredOptions.latitude, location.latitude);
-assert.equal(preferredOptions.longitude, location.longitude);
-assert.equal(preferredFallbackCalls, 0, '百度优先调起成功时不得重复打开系统地图');
-
-let fallbackOptions;
-const fallbackResult = await openProjectMapNavigation(location, '测试项目', 'map-b', {
-  createMapContext: () => ({ openMapApp: (options) => options.fail?.(new Error('not supported')) }),
-  openLocation: (options) => {
-    fallbackOptions = options;
-    options.success?.();
+const navigate = (provider, overrides, point = location) => openProjectMapNavigation(point, '测试项目', 'map-a', provider, deps(overrides));
+for (const provider of ['tencent', 'amap', 'baidu', 'apple']) {
+  let options;
+  const result = await navigate(provider, { createMapContext: id => {
+    assert.equal(id, 'map-a');
+    return { openMapApp: o => { options = o; o.success(); o.fail({ errMsg: 'late failure' }); } };
+  } });
+  assert.equal(result, 'preferred-map');
+  assert.equal(options.preferApplication, provider); assert.equal(options.destination, '测试项目');
+  assert.equal(options.latitude, location.latitude); assert.equal(options.longitude, location.longitude);
+}
+let systemCalls = 0, confirmations = 0;
+const openSystem = options => {
+  systemCalls++;
+  assert.equal(options.name, '测试项目'); assert.equal(options.address, location.address);
+  assert.equal(options.latitude, location.latitude); assert.equal(options.longitude, location.longitude);
+  assert.equal(options.scale, 16); options.success();
+};
+assert.equal(await navigate('system', { createMapContext: () => assert.fail('system needs no context'), openLocation: openSystem }), 'system-map');
+for (const createMapContext of [() => ({}), () => undefined, () => { throw Error('unsupported'); },
+  () => ({ openMapApp: o => { o.fail({ errMsg: 'failed' }); o.fail({ errMsg: 'duplicate' }); o.success(); } }),
+  () => ({ openMapApp: () => { throw Error('unsupported'); } })]) {
+  assert.equal(await navigate('amap', { createMapContext, confirmSystemMapFallback: async () => { confirmations++; return false; } }), 'cancelled');
+  assert.equal(await navigate('tencent', { createMapContext, confirmSystemMapFallback: async () => { confirmations++; return true; }, openLocation: openSystem }), 'system-map');
+}
+assert.equal(confirmations, 10); assert.equal(systemCalls, 6);
+for (const cancel of [{ errMsg: 'openMapApp:fail cancel' }, new Error('user cancelled'), { cancel: true }, '取消']) {
+  for (const callback of ['success', 'fail']) {
+    assert.equal(await navigate('baidu', { createMapContext: () => ({ openMapApp: o => o[callback](cancel) }) }), 'cancelled');
   }
-});
-assert.equal(fallbackResult, 'system-map');
-assert.equal(fallbackOptions.name, '测试项目');
-assert.equal(fallbackOptions.address, location.address);
-assert.equal(fallbackOptions.scale, 16);
-
-let missingApiFallbackCalls = 0;
-assert.equal(await openProjectMapNavigation(location, '测试项目', 'map-c', {
-  createMapContext: () => ({}),
-  openLocation: (options) => {
-    missingApiFallbackCalls += 1;
-    options.success?.();
-  }
-}), 'system-map');
-assert.equal(missingApiFallbackCalls, 1, 'openMapApp 不存在时必须降级');
-
-await assert.rejects(
-  openProjectMapNavigation({ ...location, navigable: false }, '测试项目', 'map-d', {
-    createMapContext: () => { throw new Error('不应创建地图上下文'); },
-    openLocation: () => { throw new Error('不应打开地图'); }
-  }),
-  /暂未配置导航坐标/
-);
+  assert.equal(await navigate('system', { openLocation: o => o.fail(cancel) }), 'cancelled');
+}
+await assert.rejects(navigate('system', { openLocation: o => o.fail({ errMsg: 'failed' }) }), /选择其他地图/);
+assert.equal(await navigate('apple', { isActive: () => false, createMapContext: () => assert.fail('inactive') }), 'cancelled');
+let active = true;
+assert.equal(await navigate('apple', { isActive: () => active, confirmSystemMapFallback: async () => { active = false; return true; } }), 'cancelled', 'late confirmation must not open a map after leaving/expiry');
+await assert.rejects(navigate('system', {}, { ...location, navigable: false }), /暂未配置导航坐标/);
+await assert.rejects(navigate('amap', {}, { ...location, latitude: undefined }), /暂未配置导航坐标/);
 
 const visitorSource = await readFile(new URL('../src/pages/public/visitor-invite.vue', import.meta.url), 'utf8');
 const componentSource = await readFile(new URL('../src/components/ProjectLocationCard.vue', import.meta.url), 'utf8');
@@ -82,9 +81,11 @@ assert.doesNotMatch(visitorSource, /invitation\.value\s*!==\s*current|invitation
 assert.match(visitorSource, /function resetProjectRouteImage\(\)[\s\S]*removePublicProjectRouteImage\(projectRouteImagePath\.value\)/, '替换或离开页面时必须删除临时路线图');
 // The actual page lifecycle and route cleanup are exercised by test:visitor-navigation.
 assert.doesNotMatch(guardSource, /ProjectLocationCard/, '本次不得改动门卫长期登记页面');
-assert.match(componentSource, /<map[\s\S]*@tap="navigateToProject"/);
+assert.match(componentSource, /<map[^>]*class="project-map-bridge"/);
+assert.match(componentSource, /width:1px;height:1px;opacity:0;pointer-events:none/);
+assert.doesNotMatch(componentSource, /GCJ-02|百度地图优先导航|project-location-map/);
 assert.match(componentSource, /访客导航/);
-assert.match(componentSource, /附近地标与到访路线图/);
+assert.match(componentSource, /到访路线图/);
 assert.match(componentSource, /可能不是实际入口/);
 assert.match(componentSource, /uni\.previewImage\([\s\S]*routeImagePath/, '路线图应支持微信大图预览');
 assert.doesNotMatch(componentSource, /getLocation\s*\(/, '展示项目位置不得申请访客当前位置');

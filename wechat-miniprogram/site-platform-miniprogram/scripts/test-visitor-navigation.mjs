@@ -62,7 +62,9 @@ try {
   assert.equal(s.invitation.status, 'PENDING', 'closed dialog ignores late status');
   resolveInvite = async () => { throw new Error('断网'); }; s.openNavigation(); await flush(); assert.equal(s.navigationVerified, false); assert.equal(s.navigationError, '断网');
   resolveInvite = async () => current; download = async () => { throw new Error('图片失败'); }; await s.refreshNavigation(true); await flush(); assert.ok(s.navigationVerified); assert.match(s.projectRouteImageError, /不影响地图导航/);
-  download = async () => '/tmp/synthetic-route.png'; await s.closeNavigation(); s.openNavigation(); await flush();
+  download = async () => '/tmp/synthetic-route.png'; await s.refreshNavigation(true); await flush(); assert.equal(s.projectRouteImageError, ''); assert.equal(s.projectRouteImagePath, '/tmp/synthetic-route.png');
+  current = { ...current, projectLocation: { routeImageAvailable: false } }; const beforeMissing = io.routes; await s.refreshNavigation(true); await flush(); assert.equal(io.routes, beforeMissing); assert.ok(s.navigationVerified); assert.equal(s.projectRouteImagePath, ''); current = fixture('PENDING');
+  await s.closeNavigation(); s.openNavigation(); await flush();
   assert.equal(hooks.onBackPress(), true); await flush(); assert.equal(s.navigationVisible, false); assert.equal(io.back, 0);
   s.openNavigation(); await flush(); current = fixture('VOIDED');
   for (const timer of [...timers.values()]) if (timer.delay === 30000) timer.fn();
