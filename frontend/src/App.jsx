@@ -1,3 +1,4 @@
+import SafetyCommitteePage from './pages/SafetyCommittee';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { DEFAULT_THEME_ID, getThemeById } from './constants/themes';
 import { AUTHENTICATED_LANDING_PAGE, NAV_ITEMS, PAGE_IDS } from './constants/dicts';
@@ -7353,6 +7354,8 @@ export default function App() {
         return <SiteAccessManagementPage {...pageProps} initialState={siteAccessReturnState} />;
       case PAGE_IDS.PERSON_MANAGEMENT:
         return <PersonnelManagementPage {...pageProps} />;
+      case PAGE_IDS.SAFETY_COMMITTEE:
+        return <SafetyCommitteePage key={currentProject} {...pageProps} onAccessLost={() => setCurrentPage(AUTHENTICATED_LANDING_PAGE)} />;
       case PAGE_IDS.QUALITY_MANAGEMENT:
         return <QualityManagementPage {...pageProps} businessTarget={qualityIssueTarget} />;
       case PAGE_IDS.DOCUMENT_MANAGEMENT:

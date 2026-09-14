@@ -1,5 +1,15 @@
 # AGENTS.md
 
+## 安委会巡检（2026-09-14）
+
+- 正式范围新增独立 `SAFETY_COMMITTEE`；Web 顶部在质量周检后显示“安委会巡检”，小程序自绘导航为“待办 / 资料 / 巡检 / 质量 / 安委会 / 我的”。保留原生五 tab 和登录首路由，安委会使用普通根页面与统一导航/守卫。
+- 任意时间逐条上报；服务端保存 JWT 检查人与姓名快照、首次提交北京时间，修改不变更检查人/时间。分类必选，结论最多 2000 字且选填，附件最多 30 个且选填；只选分类可以提交。
+- 两端菜单及项目权限统一：`WEB_SAFETY_COMMITTEE / MINI_SAFETY_COMMITTEE / SAFETY_COMMITTEE_RECORDS`，操作为 `safety_committee.view / submit / edit_own`。上报、本人修改依赖查看；普通角色必须明确授权，不继承其他巡检/质量/历史安全权限。平台管理员可查看、上报和确认删除，但不可修改他人记录。
+- 记录创建幂等，编辑使用 `expectedVersion`；附件绑定、记录和日志同事务。移除附件保留历史；删除用户保留检查人快照。管理员删除目标 `COMMITTEE_INSPECTION` 复用影响预览令牌，覆盖历史附件和退役预览副本，提交后清理物理文件。
+- 本模块独立允许照片 15 MiB、办公文件 100 MiB、视频 500 MiB，8 MiB 分片、24 小时会话及分片/整文件 SHA-256。`COMMITTEE_INSPECTION_*` 不得经通用文件接口读取或改绑；其他巡检/质量图片策略不变。
+- 受限工具异步转换 Office/PDF、HEIF/JPEG 和视频 H.264/AAC；原件保留。Web 用 HttpOnly Cookie，小程序用原登录及附件绑定的 15 分钟不透明读取凭证，每次读取/Range 重新鉴权。
+- 原本地数据库与附件已备份，隔离副本及原库双跑 `20260914_safety_committee_inspection.sql`；原库现 111 表，普通角色授权数量未变。空库基线同步。交付是原 8080/3002 和小程序开发包，真机五分钟拍摄与微信上传/发布另行验收。详见 `docs/安委会巡检.md`。
+
 ## 扫码预约入口与地图选择（2026-09-14）
 
 - 会议预约与有效回执的“访客导航 / 会议资料”使用实心蓝色、白色加粗文字和本地图标；单次预约及有效回执只有全宽导航入口，不展示会议内容。
@@ -41,6 +51,7 @@
 - 资料管理：目录、资料、版本、预览下载、归档、回收站，图纸/技术文件收文、发放、扫码签收与版本追溯，以及项目级用印申请、用户直指派审批、盖章件回传和用印台账。
 - 巡检管理：进入后分为“电箱巡检”和“临边巡检”两个独立专区。电箱继续使用台账、六项每日巡检、专用月表、统一二维码和原整改流程；临边只使用系统内置的 8 类固定检查表，项目只维护点位和一套周期/人员设置，不提供用户模板、自定义类别、二维码或公开月表。Web 临边记录支持后台异步生成含图 Excel；临边不再设置项目试点开关。
 - 质量周检：每项目每自然周一份共享草稿，可一次整理多个独立质量问题后原子提交；支持无问题周检留档。提交后各问题独立整改、复查和操作留痕，历史独立问题继续兼容。
+- 安委会巡检：独立逐条安全巡检上报、项目共享查询、固定隐患分类筛选、照片/视频/办公文件预览、本人修改留痕及管理员影响确认删除。
 - 系统管理：注册审核、用户、角色权限、菜单功能、用印审批、微信绑定和操作日志。项目与角色只在注册审核或用户管理中分配；用印审批按项目和具体印章直接选择业务审批用户，不向单个用户写入角色权限。
 - 项目信息：Web 顶部当前项目选择器旁进入独立档案页，项目有效成员可查看，平台管理员可编辑；小程序从“我的 → 施工区域”进入同一档案的只读页。该入口是项目基础能力，不新增菜单或普通角色权限码。
 
@@ -99,6 +110,7 @@ backend/
     electricbox/   电箱台账和二维码
     inspection/    电箱巡检，以及内部 general 数据域承载的固定式临边巡检
     quality/       质量周检共享草稿、质量问题、整改和复查
+    safetycommittee/ 安委会巡检记录、附件分片、预览和修改留痕
     file/          通用文件与存储
     common/        统一响应、异常和限流
     config/        JWT、Redis、跨域、拦截器和接口文档
@@ -158,14 +170,14 @@ docs/
 - 平台角色：`sys_role.scope_type=PLATFORM`。
 - 当前项目的项目角色：`sys_role.scope_type=PROJECT` 与 `sys_user_project_role` 多对多关系；旧 `sys_user_project.project_role_code` 只作历史兼容。
 - 角色菜单：`sys_menu`、`sys_role_menu`。
-- 业务模块：`sys_role_business_module` 中的 `SITE_ACCESS / DOCUMENT / INSPECTION / QUALITY`。后三项原业务模块继续覆盖 Web/内部小程序入口；`SITE_ACCESS` V1 只控制 Web 内部管理入口，访客公开填报不要求业务角色。
+- 业务模块：`sys_role_business_module` 中的 `SITE_ACCESS / DOCUMENT / INSPECTION / QUALITY / SAFETY_COMMITTEE`。资料、巡检、质量和安委会四项业务模块继续覆盖 Web/内部小程序入口；`SITE_ACCESS` V1 只控制 Web 内部管理入口，访客公开填报不要求业务角色。
 - 操作权限：`sys_permission`、`sys_role_permission`。
 - 项目数据范围：`sys_user_project.status=ACTIVE`。
 
 必须遵守：
 
 - `PLATFORM_ADMIN` 只通过角色判断，不允许使用固定用户 ID 兜底。
-- `PLATFORM_ADMIN` 对全部当前启用、可见的正式菜单、全部启用操作权限、`SITE_ACCESS / DOCUMENT / INSPECTION / QUALITY` 四个业务模块以及所有现有/新建项目无条件放行；不得要求管理员写入项目成员、项目角色或重复授权关系。停用、删除或隐藏的历史目录仍不得恢复。
+- `PLATFORM_ADMIN` 对全部当前启用、可见的正式菜单、全部启用操作权限、`SITE_ACCESS / DOCUMENT / INSPECTION / QUALITY / SAFETY_COMMITTEE` 五个业务模块以及所有现有/新建项目无条件放行；不得要求管理员写入项目成员、项目角色或重复授权关系。停用、删除或隐藏的历史目录仍不得恢复。
 - 只有 `PLATFORM_ADMIN` 是平台级全局资格；其他业务角色均为项目角色。用户管理仅分配项目与项目角色，受保护的平台全局身份不作为普通业务角色展示或分配。
 - 同一成员可在同一项目拥有多个角色，菜单和操作权限按并集计算；`sys_user_project.status=ACTIVE` 是项目角色生效前提。
 - 用印审批是业务任务指派，不是用户级 RBAC 覆盖：`seal.view/manage/export` 只控制项目级查询、管理和台账导出；本人申请、当前审批任务和明确抄送记录使用记录级 ACL。平台管理员可以配置和转办，但未被明确指派时不能直接审批。
@@ -176,7 +188,7 @@ docs/
 - 平台级系统管理接口只认可平台角色提供的平台权限；项目角色不能借聚合权限调用注册、全量用户、角色、菜单、微信全局管理或审计接口。
 - 项目角色权限只在目标 `projectId` 的有效成员关系内生效。用户在 A 项目有写权限，不代表能写 B 项目。
 - `/api/v1/auth/user-info` 是 Web 和小程序菜单、平台权限码、项目角色及项目权限的统一来源。
-- 资料、巡检、质量必须通过一个模块开关统一控制两端入口。场内管理的模块开关只控制 Web 内部管理；小程序 `pages/public/visitor-invite`、`pages/public/meeting-invite` 和 `pages/public/meeting-check-in` 是持不透明 scene 的免登录公开页，不进入内部菜单。关闭模块时保留细分操作权限配置，但对应内部入口和后端项目鉴权必须拒绝该模块。
+- 资料、巡检、质量、安委会各自必须通过一个模块开关统一控制两端入口。场内管理的模块开关只控制 Web 内部管理；小程序 `pages/public/visitor-invite`、`pages/public/meeting-invite` 和 `pages/public/meeting-check-in` 是持不透明 scene 的免登录公开页，不进入内部菜单。关闭模块时保留细分操作权限配置，但对应内部入口和后端项目鉴权必须拒绝该模块。
 - 临边巡检不使用项目级试点或启停开关。所有接口校验有效项目范围、`INSPECTION` 模块和对应操作权限；查看、配置/取消/改派、执行、整改、复查和含图导出分别使用 `EDGE_INSPECTION_VIEW / EDGE_INSPECTION_MANAGE / EDGE_INSPECTION_SUBMIT / EDGE_INSPECTION_RECTIFY / EDGE_INSPECTION_REVIEW / EDGE_INSPECTION_EXPORT`。临边权限不得依赖或自动补入电箱的 `inspection.* / BOX_* / INSPECTION_* / SUMMARY_*` 权限；执行、整改和复查还必须是当前明确指派人，平台管理员未被明确指派时不得代替业务人员复查。
 - 临边含图 Excel 导出要求 `EDGE_INSPECTION_VIEW + EDGE_INSPECTION_EXPORT`；普通用户只可查看、下载本人创建的任务，平台管理员可查看目标项目全部导出任务。单次最长 31 天、500 个任务、800 张照片和 120MB 原始照片，生成文件七天后过期。电箱统计与导出继续独立使用 `inspection.view / inspection.export / SUMMARY_VIEW / SUMMARY_EXPORT`，不得与临边互相代替。
 - 质量周检草稿由目标项目具备 `quality.manage` 的人员共享编辑，整份草稿使用 `expectedVersion` 防并发覆盖；同项目同一自然周只能保留一份草稿或正式周检。未来周不得创建，往期允许补录并标记实际提交时间。提交必须在单一事务中生成全部独立质量问题，任一问题、整改人或附件校验失败时整批回滚。

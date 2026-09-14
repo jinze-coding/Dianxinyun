@@ -11,6 +11,7 @@ export function navigateTo(url: string) {
 }
 
 export function switchTab(url: string) {
+  if (url.split('?')[0] === '/pages/safety-committee/index') { uni.reLaunch({ url }); return; }
   uni.switchTab({ url, fail: () => uni.reLaunch({ url }) });
 }
 

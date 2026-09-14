@@ -1,6 +1,7 @@
 import { PAGE_IDS } from '../constants/dicts.js';
 
 const PAGE_ACCESS_RULES = {
+  [PAGE_IDS.SAFETY_COMMITTEE]: { menuCodes: ['WEB_SAFETY_COMMITTEE', 'SAFETY_COMMITTEE_RECORDS'] },
   [PAGE_IDS.SITE_ACCESS]: {
     menuCodes: ['WEB_SITE_ACCESS', 'SITE_VISITOR'],
   },

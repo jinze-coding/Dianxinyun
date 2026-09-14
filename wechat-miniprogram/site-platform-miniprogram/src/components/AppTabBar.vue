@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/auth';
 import { switchTab } from '@/utils/navigation';
 import { useTodoStore } from '@/stores/todo';
 
-export type WorkspaceTabKey = 'documents' | 'inspection' | 'quality' | 'todo' | 'profile';
+export type WorkspaceTabKey = 'documents' | 'inspection' | 'quality' | 'committee' | 'todo' | 'profile';
 type CompatibleTabKey = WorkspaceTabKey | 'overview' | 'personnel' | 'safety' | 'scan' | 'project' | 'todo';
 
 const props = defineProps<{
@@ -27,6 +27,7 @@ const tabs: Array<{
   { key: 'documents', label: '资料', url: '/pages/documents/index', color: WORKSPACE_THEME.accentDeep, tint: WORKSPACE_THEME.tint, icon: '/static/design-preview-icons/quality-files.png', activeIcon: '/static/design-preview-icons/quality-files.png' },
   { key: 'inspection', label: '巡检', url: '/pages/inspection/index', color: WORKSPACE_THEME.accentDeep, tint: WORKSPACE_THEME.tint, icon: '/static/design-preview-icons/nav-safety.png', activeIcon: '/static/design-preview-icons/nav-safety-active.png' },
   { key: 'quality', label: '质量', url: '/pages/quality/index', color: WORKSPACE_THEME.accentDeep, tint: WORKSPACE_THEME.tint, icon: '/static/design-preview-icons/nav-quality.png', activeIcon: '/static/design-preview-icons/nav-quality-active.png' },
+  { key: 'committee', label: '安委会', url: '/pages/safety-committee/index', color: WORKSPACE_THEME.accentDeep, tint: WORKSPACE_THEME.tint, icon: '/static/design-preview-icons/nav-safety.png', activeIcon: '/static/design-preview-icons/nav-safety-active.png' },
   { key: 'profile', label: '我的', url: '/pages/profile/index', color: WORKSPACE_THEME.accentDeep, tint: WORKSPACE_THEME.tint, icon: '/static/design-preview-icons/nav-profile.png', activeIcon: '/static/design-preview-icons/nav-profile-active.png' }
 ];
 

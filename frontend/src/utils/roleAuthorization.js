@@ -57,6 +57,7 @@ export const BUSINESS_MENU_DEFINITIONS = [
       { menuCode: 'QUALITY_DOCUMENTS', label: '质量资料' },
     ],
   },
+  { moduleCode: 'SAFETY_COMMITTEE', label: '安委会巡检', description: 'Web 与小程序共用模块开关', backingMenuCodes: ['WEB_SAFETY_COMMITTEE', 'MINI_SAFETY_COMMITTEE'], pages: [{ menuCode: 'SAFETY_COMMITTEE_RECORDS', label: '巡检记录' }] },
 ];
 
 const SYSTEM_MENU_ORDER = [
@@ -84,6 +85,9 @@ const SYSTEM_PERMISSION_CODES = [
 ];
 
 const ACTION_DEFINITIONS = [
+  { key: 'safety_committee.view', label: '查看项目巡检记录和附件', group: '安委会巡检 · 巡检记录', menuCodes: ['SAFETY_COMMITTEE_RECORDS'], primaryCodes: ['safety_committee.view'], codes: ['safety_committee.view'] },
+  { key: 'safety_committee.submit', label: '上报巡检记录', group: '安委会巡检 · 巡检记录', menuCodes: ['SAFETY_COMMITTEE_RECORDS'], primaryCodes: ['safety_committee.submit'], codes: ['safety_committee.submit', 'safety_committee.view'], requiresActions: ['safety_committee.view'] },
+  { key: 'safety_committee.edit_own', label: '修改本人巡检记录', group: '安委会巡检 · 巡检记录', menuCodes: ['SAFETY_COMMITTEE_RECORDS'], primaryCodes: ['safety_committee.edit_own'], codes: ['safety_committee.edit_own', 'safety_committee.view'], requiresActions: ['safety_committee.view'] },
   { key: 'site_access.view', label: '查看完整外访信息', group: '场内管理 · 外访管理', menuCodes: ['SITE_VISITOR'], primaryCodes: ['site_access.view'], codes: ['site_access.view'] },
   { key: 'site_access.manage', label: '创建、修改、作废及生成小程序码', group: '场内管理 · 外访管理', menuCodes: ['SITE_VISITOR'], primaryCodes: ['site_access.manage'], codes: ['site_access.manage', 'site_access.view'], requiresActions: ['site_access.view'] },
   { key: 'site_access.export', label: '导出完整外访人员信息', group: '场内管理 · 外访管理', menuCodes: ['SITE_VISITOR'], primaryCodes: ['site_access.export'], codes: ['site_access.export', 'site_access.view'], requiresActions: ['site_access.view'] },

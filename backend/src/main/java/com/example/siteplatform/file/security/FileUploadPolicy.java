@@ -67,6 +67,33 @@ public final class FileUploadPolicy {
     private FileUploadPolicy() {
     }
 
+    public static final Set<String> COMMITTEE_VIDEOS = Set.of("mp4", "mov", "m4v", "webm", "mkv", "avi");
+    private static final Set<String> COMMITTEE_DOCUMENTS = Set.of(
+            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "wps", "et", "dps", "rtf", "txt", "csv");
+
+    public static long committeeLimit(String name) {
+        String extension = extensionOf(safeOriginalFileName(name));
+        if (IMAGE_EXTENSIONS.contains(extension)) return MAX_IMAGE_BYTES;
+        if (COMMITTEE_VIDEOS.contains(extension)) return 500L * 1024 * 1024;
+        if (COMMITTEE_DOCUMENTS.contains(extension)) return 100L * 1024 * 1024;
+        throw BusinessException.of(415, "不支持此安委会巡检附件格式");
+    }
+
+    public static void validateCommitteeMetadata(String name, long size) {
+        long limit = committeeLimit(name);
+        if (size <= 0 || size > limit) throw BusinessException.of(413,
+                "附件不能为空，图片最多15MB、办公文件100MB、视频500MB");
+    }
+
+    public static void validateCommitteeAttachment(MultipartFile file) {
+        if (file == null) throw new BusinessException("请选择附件");
+        validateCommitteeMetadata(file.getOriginalFilename(), file.getSize());
+        Set<String> allowed = java.util.stream.Stream.of(IMAGE_EXTENSIONS, COMMITTEE_VIDEOS, COMMITTEE_DOCUMENTS)
+                .flatMap(Set::stream).collect(java.util.stream.Collectors.toSet());
+        validate(file, allowed, committeeLimit(file.getOriginalFilename()), "安委会巡检附件");
+        validateMeetingOfficeContainer(file);
+    }
+
     public static void validateProjectDocument(MultipartFile file) {
         validate(file, DOCUMENT_EXTENSIONS, MAX_DOCUMENT_BYTES, "工程资料");
     }

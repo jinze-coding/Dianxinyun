@@ -38,6 +38,7 @@ const ROOT_PAGE_RULES = [
     miniMenuCodes: ['MINI_QUALITY'],
     legacyMenuCodes: ['WEB_QUALITY', 'QUALITY_MANAGEMENT']
   },
+  { path: '/pages/safety-committee/index', miniMenuCodes: ['MINI_SAFETY_COMMITTEE'], legacyMenuCodes: ['WEB_SAFETY_COMMITTEE'] },
   { path: '/pages/profile/index', miniMenuCodes: [], legacyMenuCodes: [] }
 ] as const;
 

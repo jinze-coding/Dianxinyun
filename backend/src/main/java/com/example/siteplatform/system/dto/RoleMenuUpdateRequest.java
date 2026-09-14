@@ -16,5 +16,5 @@ public class RoleMenuUpdateRequest {
     private List<@Positive Long> menuIds;
     @NotNull
     @Size(max = 4)
-    private List<@Pattern(regexp = "^(SITE_ACCESS|DOCUMENT|INSPECTION|QUALITY)$") String> businessModuleCodes;
+    private List<@Pattern(regexp = "^(SITE_ACCESS|DOCUMENT|INSPECTION|QUALITY|SAFETY_COMMITTEE)$") String> businessModuleCodes;
 }

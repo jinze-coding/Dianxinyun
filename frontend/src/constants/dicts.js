@@ -93,6 +93,7 @@ export const PAGE_IDS = {
   PERSON_MANAGEMENT: 'person_management',
   SITE_ACCESS: 'site_access',
   QUALITY_MANAGEMENT: 'quality_management',
+  SAFETY_COMMITTEE: 'safety_committee',
   DOCUMENT_MANAGEMENT: 'document_management',
   ELECTRIC_INSPECTION: 'electric_inspection',
   PERSONAL_INBOX: 'personal_inbox',
@@ -109,4 +110,5 @@ export const NAV_ITEMS = [
   { id: PAGE_IDS.DOCUMENT_MANAGEMENT, label: '资料管理' },
   { id: PAGE_IDS.ELECTRIC_INSPECTION, label: '巡检管理' },
   { id: PAGE_IDS.QUALITY_MANAGEMENT, label: '质量周检' },
+  { id: PAGE_IDS.SAFETY_COMMITTEE, label: '安委会巡检' },
 ];

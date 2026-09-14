@@ -12,6 +12,7 @@
     "build:h5": "uni build -p h5",
     "build:mp-weixin": "uni build -p mp-weixin && npm run verify:visitor-forms",
     "build:mp-weixin:real": "uni build -p mp-weixin --mode mp-real && npm run verify:mp-weixin:real && npm run verify:visitor-forms",
+    "test:safety-committee": "node scripts/test-safety-committee.mjs",
     "type-check": "vue-tsc --noEmit",
     "test:project-location": "node --experimental-strip-types scripts/test-project-map-navigation.mjs && node --experimental-strip-types scripts/test-project-location-card.mjs",
     "test:visitor-profile": "node --experimental-strip-types scripts/test-visitor-profile-flow.mjs",
@@ -30,6 +31,7 @@
     "@dcloudio/uni-app": "3.0.0-alpha-5010420260626001",
     "@dcloudio/uni-h5": "3.0.0-alpha-5010420260626001",
     "@dcloudio/uni-mp-weixin": "3.0.0-alpha-5010420260626001",
+    "@noble/hashes": "^1.8.0",
     "jsqr": "^1.4.0",
     "vue": "^3.5.35"
   },

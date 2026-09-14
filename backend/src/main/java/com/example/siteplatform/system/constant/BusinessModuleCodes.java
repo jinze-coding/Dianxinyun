@@ -8,7 +8,7 @@ import java.util.Set;
  * 正式业务模块的跨端开关。
  *
  * <p>菜单资源仍然保留 Web / 小程序两条记录，以便各客户端继续使用自己的路由；
- * 角色配置和鉴权统一使用本类的四个模块编码；场内管理 V1 仅有 Web 内部入口，
+ * 角色配置和鉴权统一使用本类的五个模块编码；场内管理 V1 仅有 Web 内部入口，
  * 其余模块避免把同一业务拆成两次授权。</p>
  */
 public final class BusinessModuleCodes {
@@ -17,9 +17,10 @@ public final class BusinessModuleCodes {
     public static final String DOCUMENT = "DOCUMENT";
     public static final String INSPECTION = "INSPECTION";
     public static final String QUALITY = "QUALITY";
+    public static final String SAFETY_COMMITTEE = "SAFETY_COMMITTEE";
     public static final String SITE_ACCESS = "SITE_ACCESS";
 
-    public static final List<String> ALL = List.of(SITE_ACCESS, DOCUMENT, INSPECTION, QUALITY);
+    public static final List<String> ALL = List.of(SITE_ACCESS, DOCUMENT, INSPECTION, QUALITY, SAFETY_COMMITTEE);
 
     public static final Set<String> SITE_ACCESS_MENUS = Set.of(
             "WEB_SITE_ACCESS", "SITE_VISITOR");
@@ -38,6 +39,7 @@ public final class BusinessModuleCodes {
         if (DOCUMENT_MENUS.contains(normalized)) return DOCUMENT;
         if (INSPECTION_MENUS.contains(normalized)) return INSPECTION;
         if (QUALITY_MENUS.contains(normalized)) return QUALITY;
+        if (Set.of("WEB_SAFETY_COMMITTEE", "MINI_SAFETY_COMMITTEE", "SAFETY_COMMITTEE_RECORDS").contains(normalized)) return SAFETY_COMMITTEE;
         return null;
     }
 
@@ -53,6 +55,7 @@ public final class BusinessModuleCodes {
                 || normalized.startsWith("SUMMARY_")
                 || normalized.startsWith("RECTIFICATION_")) return INSPECTION;
         if (normalized.startsWith("QUALITY.")) return QUALITY;
+        if (normalized.startsWith("SAFETY_COMMITTEE.")) return SAFETY_COMMITTEE;
         if (normalized.startsWith("SEAL.")) return DOCUMENT;
         return null;
     }

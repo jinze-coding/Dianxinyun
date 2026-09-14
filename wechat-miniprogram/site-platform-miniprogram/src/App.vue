@@ -16,7 +16,8 @@ const PUBLIC_PREFIXES = [
 const PAGE_TO_ROOT: Array<[string, string]> = [
   ['pages/documents/', '/pages/documents/index'],
   ['pages/inspection/', '/pages/inspection/index'],
-  ['pages/quality/', '/pages/quality/index']
+  ['pages/quality/', '/pages/quality/index'],
+  ['pages/safety-committee/', '/pages/safety-committee/index']
 ];
 
 async function enforceCurrentPageAccess() {

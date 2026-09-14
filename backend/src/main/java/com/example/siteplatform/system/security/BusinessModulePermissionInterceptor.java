@@ -91,6 +91,7 @@ public class BusinessModulePermissionInterceptor implements HandlerInterceptor {
     String resolveStaticPermission(String method, String path) {
         String normalizedPath = normalizePath(path);
         boolean read = isReadMethod(method);
+        if (matchesModule(normalizedPath, "/api/v1/safety-committee")) return null;
 
         if (matchesModule(normalizedPath, PROJECT_DOCUMENTS)) {
             if (read) return SystemPermissionCodes.DOCUMENT_VIEW;

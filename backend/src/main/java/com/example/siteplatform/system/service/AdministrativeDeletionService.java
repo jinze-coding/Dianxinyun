@@ -45,7 +45,7 @@ public class AdministrativeDeletionService {
             "USER", "PROJECT", "ROLE", "REGISTRATION_APPLICATION",
             "DOCUMENT_FOLDER", "PROJECT_DOCUMENT", "FILE",
             "ELECTRIC_BOX", "INSPECTION_RECORD", "QUALITY_ISSUE",
-            "SITE_ACCESS_INVITATION", "MEETING_MATERIAL");
+            "SITE_ACCESS_INVITATION", "MEETING_MATERIAL", "COMMITTEE_INSPECTION");
 
     private final JdbcTemplate jdbc;
     private final StringRedisTemplate redis;
@@ -116,6 +116,7 @@ public class AdministrativeDeletionService {
             case "QUALITY_ISSUE" -> deleteQualityIssue(request.getTargetId());
             case "SITE_ACCESS_INVITATION" -> deleteSiteAccessInvitation(request.getTargetId());
             case "MEETING_MATERIAL" -> deleteMeetingMaterial(request.getTargetId());
+            case "COMMITTEE_INSPECTION" -> deleteCommitteeRecord(request.getTargetId());
             default -> throw new BusinessException("不支持的删除类型");
         }
         recordDeletion(operator, current);
@@ -164,6 +165,7 @@ public class AdministrativeDeletionService {
             case "QUALITY_ISSUE" -> qualityIssueImpact(impact, id);
             case "SITE_ACCESS_INVITATION" -> siteAccessInvitationImpact(impact, id);
             case "MEETING_MATERIAL" -> meetingMaterialImpact(impact, id);
+            case "COMMITTEE_INSPECTION" -> committeeImpact(impact, id);
             default -> throw new BusinessException("不支持的删除类型");
         }
         impact.setTotalAssociatedCount(impact.getItems().stream().mapToLong(DeletionImpactVO.Item::getCount).sum());
@@ -224,6 +226,8 @@ public class AdministrativeDeletionService {
                 """, id));
         add(impact, "sealApplications", "保留的本人用印申请",
                 count("seal_application", "applicant_id", id));
+        add(impact, "committee", "保留的本人安委会巡检、附件与修改记录", count("safety_committee_record", "inspector_id", id)
+                + count("safety_committee_attachment", "uploader_id", id) + count("safety_committee_log", "operator_id", id));
         add(impact, "sealFormExports", "保留的申请单合并任务与下载记录", count("seal_form_export_job", "requested_by_id", id));
         add(impact, "sealUploads", "保留的用印附件上传快照",
                 count("seal_application_file", "uploader_id", id));
@@ -254,6 +258,8 @@ public class AdministrativeDeletionService {
                         + count("quality_issue_log", "project_id", id)
                         + count("quality_issue_export_job", "project_id", id)
                         + count("quality_issue_export_job_item", "project_id", id));
+        add(impact, "committee", "安委会巡检、附件与修改记录", count("safety_committee_record", "project_id", id)
+                + count("safety_committee_attachment", "project_id", id) + count("safety_committee_log", "project_id", id));
         add(impact, "sealFormExports", "用印申请单合并任务与明细", count("seal_form_export_job", "project_id", id)
                 + count("seal_form_export_item", "project_id", id));
         add(impact, "sealWorkflow", "用印申请、印章、审批、抄送与通知", sealProjectDataCount(id));
@@ -512,6 +518,10 @@ public class AdministrativeDeletionService {
     }
 
     private void lockTarget(String type, Long id) {
+        if ("COMMITTEE_INSPECTION".equals(type)) {
+            Map<String,Object> record = requireRow("SELECT project_id FROM safety_committee_record WHERE id = ?", id, "巡检记录不存在");
+            requireRow("SELECT id FROM project_info WHERE id = ? FOR UPDATE", number(record.get("project_id")), "项目不存在");
+        }
         if ("MEETING_MATERIAL".equals(type)) {
             Map<String,Object> material = requireRow("SELECT invitation_id FROM site_meeting_material WHERE id = ?", id, "资料不存在");
             requireRow("SELECT id FROM site_visit_invitation WHERE id = ? FOR UPDATE", number(material.get("invitation_id")), "会议不存在");
@@ -529,6 +539,7 @@ public class AdministrativeDeletionService {
             case "QUALITY_ISSUE" -> "quality_issue";
             case "SITE_ACCESS_INVITATION" -> "site_visit_invitation";
             case "MEETING_MATERIAL" -> "site_meeting_material";
+            case "COMMITTEE_INSPECTION" -> "safety_committee_record";
             default -> throw new BusinessException("不支持的删除类型");
         };
         requireRow("SELECT id FROM `" + table + "` WHERE id = ? FOR UPDATE", id, "待删除数据不存在");
@@ -611,6 +622,9 @@ public class AdministrativeDeletionService {
 
         // Only draft-only projects can reach this path. Submitted/decided applications are
         // immutable audit records and are blocked above instead of being cascade-deleted.
+        update("DELETE FROM safety_committee_log WHERE project_id = ?", projectId);
+        update("DELETE FROM safety_committee_attachment WHERE project_id = ?", projectId);
+        update("DELETE FROM safety_committee_record WHERE project_id = ?", projectId);
         update("DELETE FROM user_notification WHERE project_id = ?", projectId);
         update("DELETE FROM workflow_approval_task WHERE project_id = ?", projectId);
         update("DELETE FROM workflow_approval_instance WHERE project_id = ?", projectId);
@@ -794,6 +808,31 @@ public class AdministrativeDeletionService {
         deleteByIds("inspection_rectification", "id", rectificationIds);
         requireSingle(update("DELETE FROM inspection_record WHERE id = ?", recordId), "巡检记录状态已变化，请重新预览");
         registerCommittedFilePurge(files);
+    }
+
+    private void committeeImpact(DeletionImpactVO impact, Long id) {
+        Map<String,Object> record = requireRow("SELECT inspector_name, inspected_at, version FROM safety_committee_record WHERE id = ?", id, "巡检记录不存在");
+        impact.setTargetName("安委会巡检 · " + text(record.get("inspector_name")) + " · " + record.get("inspected_at") + " · 第" + record.get("version") + "版");
+        add(impact, "committeeAttachments", "当前及历史附件", count("safety_committee_attachment", "record_id", id));
+        add(impact, "committeeLogs", "上报及修改记录", count("safety_committee_log", "record_id", id));
+        setFileImpact(impact, fileStats("SELECT COUNT(*) file_count, COALESCE(SUM(file_size),0) file_bytes FROM file_resource WHERE " + committeeFilePredicate(), id, id, id));
+    }
+
+    private void deleteCommitteeRecord(Long id) {
+        List<FileResource> files = files("SELECT * FROM file_resource WHERE " + committeeFilePredicate(), id, id, id);
+        stageFiles(files);
+        update("DELETE FROM safety_committee_log WHERE record_id = ?", id);
+        update("DELETE FROM safety_committee_attachment WHERE record_id = ?", id);
+        requireSingle(update("DELETE FROM safety_committee_record WHERE id = ?", id), "巡检记录已变化，请重新预览");
+        registerCommittedFilePurge(files);
+    }
+
+    private String committeeFilePredicate() {
+        // Retried conversion copies may already be retired and no longer be the current preview pointer.
+        return "id IN (SELECT file_id FROM safety_committee_attachment WHERE record_id = ? "
+                + "UNION SELECT preview_file_id FROM safety_committee_attachment WHERE record_id = ?) "
+                + "OR (business_type IN ('COMMITTEE_INSPECTION_ATTACHMENT','COMMITTEE_INSPECTION_PREVIEW') "
+                + "AND business_id = ?)";
     }
 
     private void deleteQualityIssue(Long issueId) {

@@ -231,6 +231,28 @@ public class AuthService {
         return user;
     }
 
+    public record ReadSessionSnapshot(Long userId, String fingerprint, Integer credentialVersion, long expiresAt) {}
+
+    public ReadSessionSnapshot snapshotReadSession(String authorization) {
+        SysUser user = getCurrentUser(authorization);
+        String token = normalizeToken(authorization);
+        return new ReadSessionSnapshot(user.getId(), tokenFingerprint(token), normalizedCredentialVersion(user),
+                jwtConfig.parseToken(token).getExpiration().getTime());
+    }
+
+    public SysUser validateReadSession(ReadSessionSnapshot snapshot) {
+        if (snapshot == null || snapshot.expiresAt() <= System.currentTimeMillis()
+                || !snapshot.userId().toString().equals(String.valueOf(redisTemplate.opsForValue()
+                .get(sessionTokenKey(snapshot.fingerprint()))))) {
+            throw BusinessException.of(401, "原登录会话已失效，请重新打开附件");
+        }
+        SysUser user = getUserInfo(snapshot.userId());
+        if (Integer.valueOf(0).equals(user.getStatus())
+                || !java.util.Objects.equals(normalizedCredentialVersion(user), snapshot.credentialVersion())
+                || requiresInitialPasswordSetup(user)) throw BusinessException.forbidden("原登录资格已变化");
+        return user;
+    }
+
     public SysUser getCurrentUserIfPresent(String token) {
         return StringUtils.hasText(token) ? getCurrentUser(token) : null;
     }

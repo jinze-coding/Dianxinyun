@@ -856,7 +856,7 @@ public class SystemAdministrationService {
                 .in(SystemMenu::getMenuCode, List.of(
                         "WEB_SITE_ACCESS",
                         "WEB_DOCUMENT", "MINI_DOCUMENT", "WEB_INSPECTION", "MINI_INSPECTION",
-                        "WEB_QUALITY", "MINI_QUALITY")));
+                        "WEB_QUALITY", "MINI_QUALITY", "WEB_SAFETY_COMMITTEE", "MINI_SAFETY_COMMITTEE")));
         for (SystemMenu menu : businessMenus) {
             String moduleCode = BusinessModuleCodes.fromMenuCode(menu.getMenuCode());
             if (moduleCode == null) continue;
@@ -905,6 +905,7 @@ public class SystemAdministrationService {
 
     private Set<String> requiredPermissionCodes(String code) {
         Set<String> requiredCodes = new LinkedHashSet<>();
+        if (Set.of("SAFETY_COMMITTEE.SUBMIT", "SAFETY_COMMITTEE.EDIT_OWN").contains(code)) requiredCodes.add("SAFETY_COMMITTEE.VIEW");
         if ("BOX_VIEW".equals(code)) requiredCodes.add("INSPECTION.VIEW");
         if ("BOX_MANAGE".equals(code)) {
             requiredCodes.add("BOX_VIEW");
@@ -976,6 +977,8 @@ public class SystemAdministrationService {
                 Set.of("INSPECTION_LEDGER", "INSPECTION_RECORDS", "INSPECTION_RECTIFICATIONS", "INSPECTION_EDGE"), selectedCodes, catalogCodes);
         requireSelectedPageWhenCatalogExists("WEB_QUALITY",
                 Set.of("QUALITY_ISSUES", "QUALITY_DOCUMENTS"), selectedCodes, catalogCodes);
+        requireSelectedPageWhenCatalogExists("WEB_SAFETY_COMMITTEE",
+                Set.of("SAFETY_COMMITTEE_RECORDS"), selectedCodes, catalogCodes);
         requireSelectedPageWhenCatalogExists("WEB_SITE_ACCESS",
                 Set.of("SITE_VISITOR"), selectedCodes, catalogCodes);
         if (selectedCodes.contains("WEB_SYSTEM")
@@ -1081,6 +1084,9 @@ public class SystemAdministrationService {
             return selectedMenuCodes.contains("INSPECTION_LEDGER")
                     || selectedMenuCodes.contains("INSPECTION_RECORDS")
                     || selectedMenuCodes.contains("INSPECTION_RECTIFICATIONS");
+        }
+        if ("WEB_SAFETY_COMMITTEE".equals(module)) {
+            return businessModuleCodes.contains("SAFETY_COMMITTEE") && selectedMenuCodes.contains("SAFETY_COMMITTEE_RECORDS");
         }
         if ("WEB_QUALITY".equals(module)) {
             if (!businessModuleCodes.contains("QUALITY")) return false;

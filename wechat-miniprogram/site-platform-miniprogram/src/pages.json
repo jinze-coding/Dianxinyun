@@ -4,6 +4,10 @@
       "path": "pages/login/index",
       "style": { "navigationStyle": "custom", "disableScroll": true }
     },
+    { "path": "pages/safety-committee/index", "style": { "navigationStyle": "custom", "navigationBarTitleText": "安委会巡检" } },
+    { "path": "pages/safety-committee/edit", "style": { "navigationStyle": "custom", "navigationBarTitleText": "安委会巡检" } },
+    { "path": "pages/safety-committee/detail", "style": { "navigationStyle": "custom", "navigationBarTitleText": "安委会巡检" } },
+    { "path": "pages/safety-committee/capture", "style": { "navigationStyle": "custom", "navigationBarTitleText": "安委会巡检" } },
     {
       "path": "pages/wechat-bind/index",
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "绑定系统账号" }
