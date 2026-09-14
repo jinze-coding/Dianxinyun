@@ -13,18 +13,9 @@ export const committeeKey = () => `${Date.now().toString(36)}${Math.random().toS
 export const committeeDate = (v: string) => String(v || '').replace('T',' ').replace(/\.\d+$/, '');
 export const committeeSize = (v: number) => v >= 1024 ** 2 ? `${(v / 1024 ** 2).toFixed(1)} MB` : `${Math.ceil(v / 1024)} KB`;
 export const activeCommitteeFiles = (r?: CommitteeRecord) => (r?.attachments || []).filter(a => a.status === 'ACTIVE');
-export function validateCommitteeDateRange(startDate: string, endDate: string): string {
-  if (!startDate && !endDate) return '';
-  if (!startDate || !endDate) return '请选择完整的开始日期和结束日期';
-  const valid = (value: string) => /^[1-9]\d{3}-\d{2}-\d{2}$/.test(value)
-    && !Number.isNaN(Date.parse(`${value}T00:00:00Z`))
-    && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
-  if (!valid(startDate) || !valid(endDate)) return '请选择有效日期';
-  return endDate < startDate ? '结束日期不能早于开始日期' : '';
-}
 export const committeeApi = {
   categories: (projectId: number) => request<string[]>(`${base}/categories?projectId=${projectId}`),
-  list: (projectId: number, category: string, page: number, startDate = '', endDate = '') => request<CommitteePage>(`${base}/records?projectId=${projectId}&pageNo=${page}&category=${encodeURIComponent(category)}${startDate ? `&startDate=${encodeURIComponent(startDate)}` : ''}${endDate ? `&endDate=${encodeURIComponent(endDate)}` : ''}`),
+  list: (projectId: number, category: string, page: number) => request<CommitteePage>(`${base}/records?projectId=${projectId}&pageNo=${page}&category=${encodeURIComponent(category)}`),
   detail: (id: number) => request<CommitteeRecord>(`${base}/records/${id}`),
   save: (id: number | undefined, data: unknown) => request<CommitteeRecord>(`${base}/records${id ? `/${id}` : ''}`, { method: id ? 'PUT' : 'POST', data }),
   attachment: (id: number) => request<CommitteeAttachment>(`${base}/attachments/${id}`),

@@ -41,17 +41,6 @@
 .committee-filter-value { display: flex; min-height: 58rpx; align-items: center; gap: 8rpx; padding: 10rpx 14rpx; border-radius: 10rpx; background: var(--workspace-tint); color: var(--workspace-accent-deep); font-size: 21rpx; font-weight: 650; }
 .committee-filter-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .committee-sync { display: block; margin-top: 10rpx; color: var(--workspace-text-muted); font-size: 20rpx; line-height: 1.5; }
-.committee-date-range { margin-top: 18rpx; padding: 18rpx 0 14rpx; border-top: 1rpx solid var(--workspace-divider); border-bottom: 1rpx solid var(--workspace-divider); }
-.committee-date-label { display: block; margin-bottom: 12rpx; color: var(--workspace-text-secondary); font-size: 22rpx; font-weight: 650; }
-.committee-date-fields { display: flex; align-items: center; gap: 12rpx; }
-.committee-date-picker { min-width: 0; flex: 1; }
-.committee-date-value { display: flex; min-height: 68rpx; align-items: center; justify-content: space-between; gap: 8rpx; padding: 12rpx 16rpx; border-radius: 10rpx; background: var(--workspace-tint); color: var(--workspace-accent-deep); font-size: 23rpx; }
-.committee-date-separator, .committee-date-note { color: var(--workspace-text-muted); font-size: 20rpx; line-height: 1.5; }
-.committee-date-actions { display: flex; align-items: center; gap: 12rpx; margin-top: 14rpx; }
-.committee-date-note { min-width: 0; flex: 1; }
-.committee-date-button { min-height: 58rpx; padding: 10rpx 22rpx; font-size: 22rpx; }
-.committee-date-error, .committee-date-pending { display: block; margin-top: 12rpx; font-size: 21rpx; line-height: 1.5; }
-.committee-date-error { color: var(--mp-danger); }
 .committee-new { width: 100%; }
 .committee-record { padding: 22rpx; }
 .committee-record-name { min-width: 0; font-size: 26rpx; font-weight: 750; overflow-wrap: anywhere; }

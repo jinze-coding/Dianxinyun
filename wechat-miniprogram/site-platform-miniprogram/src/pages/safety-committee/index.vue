@@ -12,12 +12,9 @@ import { WORKSPACE_THEME } from '@/constants/workspaceTheme';
 import { usePageScrollHeight } from '@/utils/navLayout';
 import { useAuthStore } from '@/stores/auth';
 import { useProjectStore } from '@/stores/project';
-import { committeeApi, committeeDate, committeeAccessLost, activeCommitteeFiles, validateCommitteeDateRange, type CommitteeAttachment, type CommitteePage } from '@/api/safetyCommittee';
+import { committeeApi, committeeDate, committeeAccessLost, activeCommitteeFiles, type CommitteeAttachment, type CommitteePage } from '@/api/safetyCommittee';
 const auth=useAuthStore();const projects=useProjectStore();
 const categories=ref<string[]>([]);const category=ref('');const page=ref(1);const data=ref<CommitteePage>({records:[],total:0,latestId:null});
-const startDate=ref('');const endDate=ref('');const dateRange=ref({startDate:'',endDate:''});const dateError=ref('');
-const pickerDate=new Date(Date.now()+8*3600000).toISOString().slice(0,10);
-const datesChanged=computed(()=>startDate.value!==dateRange.value.startDate||endDate.value!==dateRange.value.endDate);
 const preview=ref<CommitteeAttachment>();const error=ref('');const lastSync=ref('');const hasNew=ref(false);const latest=ref<number|null>(null);let timer:ReturnType<typeof setInterval>|undefined;let visible=false;let loading=false;let generation=0;
 const projectId=computed(()=>projects.state.currentProjectId);const canSubmit=computed(()=>auth.hasProjectPermission(projectId.value,'safety_committee.submit'));
 const authorizedProjects=computed(()=>projects.state.projects.filter(p=>auth.hasProjectPermission(p.id,'safety_committee.view')));
@@ -25,8 +22,8 @@ const currentProject=computed(()=>projects.state.projects.find(p=>p.id===project
 const areaSheetOpen=ref(false);
 const scrollTop=ref(0);
 const { scrollStyle }=usePageScrollHeight({bottomRpx:124,minHeight:180});
-async function refresh(){if(!visible||loading||!projectId.value)return;loading=true;const current=++generation;const requestedProject=projectId.value;const requestedCategory=category.value;const requestedPage=page.value;const requestedDates=dateRange.value;
- try{const next=await committeeApi.list(requestedProject,requestedCategory,requestedPage,requestedDates.startDate,requestedDates.endDate);if(!visible||current!==generation||projectId.value!==requestedProject||category.value!==requestedCategory||page.value!==requestedPage||dateRange.value!==requestedDates)return;
+async function refresh(){if(!visible||loading||!projectId.value)return;loading=true;const current=++generation;const requestedProject=projectId.value;const requestedCategory=category.value;const requestedPage=page.value;
+ try{const next=await committeeApi.list(requestedProject,requestedCategory,requestedPage);if(!visible||current!==generation||projectId.value!==requestedProject||category.value!==requestedCategory||page.value!==requestedPage)return;
  if(page.value>1&&latest.value!==null&&latest.value!==next.latestId)hasNew.value=true;else{data.value=next;latest.value=next.latestId;}
  lastSync.value=new Date().toLocaleTimeString('zh-CN',{hour12:false});error.value='';
  }catch(e){if(visible&&current===generation&&projectId.value===requestedProject){error.value=(e as Error).message;if(committeeAccessLost(e))data.value={records:[],total:0,latestId:null};}}finally{if(current===generation)loading=false;}}
@@ -39,8 +36,6 @@ async function scrollToTop(){await nextTick();scrollTop.value=0;}
 function reload(){generation++;loading=false;void refresh();}
 function newest(){page.value=1;latest.value=null;hasNew.value=false;reload();void scrollToTop();}
 function filter(e:any){category.value=['',...categories.value][Number(e.detail.value)]||'';newest();}
-function applyDates(){dateError.value=validateCommitteeDateRange(startDate.value,endDate.value);if(dateError.value)return;dateRange.value={startDate:startDate.value,endDate:endDate.value};newest();}
-function resetFilters(){startDate.value='';endDate.value='';dateError.value='';category.value='';dateRange.value={startDate:'',endDate:''};newest();}
 function selectProject(id:number){projects.setCurrentProject(id);data.value={records:[],total:0,latestId:null};newest();}
 function changePage(step:number){page.value+=step;reload();void scrollToTop();}
 function open(id:number){uni.navigateTo({url:`/pages/safety-committee/detail?id=${id}`});}
@@ -64,21 +59,6 @@ function open(id:number){uni.navigateTo({url:`/pages/safety-committee/detail?id=
               <view class="committee-filter-value"><text class="committee-filter-label">{{category||'全部分类'}}</text><text class="committee-chevron"></text></view>
             </picker>
           </view>
-          <view class="committee-date-range">
-            <text class="committee-date-label">检查日期</text>
-            <view class="committee-date-fields">
-              <picker class="committee-date-picker" mode="date" start="1000-01-01" end="9999-12-31" :value="startDate||endDate||pickerDate" @change="startDate=$event.detail.value;dateError=''">
-                <view class="committee-date-value"><text>{{startDate||'开始日期'}}</text><text class="committee-chevron"></text></view>
-              </picker>
-              <text class="committee-date-separator">至</text>
-              <picker class="committee-date-picker" mode="date" start="1000-01-01" end="9999-12-31" :value="endDate||startDate||pickerDate" @change="endDate=$event.detail.value;dateError=''">
-                <view class="committee-date-value"><text>{{endDate||'结束日期'}}</text><text class="committee-chevron"></text></view>
-              </picker>
-            </view>
-            <view class="committee-date-actions"><text class="committee-date-note">北京时间，含起止当天</text><button class="committee-button committee-date-button" @tap="resetFilters">重置</button><button class="committee-button committee-primary committee-date-button" @tap="applyDates">查询</button></view>
-            <text v-if="dateError" class="committee-date-error">{{dateError}}</text>
-            <text v-else-if="datesChanged" class="committee-date-note committee-date-pending">日期已修改，点击查询生效</text>
-          </view>
           <text class="committee-sync">{{lastSync?`自动同步 · 最近更新 ${lastSync}`:'正在加载记录…'}}</text>
         </view>
         <button v-if="hasNew" class="committee-button committee-new" @tap="newest">有新记录，点击查看最新</button>
@@ -92,7 +72,7 @@ function open(id:number){uni.navigateTo({url:`/pages/safety-committee/detail?id=
         <view v-if="!data.records.length&&!error" class="committee-card committee-empty">
           <view class="committee-empty-mark"><image class="committee-empty-image" src="/static/design-preview-icons/quality-inspect.png" mode="aspectFit" /></view>
           <text class="committee-empty-title">{{lastSync?'暂无巡检记录':'正在加载巡检记录'}}</text>
-          <text v-if="lastSync" class="committee-empty-desc">{{category||dateRange.startDate?'可调整分类或日期范围查看':canSubmit?'点击上方“上报巡检”，记录现场检查情况':'当前施工区域的巡检记录将在这里显示'}}</text>
+          <text v-if="lastSync" class="committee-empty-desc">{{category?'可切换其他隐患分类查看':canSubmit?'点击上方“上报巡检”，记录现场检查情况':'当前施工区域的巡检记录将在这里显示'}}</text>
         </view>
         <view v-if="data.total>20" class="committee-row committee-pagination"><button class="committee-button committee-page-button" :class="{'committee-button-disabled':page<=1}" :disabled="page<=1" @tap="changePage(-1)">上一页</button><text class="committee-muted">{{page}} / {{Math.max(1,Math.ceil(data.total/20))}}</text><button class="committee-button committee-page-button" :class="{'committee-button-disabled':page*20>=data.total}" :disabled="page*20>=data.total" @tap="changePage(1)">下一页</button></view>
       </view>

@@ -24,10 +24,8 @@ try{
    getFileSystemManager:()=>({readFile:o=>{reads.push([o.position,o.length]);o.success({data:new Uint8Array(o.length).buffer});}}),
    request:o=>{assert.equal(o.method,'PUT');assert.ok(o.data.byteLength<=8*1024**2+1024);assert.equal(o.header.Authorization,'Bearer test-session');sent++;o.success({statusCode:200,data:{code:200}});return {abort:()=>{}};}};
  const api=await import(pathToFileURL(path.join(temporary,'api.mjs')));
- for(const [start,end] of [['',''],['2024-02-29','2024-02-29'],['2024-02-29','2026-09-14']])assert.equal(api.validateCommitteeDateRange(start,end),'');
- for(const [start,end] of [['2026-09-01',''],['','2026-09-14'],['2026-09-14','2026-09-01'],['2026-02-29','2026-03-01']])assert.ok(api.validateCommitteeDateRange(start,end));
- await api.committeeApi.list(3,'基坑工程',2,'2026-09-01','2026-09-14');
- assert.deepEqual(Object.fromEntries(queries[0]),{projectId:'3',pageNo:'2',category:'基坑工程',startDate:'2026-09-01',endDate:'2026-09-14'});
+ await api.committeeApi.list(3,'基坑工程',2);
+ assert.deepEqual(Object.fromEntries(queries[0]),{projectId:'3',pageNo:'2',category:'基坑工程'});
  await api.committeeApi.list(3,'',1);assert.equal(queries[1].has('startDate'),false);assert.equal(queries[1].has('endDate'),false);
  for(const [ext,limit] of [['png',15],['docx',100],['mp4',500]]){api.validateCommitteeFile({name:`f.${ext}`,size:limit*1024**2,path:'x'});assert.throws(()=>api.validateCommitteeFile({name:`f.${ext}`,size:limit*1024**2+1,path:'x'}));}
  assert.throws(()=>api.validateCommitteeFile({name:'bad.svg',size:10,path:'x'}));
@@ -39,5 +37,5 @@ try{
  const nav=ts.transpileModule(await readFile(path.join(root,'src/utils/navigation.ts'),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
  await writeFile(path.join(temporary,'nav.mjs'),nav);const navigation=await import(pathToFileURL(path.join(temporary,'nav.mjs')));
  navigation.switchTab('/pages/safety-committee/index');assert.equal(launched,'/pages/safety-committee/index');assert.equal(switched,'');navigation.switchTab('/pages/todo/index');assert.equal(switched,'/pages/todo/index');
- console.log('安委会专项通过：日期范围校验及组合分页/重置、大小边界、500 MiB 按段读取及31片续传、取消、播放凭证和六入口路由（原生五tab）。');
+ console.log('安委会专项通过：不带日期的分类分页查询、大小边界、500 MiB 按段读取及31片续传、取消、播放凭证和六入口路由（原生五tab）。');
 }finally{await rm(temporary,{recursive:true,force:true});delete globalThis.uni;delete globalThis.committeeRequest;}
