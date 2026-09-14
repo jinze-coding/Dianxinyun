@@ -30,11 +30,13 @@ import {
   EDGE_REMINDER_PROJECTION_NOTICE,
   EDGE_RECTIFICATION_STATUS_TEXT,
   WEEKDAY_OPTIONS,
+  edgePendingPhaseText,
   edgePointTypeCode,
   edgePointTypeName,
   edgeTaskStatusText,
   formatLocalDate,
   normalizeEdgeSetting,
+  selectTodayOpenPendingTasks,
   taskTimeRange,
 } from './model';
 import './index.css';
@@ -61,6 +63,8 @@ const timestamp = (value) => {
   const parsed = value ? new Date(value).getTime() : Number.POSITIVE_INFINITY;
   return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
 };
+const taskIsOverdue = (task) => task?.overdue === true
+  || (task?.overdue == null && timestamp(task?.dueTime || task?.deadline || task?.windowEnd) < Date.now());
 const EDGE_FLOW_STEPS = ['点位设置', '自动生成任务', '小程序巡检', '异常整改', '复查闭环'];
 
 function Modal({ title, children, onClose, onSubmit, submitText = '保存', busy, wide = false }) {
@@ -184,7 +188,7 @@ export default function EdgeInspectionManagement({ projectId, theme: T, currentU
     const rectificationTaskIds = new Set(rectifications.map((row) => Number(row.taskId || row.inspectionTaskId || row.id)).filter(Boolean));
     const overdueTasks = todoTasks
       .filter((task) => String(task.status || '').toUpperCase() === 'PENDING')
-      .filter((task) => timestamp(task.dueTime || task.deadline || task.windowEnd) < Date.now())
+      .filter(taskIsOverdue)
       .filter((task) => !rectificationTaskIds.has(Number(task.id)))
       .map((task) => ({
         key: `task-${task.id}`, category: 'MISSED', categoryLabel: '逾期未检', source: task,
@@ -220,6 +224,10 @@ export default function EdgeInspectionManagement({ projectId, theme: T, currentU
     RECTIFY: todoItems.filter((item) => item.category === 'RECTIFY').length,
     REVIEW: todoItems.filter((item) => item.category === 'REVIEW').length,
   }), [todoItems]);
+  const todayOpenPendingTasks = useMemo(
+    () => selectTodayOpenPendingTasks(todoTasks, today()),
+    [todoTasks],
+  );
   const filteredTodoItems = useMemo(() => todoFilter === 'ALL' ? todoItems : todoItems.filter((item) => item.category === todoFilter), [todoFilter, todoItems]);
   const settingFrequencyText = useMemo(() => {
     if (!setting) return '-';
@@ -273,7 +281,7 @@ export default function EdgeInspectionManagement({ projectId, theme: T, currentU
     setLoading(true); setError('');
     try {
       const requests = [
-        getEdgeInspectionTasks({ projectId: targetProjectId, mine: false, status: 'PENDING' }),
+        getEdgeInspectionTasks({ projectId: targetProjectId, mine: false, status: 'PENDING', endDate: today() }),
         getEdgeInspectionRectifications({ projectId: targetProjectId, scope: 'ALL' }),
         getEdgeInspectionWorkspaceSummary(targetProjectId),
       ];
@@ -595,6 +603,7 @@ export default function EdgeInspectionManagement({ projectId, theme: T, currentU
   const checklistItems = (type) => type.items || type.checkItems || type.inspectionItems || [];
   const rectificationRows = (detail) => detail?.items || detail?.abnormalItems || detail?.rectifications || [];
   const taskItems = taskDetail?.items || taskDetail?.checkItems || [];
+  const taskDetailPending = String(taskDetail?.status || '').toUpperCase() === 'PENDING';
   const userNameById = (id, fallback) => {
     const matched = users.find((user) => Number(valueId(user)) === Number(id));
     return fallback || (matched ? valueName(matched) : '-');
@@ -627,11 +636,24 @@ export default function EdgeInspectionManagement({ projectId, theme: T, currentU
     </section>
 
     {activeView === 'todo' && <section className="edge-card edge-workspace-card">
-      <div className="edge-toolbar"><div><h3>项目待处理</h3><span className="edge-muted">项目范围：只显示逾期未检、待整改和待复查；未来预生成任务不会进入这里。</span></div><button className="edge-link-button" type="button" onClick={() => setActiveView('records')}>查看全部记录</button></div>
+      <div className="edge-today-block">
+        <div className="edge-toolbar"><div><h3>今日待巡检 <b className="edge-section-count">{todayOpenPendingTasks.length}</b><small>项目范围</small></h3><span className="edge-muted">这里展示今天尚未截止的临边任务；现场照片和 5 项固定检查由指定巡检人在微信小程序录入。</span></div><button className="edge-link-button" type="button" onClick={() => { const currentDate = today(); setRange({ startDate: currentDate, endDate: currentDate, status: 'PENDING' }); setRecordFilter({ keyword: '', typeCode: '' }); setRecordQuickFilter('ALL'); setActiveView('records'); }}>查看今日全部任务</button></div>
+        {!todayOpenPendingTasks.length ? <Empty>今天没有待巡检任务；已提交任务可到“巡检记录”查看。</Empty> : <div className="edge-today-grid">
+          {todayOpenPendingTasks.slice(0, 8).map((task) => <button className="edge-today-task" type="button" key={task.id} onClick={() => openTask(task)}>
+            <span className="edge-today-task-head"><strong>{task.pointCode} · {displayPointName(task.pointName)}</strong><em>{edgePendingPhaseText(task)}</em></span>
+            <span>{task.pointTypeName || pointTypeNameByCode.get(task.pointTypeCode) || task.pointTypeCode}</span>
+            <small>{[task.buildingName, task.floorName, task.locationDesc].filter(Boolean).join(' · ') || '未填写位置'} · {task.assigneeName || '待分派'}</small>
+            <small>{taskTimeRange(task)}</small>
+          </button>)}
+          {todayOpenPendingTasks.length > 8 && <button className="edge-today-more" type="button" onClick={() => { const currentDate = today(); setRange({ startDate: currentDate, endDate: currentDate, status: 'PENDING' }); setRecordFilter({ keyword: '', typeCode: '' }); setRecordQuickFilter('ALL'); setActiveView('records'); }}>还有 {todayOpenPendingTasks.length - 8} 项，查看全部</button>}
+        </div>}
+      </div>
+      <div className="edge-workspace-divider" />
+      <div className="edge-toolbar"><div><h3>异常待处理 <small>项目范围</small></h3><span className="edge-muted">只显示逾期未检、待整改和待复查；未来预生成任务不会进入这里。</span></div><button className="edge-link-button" type="button" onClick={() => setActiveView('records')}>查看全部记录</button></div>
       <div className="edge-todo-filters">
         {[['MISSED', '逾期未检'], ['RECTIFY', '待整改'], ['REVIEW', '待复查']].map(([key, label]) => <button key={key} type="button" className={todoFilter === key ? 'active' : ''} onClick={() => setTodoFilter((current) => current === key ? 'ALL' : key)}><span>{label}</span><strong>{todoMetrics[key]}</strong></button>)}
       </div>
-      {!filteredTodoItems.length ? <Empty>{todoItems.length ? '当前分类没有待处理事项。' : '当前没有需要处理的临边巡检事项。'}</Empty> : <div className="edge-table-wrap"><table className="edge-table edge-todo-table"><thead><tr><th>事项类型</th><th>点位</th><th>任务日期 / 期限</th><th>当前责任人</th><th>状态</th><th>操作</th></tr></thead><tbody>
+      {!filteredTodoItems.length ? <Empty>{todoItems.length ? '当前分类没有待处理事项。' : '当前没有逾期、整改或复查事项。'}</Empty> : <div className="edge-table-wrap"><table className="edge-table edge-todo-table"><thead><tr><th>事项类型</th><th>点位</th><th>任务日期 / 期限</th><th>当前责任人</th><th>状态</th><th>操作</th></tr></thead><tbody>
         {filteredTodoItems.map((item) => <tr className="edge-clickable-row" key={item.key} onClick={() => item.category === 'MISSED' ? openTask(item.source) : openRectification(item.source)}><td><strong>{item.categoryLabel}</strong></td><td><strong>{item.pointCode}</strong><br />{displayPointName(item.pointName)}{item.pointTypeName && <><br /><span className="edge-muted">{item.pointTypeName}</span></>}</td><td>{item.businessDate}<br /><span className={item.overdue ? 'edge-danger-text' : 'edge-muted'}>{item.deadline ? `期限 ${dateText(item.deadline)}` : '-'}</span></td><td>{item.owner}</td><td><span className={`edge-status ${item.overdue ? 'danger' : ''}`}>{item.statusLabel}</span></td><td><button className="edge-button" type="button" onClick={(event) => { event.stopPropagation(); if (item.category === 'MISSED') openTask(item.source); else openRectification(item.source); }}>查看</button></td></tr>)}
       </tbody></table></div>}
     </section>}
@@ -704,7 +726,7 @@ export default function EdgeInspectionManagement({ projectId, theme: T, currentU
       <div className="edge-note"><b>数字口径：</b>本 Web 页面展示项目范围；小程序只展示当前账号被明确指派的巡检、整改和复查事项。</div>
     </div></aside></div>}
 
-    {taskDetail && <div className="edge-drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setTaskDetail(null)}><aside className="edge-drawer"><header><div><span>巡检记录详情</span><h3>{taskDetail.pointCode} · {displayPointName(taskDetail.pointName)}</h3></div><div>{canManage && String(taskDetail.status || '').toUpperCase() === 'PENDING' && <button className="edge-button" type="button" onClick={() => setTaskReassign({ task: taskDetail, assigneeId: taskDetail.assigneeId || '', reason: '' })}>改派巡检人</button>}<button className="edge-button" type="button" onClick={() => setTaskDetail(null)}>关闭</button></div></header><div className="edge-drawer-body"><div className="edge-detail-grid"><div><span>点位类型</span><strong>{taskDetail.pointTypeName || pointTypeNameByCode.get(taskDetail.pointTypeCode) || taskDetail.pointTypeCode}</strong></div><div><span>任务日期</span><strong>{taskDate(taskDetail)}</strong></div><div><span>状态</span><strong>{edgeTaskStatusText(taskDetail)}</strong></div><div><span>执行时段</span><strong>{taskTimeRange(taskDetail)}</strong></div><div><span>巡检人</span><strong>{taskDetail.assigneeName || '-'}</strong></div><div><span>提交时间</span><strong>{dateText(taskSubmittedTime(taskDetail))}</strong></div></div><h4>固定检查结果</h4>{!taskItems.length ? <Empty>尚未提交检查结果。</Empty> : <div className="edge-table-wrap"><table className="edge-table"><thead><tr><th>检查项</th><th>结果</th><th>说明</th><th>证据照片</th></tr></thead><tbody>{taskItems.map((item) => <tr key={item.snapshotItemId || item.id}><td>{item.itemName}{item.guidance && <div className="edge-muted">提示：{item.guidance}</div>}{item.standardReference && <div className="edge-muted">依据：{item.standardReference}</div>}</td><td>{resultText(item.result)}</td><td>{item.description || '-'}</td><td>{(item.photoFileIds || item.photos || []).length || 0} 张</td></tr>)}</tbody></table></div>}<div className="edge-note">现场全景照片 {(taskDetail.overallPhotoFileIds || taskDetail.overallPhotos || []).length || 0} 张；总备注：{taskDetail.remark || taskDetail.overallRemark || '-'}</div></div></aside></div>}
+    {taskDetail && <div className="edge-drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setTaskDetail(null)}><aside className="edge-drawer"><header><div><span>{taskDetailPending ? '巡检任务详情' : '巡检记录详情'}</span><h3>{taskDetail.pointCode} · {displayPointName(taskDetail.pointName)}</h3></div><div>{canManage && taskDetailPending && <button className="edge-button" type="button" onClick={() => setTaskReassign({ task: taskDetail, assigneeId: taskDetail.assigneeId || '', reason: '' })}>改派巡检人</button>}<button className="edge-button" type="button" onClick={() => setTaskDetail(null)}>关闭</button></div></header><div className="edge-drawer-body">{taskDetailPending && <div className="edge-note edge-input-guide"><b>录入端：微信小程序</b><span>请由巡检人 {taskDetail.assigneeName || '（待分派）'} 在“巡检 → 临边巡检 → 今日巡检”上传现场全景照片，并完成下列 5 项固定检查。</span></div>}<div className="edge-detail-grid"><div><span>点位类型</span><strong>{taskDetail.pointTypeName || pointTypeNameByCode.get(taskDetail.pointTypeCode) || taskDetail.pointTypeCode}</strong></div><div><span>任务日期</span><strong>{taskDate(taskDetail)}</strong></div><div><span>状态</span><strong>{edgeTaskStatusText(taskDetail)}</strong></div><div><span>执行时段</span><strong>{taskTimeRange(taskDetail)}</strong></div><div><span>巡检人</span><strong>{taskDetail.assigneeName || '-'}</strong></div><div><span>提交时间</span><strong>{dateText(taskSubmittedTime(taskDetail))}</strong></div></div><h4>{taskDetailPending ? '固定检查内容（待小程序录入）' : '固定检查结果'}</h4>{!taskItems.length ? <Empty>尚未提交检查结果。</Empty> : <div className="edge-table-wrap"><table className="edge-table"><thead><tr><th>检查项</th><th>结果</th><th>说明</th><th>证据照片</th></tr></thead><tbody>{taskItems.map((item) => <tr key={item.snapshotItemId || item.id}><td>{item.itemName}{item.guidance && <div className="edge-muted">提示：{item.guidance}</div>}{item.standardReference && <div className="edge-muted">依据：{item.standardReference}</div>}</td><td>{resultText(item.result)}</td><td>{item.description || '-'}</td><td>{(item.photoFileIds || item.photos || []).length || 0} 张</td></tr>)}</tbody></table></div>}<div className="edge-note">现场全景照片 {(taskDetail.overallPhotoFileIds || taskDetail.overallPhotos || []).length || 0} 张；总备注：{taskDetail.remark || taskDetail.overallRemark || '-'}</div></div></aside></div>}
 
     {cancelEditor && <Modal title="批量取消临边任务" onClose={() => setCancelEditor(null)} onSubmit={cancelTasks} busy={busy === 'task-cancel'} submitText="确认取消"><p>即将取消 {cancelEditor.taskIds.length} 项尚未提交的临边任务。取消任务不计入应检和漏检。</p><Field label="取消原因（必填）"><textarea rows="3" maxLength="300" value={cancelEditor.reason} onChange={(event) => setCancelEditor({ ...cancelEditor, reason: event.target.value })} /></Field></Modal>}
 

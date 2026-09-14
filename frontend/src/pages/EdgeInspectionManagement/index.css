@@ -56,6 +56,21 @@
 .edge-todo-filters button strong, .edge-compact-metrics button strong { font-size: 14px; }
 .edge-todo-filters button.active, .edge-compact-metrics button.active { color: var(--edge-accent); border-color: color-mix(in srgb, var(--edge-accent) 55%, var(--edge-border)); background: color-mix(in srgb, var(--edge-accent) 7%, var(--edge-card)); }
 .edge-todo-filters button:first-child strong { color: var(--edge-danger); }
+.edge-today-block { min-width: 0; }
+.edge-today-block h3 small, .edge-workspace-card h3 small { margin-left: 5px; color: var(--edge-muted); font-size: 11px; font-weight: 500; }
+.edge-section-count { display: inline-grid; min-width: 20px; height: 20px; margin-left: 5px; padding: 0 5px; place-items: center; border-radius: 999px; background: color-mix(in srgb, var(--edge-accent) 10%, var(--edge-card)); color: var(--edge-accent); font-size: 11px; }
+.edge-today-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; }
+.edge-today-task { min-width: 0; display: grid; gap: 5px; padding: 11px 12px; border: 1px solid var(--edge-border); border-radius: 8px; background: var(--edge-surface); color: var(--edge-text); text-align: left; cursor: pointer; font: inherit; }
+.edge-today-task:hover { border-color: var(--edge-accent); background: color-mix(in srgb, var(--edge-accent) 5%, var(--edge-card)); }
+.edge-today-task > span, .edge-today-task > small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.edge-today-task > span:not(.edge-today-task-head), .edge-today-task > small { color: var(--edge-muted); font-size: 11px; }
+.edge-today-task-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.edge-today-task-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.edge-today-task-head em { flex: 0 0 auto; padding: 2px 7px; border-radius: 999px; background: color-mix(in srgb, var(--edge-accent) 10%, var(--edge-card)); color: var(--edge-accent); font-size: 10px; font-style: normal; }
+.edge-today-more { min-height: 76px; border: 1px dashed var(--edge-border); border-radius: 8px; background: transparent; color: var(--edge-accent); cursor: pointer; font: inherit; font-size: 12px; }
+.edge-workspace-divider { height: 1px; margin: 16px 0; background: var(--edge-border); }
+.edge-input-guide { display: grid; gap: 4px; margin: 0 0 14px; color: var(--edge-text); border: 1px solid color-mix(in srgb, var(--edge-accent) 32%, var(--edge-border)); background: color-mix(in srgb, var(--edge-accent) 7%, var(--edge-card)); }
+.edge-input-guide b { color: var(--edge-accent); }
 .edge-todo-table th:first-child { width: 92px; }
 .edge-record-table th:first-child { width: 94px; }
 .edge-inline-summary { margin-top: 5px; color: var(--edge-muted); font-size: 11px; }
@@ -161,6 +176,7 @@
   .edge-flow-steps { order: 3; flex-basis: 100%; justify-content: flex-start; overflow-x: auto; padding-top: 4px; }
 }
 @media (max-width: 620px) {
+  .edge-today-grid { grid-template-columns: minmax(0, 1fr); }
   .edge-card { padding: 14px; }
   .edge-toolbar { align-items: stretch; flex-direction: column; }
   .edge-tabs { overflow-x: auto; }

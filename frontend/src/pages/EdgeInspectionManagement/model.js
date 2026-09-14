@@ -49,6 +49,28 @@ export function edgeTaskStatusText(task, now) {
   return EDGE_TASK_STATUS_TEXT[status] || status || '-';
 }
 
+export function selectTodayOpenPendingTasks(tasks = [], businessDate = formatLocalDate(), now = new Date()) {
+  const nowTime = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  return tasks
+    .filter((task) => String(task?.status || '').toUpperCase() === 'PENDING')
+    .filter((task) => String(task?.occurrenceDate || task?.taskDate || task?.scheduledDate || '') === businessDate)
+    .filter((task) => {
+      if (task?.overdue === true) return false;
+      if (task?.overdue === false) return true;
+      const due = task?.dueTime || task?.deadline || task?.windowEnd;
+      const dueTime = due ? new Date(due).getTime() : Number.POSITIVE_INFINITY;
+      return !Number.isFinite(nowTime) || !Number.isFinite(dueTime) || dueTime >= nowTime;
+    })
+    .sort((left, right) => String(left?.pointCode || '').localeCompare(String(right?.pointCode || ''), 'zh-CN'));
+}
+
+export function edgePendingPhaseText(task, now = new Date()) {
+  const available = task?.availableTime || task?.startTime || task?.windowStart;
+  if (!available) return '待巡检';
+  const availableTime = new Date(available).getTime();
+  return Number.isFinite(availableTime) && now.getTime() < availableTime ? '待开始' : '待巡检';
+}
+
 export function edgePointTypeCode(value) {
   return value?.pointTypeCode || value?.typeCode || value?.categoryCode || value?.code || '';
 }

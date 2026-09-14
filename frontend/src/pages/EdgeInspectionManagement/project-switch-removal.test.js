@@ -26,12 +26,23 @@ test('edge inspection Web workspace defaults to the compact three-page structure
 });
 
 test('todo page loads only actionable tasks and rectifications, deduplicates and sorts them', () => {
-  assert.match(page, /getEdgeInspectionTasks\(\{ projectId: targetProjectId, mine: false, status: 'PENDING' \}\)/);
+  assert.match(page, /getEdgeInspectionTasks\(\{ projectId: targetProjectId, mine: false, status: 'PENDING', endDate: today\(\) \}\)/);
+  assert.match(page, /task\?\.overdue === true/);
   assert.match(page, /getEdgeInspectionRectifications\(\{ projectId: targetProjectId, scope: 'ALL' \}\)/);
   assert.match(page, /rectificationTaskIds/);
   assert.match(page, /\['UNASSIGNED', 'PENDING', 'REJECTED', 'COMPLETED'\]/);
   assert.match(page, /left\.overdue !== right\.overdue/);
   assert.doesNotMatch(page, /Promise\.allSettled/);
+});
+
+test('todo workspace previews today tasks separately and directs field input to the mini program', () => {
+  assert.match(page, /selectTodayOpenPendingTasks/);
+  assert.match(page, /今日待巡检/);
+  assert.match(page, /现场照片和 5 项固定检查由指定巡检人在微信小程序录入/);
+  assert.match(page, /异常待处理/);
+  assert.match(page, /setRange\(\{ startDate: currentDate, endDate: currentDate, status: 'PENDING' \}\)/);
+  assert.match(page, /巡检 → 临边巡检 → 今日巡检/);
+  assert.match(styles, /\.edge-today-grid/);
 });
 
 test('records keep filters visible and opt into batch mode, statistics drawer and export dialog', () => {

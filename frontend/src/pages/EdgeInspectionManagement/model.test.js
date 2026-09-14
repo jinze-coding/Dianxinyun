@@ -4,10 +4,12 @@ import {
   EDGE_POINT_TYPE_OPTIONS,
   EDGE_REMINDER_PROJECTION_LABEL,
   EDGE_REMINDER_PROJECTION_NOTICE,
+  edgePendingPhaseText,
   edgeTaskDisplayStatus,
   edgeTaskStatusText,
   formatLocalDate,
   normalizeEdgeSetting,
+  selectTodayOpenPendingTasks,
 } from './model.js';
 
 describe('fixed edge inspection model', () => {
@@ -21,6 +23,25 @@ describe('fixed edge inspection model', () => {
     assert.equal(edgeTaskStatusText({ status: 'COMPLETED', lateSubmission: true }), '逾期补检');
     assert.equal(edgeTaskDisplayStatus({ status: 'PENDING', dueTime: '2026-08-25T08:00:00' }, new Date('2026-08-26T08:00:00')), 'OVERDUE');
     assert.equal(edgeTaskStatusText({ status: 'PENDING', dueTime: '2026-08-25T08:00:00' }, new Date('2026-08-26T08:00:00')), '逾期未检');
+  });
+
+  it('selects only today pending tasks that have not passed their deadline', () => {
+    const now = new Date('2026-09-03T09:57:00+08:00');
+    const rows = selectTodayOpenPendingTasks([
+      { id: 3, pointCode: 'EDGE-03', status: 'PENDING', occurrenceDate: '2026-09-03', dueTime: '2026-09-03T18:00:00+08:00' },
+      { id: 1, pointCode: 'EDGE-01', status: 'PENDING', occurrenceDate: '2026-09-03', dueTime: '2026-09-03T18:00:00+08:00' },
+      { id: 2, pointCode: 'EDGE-02', status: 'PENDING', occurrenceDate: '2026-09-03', dueTime: '2026-09-03T09:56:59+08:00' },
+      { id: 4, pointCode: 'EDGE-04', status: 'PENDING', occurrenceDate: '2026-09-04', dueTime: '2026-09-04T18:00:00+08:00' },
+      { id: 5, pointCode: 'EDGE-05', status: 'COMPLETED', occurrenceDate: '2026-09-03', dueTime: '2026-09-03T18:00:00+08:00' },
+      { id: 6, pointCode: 'EDGE-06', status: 'PENDING', occurrenceDate: '2026-09-03', dueTime: '2026-09-03T18:00:00+08:00', overdue: true },
+    ], '2026-09-03', now);
+    assert.deepEqual(rows.map((row) => row.id), [1, 3]);
+  });
+
+  it('distinguishes a task waiting for its execution window from one ready for inspection', () => {
+    const now = new Date('2026-09-03T09:57:00+08:00');
+    assert.equal(edgePendingPhaseText({ availableTime: '2026-09-03T10:00:00+08:00' }, now), '待开始');
+    assert.equal(edgePendingPhaseText({ availableTime: '2026-09-03T08:00:00+08:00' }, now), '待巡检');
   });
 
   it('formats the calendar date using an explicit local timezone offset', () => {
