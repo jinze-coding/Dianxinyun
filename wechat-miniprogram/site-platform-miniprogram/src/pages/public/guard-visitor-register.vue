@@ -511,7 +511,6 @@ onBeforeUnmount(cleanup);
           <view class="pass-grid"><text>登记来源</text><text>{{ matched.sourceType === 'MEETING' ? '会议预约' : '预约邀请' }}</text><text>主题</text><text>{{ matched.subject }}</text><text>登记编号</text><text>{{ matched.sourceNo }}</text><text>单位</text><text>{{ matched.visitorCompany }}</text><text>姓名</text><text>{{ matched.contactName }}</text><text>人数</text><text>{{ matched.visitorCount }} 人</text><text>有效时段</text><text>{{ formatTime(matched.visitStartTime) }} 至 {{ formatTime(matched.validUntil) }}</text><text>车辆</text><text>{{ matched.travelMode === 'DRIVING' ? matched.vehiclePlate : '非驾车' }}</text></view>
           <view class="matched-people"><text v-for="(person, index) in matched.people" :key="index">{{ person.personName || '未填写姓名' }}{{ person.personCompany ? ' · ' + person.personCompany : '' }}</text></view>
           <text class="pass-hint">{{ matched.sourceType === 'MEETING' ? '门卫核验后请到会场扫描签到码，逐人确认实际到场人员。' : '请将本页面出示给门卫核验。' }}</text>
-          <button class="project-info-button" @tap="openProjectProfile">项目信息</button>
         </view>
         <view v-if="pass" class="pass-card" :class="{ expired: passExpired }">
           <view class="pass-check">{{ passExpired ? '!' : '✓' }}</view>
@@ -528,7 +527,6 @@ onBeforeUnmount(cleanup);
             <text>有效截止</text><text>{{ formatTime(pass.validUntil) }}</text>
           </view>
           <text class="pass-hint">{{ passExpired ? '本次放行已超过24小时，请重新登记后再向门卫展示。' : '请将本页面出示给门卫核验。登记自提交起 24 小时有效。' }}</text>
-          <button class="project-info-button" @tap="openProjectProfile">项目信息</button>
           <button v-if="passExpired" class="pass-reload" @tap="initialize()">重新登记</button>
         </view>
       </template>
