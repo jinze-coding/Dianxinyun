@@ -1,9 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeCommitteePage } from './model.js';
+import { mergeCommitteePage, validateCommitteeDateRange } from './model.js';
 import { buildRoleMenuTree, toggleMenuNode, buildPermissionActions, toggleActionKey } from '../../utils/roleAuthorization.js';
 import { canAccessPage } from '../../utils/permissions.js';
 import { PAGE_IDS } from '../../constants/dicts.js';
+
+test('inspection dates are optional as a pair, include a single day and have no arbitrary span cap', () => {
+  for (const [start,end] of [['',''],['2024-02-29','2024-02-29'],['2024-02-29','2026-09-14'],['1000-01-01','9999-12-31']]) assert.equal(validateCommitteeDateRange(start,end),'');
+  for (const [start,end] of [['2026-09-01',''],['','2026-09-14'],['2026-09-14','2026-09-01'],['2026-02-29','2026-03-01'],['2026-13-01','2027-01-01'],['invalid','2026-09-14']]) assert.ok(validateCommitteeDateRange(start,end));
+});
 
 test('new submissions do not shift an older page; returning to page one releases the snapshot', () => {
   const current={records:[{id:20}],total:40}; const incoming={records:[{id:21}],total:41,latestId:41};

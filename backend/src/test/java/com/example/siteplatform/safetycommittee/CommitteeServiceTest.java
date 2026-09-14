@@ -15,6 +15,7 @@ import org.junit.jupiter.api.*;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.transaction.support.*;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.LongStream;
 import static org.assertj.core.api.Assertions.*;
@@ -49,6 +50,19 @@ class CommitteeServiceTest {
         assertThat(CommitteeService.normalizedIds(null)).isEmpty();assertThat(CommitteeService.normalizedIds(LongStream.rangeClosed(1,30).boxed().toList())).hasSize(30);
         assertThatThrownBy(()->CommitteeService.normalizedIds(LongStream.rangeClosed(1,31).boxed().toList())).isInstanceOf(BusinessException.class);
         assertThatThrownBy(()->CommitteeService.normalizedIds(List.of(1L,1L))).isInstanceOf(BusinessException.class);
+    }
+    @Test void dateRangeRequiresBothDatesInOrderAndAcceptsSameDayOrMultipleYears(){
+        var start=LocalDate.of(2024,2,29);
+        CommitteeService.validateDateRange(null,null);
+        CommitteeService.validateDateRange(start,start);
+        CommitteeService.validateDateRange(start,LocalDate.of(2026,9,14));
+        CommitteeService.validateDateRange(LocalDate.of(1000,1,1),LocalDate.of(9999,12,31));
+        assertThatThrownBy(()->service.page(3L,"",start,null,1,user)).isInstanceOf(BusinessException.class).hasMessageContaining("完整");
+        assertThatThrownBy(()->service.page(3L,"",null,start,1,user)).isInstanceOf(BusinessException.class).hasMessageContaining("完整");
+        assertThatThrownBy(()->service.page(3L,"",start,start.minusDays(1),1,user)).isInstanceOf(BusinessException.class).hasMessageContaining("早于");
+        assertThatThrownBy(()->CommitteeService.validateDateRange(LocalDate.of(999,1,1),start)).isInstanceOf(BusinessException.class);
+        assertThatThrownBy(()->CommitteeService.validateDateRange(start,LocalDate.of(10000,1,1))).isInstanceOf(BusinessException.class);
+        verify(records,never()).selectPage(any(),any());verify(records,never()).selectList(any());
     }
     @Test void ownEditPreservesOriginalInspectorAndTimeAndWritesBeforeAfterAudit(){
         var result=service.edit(10L,new CommitteeRequests.Edit("基坑工程","新版结论",List.of(),1),user);

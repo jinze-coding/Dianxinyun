@@ -39,6 +39,12 @@ class RoleAuthorizationRequestValidationTest {
 
         request.setBusinessModuleCodes(List.of("SITE_ACCESS", "DOCUMENT", "INSPECTION", "QUALITY"));
         assertTrue(validator.validate(request).isEmpty());
+
+        request.setBusinessModuleCodes(List.of("SITE_ACCESS", "DOCUMENT", "INSPECTION", "QUALITY", "SAFETY_COMMITTEE"));
+        assertTrue(validator.validate(request).isEmpty());
+
+        request.setBusinessModuleCodes(List.of("SITE_ACCESS", "DOCUMENT", "INSPECTION", "QUALITY", "SAFETY_COMMITTEE", "UNKNOWN"));
+        assertFalse(validator.validate(request).isEmpty());
     }
 
     @Test

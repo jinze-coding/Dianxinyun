@@ -62,18 +62,33 @@ public class CommitteeService {
             throw BusinessException.forbidden("只能修改本人上报的巡检记录");
         return record;
     }
-    public Map<String,Object> page(Long projectId, String category, long pageNo, SysUser user) {
+    public Map<String,Object> page(Long projectId, String category, LocalDate startDate, LocalDate endDate, long pageNo, SysUser user) {
         access(projectId, user, VIEW);
         if (category != null && !category.isBlank()) validateMetadata(category, null);
-        var q = new LambdaQueryWrapper<CommitteeRecord>().eq(CommitteeRecord::getProjectId, projectId)
-                .eq(category != null && !category.isBlank(), CommitteeRecord::getCategory, category)
-                .orderByDesc(CommitteeRecord::getInspectedAt).orderByDesc(CommitteeRecord::getId);
-        var page = records.selectPage(new Page<>(Math.max(1, pageNo), 20), q);
-        var newest = records.selectList(new LambdaQueryWrapper<CommitteeRecord>().eq(CommitteeRecord::getProjectId, projectId)
-                .eq(category != null && !category.isBlank(), CommitteeRecord::getCategory, category)
-                .orderByDesc(CommitteeRecord::getInspectedAt).orderByDesc(CommitteeRecord::getId).last("LIMIT 1"));
+        validateDateRange(startDate, endDate);
+        var page = records.selectPage(new Page<>(Math.max(1, pageNo), 20), recordQuery(projectId, category, startDate, endDate));
+        var newest = records.selectList(recordQuery(projectId, category, startDate, endDate).last("LIMIT 1"));
         return Map.of("records", page.getRecords().stream().map(r -> view(r, user, false)).toList(),
                 "total", page.getTotal(), "latestId", newest.isEmpty() ? 0L : newest.get(0).getId(), "serverTime", now());
+    }
+    static void validateDateRange(LocalDate startDate, LocalDate endDate) {
+        if (startDate == null && endDate == null) return;
+        if (startDate == null || endDate == null) throw BusinessException.of(400, "请选择完整的开始日期和结束日期");
+        if (endDate.isBefore(startDate)) throw BusinessException.of(400, "结束日期不能早于开始日期");
+        if (startDate.getYear() < 1000 || endDate.getYear() > 9999)
+            throw BusinessException.of(400, "日期须在 1000-01-01 至 9999-12-31 之间");
+    }
+    private LambdaQueryWrapper<CommitteeRecord> recordQuery(Long projectId, String category, LocalDate startDate, LocalDate endDate) {
+        var query = new LambdaQueryWrapper<CommitteeRecord>().eq(CommitteeRecord::getProjectId, projectId)
+                .eq(category != null && !category.isBlank(), CommitteeRecord::getCategory, category);
+        if (startDate != null) {
+            // inspected_at stores Beijing wall time. An exclusive next-day bound includes every microsecond of the end day.
+            query.ge(CommitteeRecord::getInspectedAt, startDate.atStartOfDay());
+            if (endDate.equals(LocalDate.of(9999, 12, 31)))
+                query.le(CommitteeRecord::getInspectedAt, endDate.atTime(23, 59, 59, 999999000));
+            else query.lt(CommitteeRecord::getInspectedAt, endDate.plusDays(1).atStartOfDay());
+        }
+        return query.orderByDesc(CommitteeRecord::getInspectedAt).orderByDesc(CommitteeRecord::getId);
     }
     public RecordView detail(Long id, SysUser user) { return view(requireRecord(id,user,false,false),user,true); }
 

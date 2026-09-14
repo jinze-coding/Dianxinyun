@@ -72,6 +72,47 @@ class CommitteeIntegrationTest {
     String base(){return "/api/v1/safety-committee";}
     Map<String,Object> createData(String category,String key,List<Long> ids){return new LinkedHashMap<>(Map.of("projectId",project,"category",category,"conclusion","","attachmentIds",ids,"requestKey",key));}
     int status(String method,String path,Object body,String token)throws Exception{return raw(method,path,body,token).getResponse().getStatus();}
+    @Test void dateRangeIncludesBeijingEndDayAndKeepsPaginationCategoryAndLatestInScope()throws Exception{
+        List<Long> fixtureIds=new ArrayList<>();
+        try{
+            datedRecord(fixtureIds,project,"其他","2024-02-27 23:59:59.999999");
+            long first=datedRecord(fixtureIds,project,"其他","2024-02-28 00:00:00.000000");
+            List<Long> middle=new ArrayList<>();
+            for(int i=0;i<20;i++)middle.add(datedRecord(fixtureIds,project,"其他",String.format("2024-02-28 12:00:%02d.000000",i)));
+            long last=datedRecord(fixtureIds,project,"其他","2024-02-29 23:59:59.999999");
+            long fire=datedRecord(fixtureIds,project,"消防管理","2024-02-29 12:00:00.000000");
+            datedRecord(fixtureIds,project,"其他","2024-03-01 00:00:00.000000");
+            datedRecord(fixtureIds,otherProject,"其他","2024-02-29 23:59:59.999999");
+            String path=base()+"/records?projectId="+project+"&startDate=2024-02-28&endDate=2024-02-29";
+            var all=call("GET",path,null,readerToken);
+            assertThat(all.path("total").asLong()).isEqualTo(23);assertThat(all.path("records").size()).isEqualTo(20);assertThat(all.path("latestId").asLong()).isEqualTo(last);
+            String filtered=path+"&category="+java.net.URLEncoder.encode("其他",StandardCharsets.UTF_8);
+            var result=call("GET",filtered,null,readerToken);
+            assertThat(result.path("total").asLong()).isEqualTo(22);assertThat(result.path("records").get(0).path("id").asLong()).isEqualTo(last);
+            var pageTwo=call("GET",filtered+"&pageNo=2",null,readerToken);
+            assertThat(pageTwo.path("total").asLong()).isEqualTo(22);assertThat(pageTwo.path("records").size()).isEqualTo(2);
+            assertThat(pageTwo.path("records").get(0).path("id").asLong()).isEqualTo(middle.get(0));
+            assertThat(pageTwo.path("records").get(1).path("id").asLong()).isEqualTo(first);
+            assertThat(pageTwo.path("latestId").asLong()).isEqualTo(last);
+            // A later submission outside the selected dates must not change the older-page new-record marker.
+            datedRecord(fixtureIds,project,"其他","2024-03-02 12:00:00.000000");
+            var refreshed=call("GET",filtered+"&pageNo=2",null,readerToken);
+            for(String field:List.of("records","total","latestId"))assertThat(refreshed.path(field)).isEqualTo(pageTwo.path(field));
+            var sameDay=call("GET",base()+"/records?projectId="+project+"&startDate=2024-02-29&endDate=2024-02-29",null,readerToken);
+            assertThat(sameDay.path("total").asLong()).isEqualTo(2);assertThat(sameDay.path("records").get(1).path("id").asLong()).isEqualTo(fire);
+            var empty=call("GET",base()+"/records?projectId="+project+"&startDate=2024-02-26&endDate=2024-02-26",null,readerToken);
+            assertThat(empty.path("total").asLong()).isZero();assertThat(empty.path("latestId").asLong()).isZero();assertThat(empty.path("records").isEmpty()).isTrue();
+            assertThat(call("GET",base()+"/records?projectId="+project,null,readerToken).path("total").asLong()).isGreaterThan(23);
+            for(String dates:List.of("startDate=2024-02-28","endDate=2024-02-29","startDate=2024-03-01&endDate=2024-02-29","startDate=2024-02-30&endDate=2024-03-01","startDate=invalid&endDate=2024-03-01"))
+                assertThat(status("GET",base()+"/records?projectId="+project+"&"+dates,null,readerToken)).as(dates).isEqualTo(400);
+            assertThat(status("GET",base()+"/records?projectId="+otherProject+"&startDate=2024-02-28&endDate=2024-02-29",null,readerToken)).isEqualTo(403);
+        }finally{for(Long id:fixtureIds)deleteRecord(id);}
+    }
+    long datedRecord(List<Long> ids,long projectId,String category,String time)throws Exception{
+        var data=createData(category,key(),List.of());data.put("projectId",projectId);
+        long id=call("POST",base()+"/records",data,adminToken).path("id").asLong();ids.add(id);
+        jdbc.update("UPDATE safety_committee_record SET inspected_at=? WHERE id=?",time,id);return id;
+    }
     @Test void categoryOnlyIdempotencyIdentityConcurrencyAndAuthorization()throws Exception{
         assertThat(call("GET",base()+"/categories?projectId="+project,null,readerToken).size()).isEqualTo(11);
         var data=createData("其他",key(),List.of());data.put("inspectorId",readerId);data.put("inspectorName","伪造姓名");data.put("inspectedAt","1999-01-01T00:00:00");

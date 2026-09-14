@@ -7,9 +7,11 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ResponseEntity;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import java.util.*;
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/v1/safety-committee")
@@ -25,8 +27,10 @@ public class CommitteeController {
         service.access(projectId,auth.getCurrentUser(authorization),CommitteeService.VIEW);return Result.success(CommitteeService.CATEGORIES);
     }
     @GetMapping("/records") public Result<Map<String,Object>> page(@RequestParam Long projectId,@RequestParam(required=false) String category,
+            @RequestParam(required=false) @DateTimeFormat(iso=DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required=false) @DateTimeFormat(iso=DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(defaultValue="1") long pageNo,@RequestHeader(value="Authorization",required=false) String authorization) {
-        return Result.success(service.page(projectId,category,pageNo,auth.getCurrentUser(authorization)));
+        return Result.success(service.page(projectId,category,startDate,endDate,pageNo,auth.getCurrentUser(authorization)));
     }
     @GetMapping("/records/{id}") public Result<CommitteeService.RecordView> detail(@PathVariable Long id,@RequestHeader(value="Authorization",required=false) String authorization) {
         return Result.success(service.detail(id,auth.getCurrentUser(authorization)));
