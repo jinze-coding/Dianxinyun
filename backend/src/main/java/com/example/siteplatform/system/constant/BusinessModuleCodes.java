@@ -60,6 +60,24 @@ public final class BusinessModuleCodes {
         return null;
     }
 
+    public static String fromBusinessType(String type) {
+        String code = normalize(type);
+        if (code.startsWith("SEAL_") || code.startsWith("DOCUMENT_")) return DOCUMENT;
+        if (code.startsWith("QUALITY_")) return QUALITY;
+        if (code.startsWith("COMMITTEE_") || code.startsWith("SAFETY_COMMITTEE")) return SAFETY_COMMITTEE;
+        if (code.startsWith("INSPECTION_") || code.startsWith("ELECTRIC_BOX") || code.startsWith("EDGE_INSPECTION") || code.startsWith("GENERAL_INSPECTION")) return INSPECTION;
+        if (code.startsWith("SITE_") || code.startsWith("MEETING_") || code.startsWith("GUARD_")) return SITE_ACCESS;
+        return null;
+    }
+
+    private static final String NOTIFICATION_MODULE_SQL = "CASE "
+            + "WHEN business_type LIKE 'SEAL\\_%' OR business_type LIKE 'DOCUMENT\\_%' THEN 'DOCUMENT' "
+            + "WHEN business_type LIKE 'QUALITY\\_%' THEN 'QUALITY' "
+            + "WHEN business_type LIKE 'COMMITTEE\\_%' OR business_type LIKE 'SAFETY_COMMITTEE%' THEN 'SAFETY_COMMITTEE' "
+            + "WHEN business_type LIKE 'INSPECTION\\_%' OR business_type LIKE 'ELECTRIC_BOX%' OR business_type LIKE 'EDGE_INSPECTION%' OR business_type LIKE 'GENERAL_INSPECTION%' THEN 'INSPECTION' "
+            + "WHEN business_type LIKE 'SITE\\_%' OR business_type LIKE 'MEETING\\_%' OR business_type LIKE 'GUARD\\_%' THEN 'SITE_ACCESS' ELSE NULL END";
+    public static final String NOTIFICATION_ENABLED_SQL = "(user_notification.project_id IS NULL OR (" + NOTIFICATION_MODULE_SQL + ") IS NULL OR EXISTS (SELECT 1 FROM project_business_module pm WHERE pm.project_id=user_notification.project_id AND pm.enabled=1 AND pm.module_code=(" + NOTIFICATION_MODULE_SQL + ")))";
+
     public static boolean isBusinessModule(String moduleCode) {
         return ALL.contains(normalize(moduleCode));
     }

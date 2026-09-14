@@ -129,7 +129,24 @@ public class ProjectPermissionService {
         return systemPermissionService.hasProjectPermission(userId, projectId, permissionCode);
     }
 
+    public void requireBusinessModule(Long projectId, String moduleCode) {
+        systemPermissionService.projectModules().requireEnabled(projectId, moduleCode);
+    }
+
+    public boolean isBusinessModuleDisabled(Long projectId, String moduleCode) {
+        return systemPermissionService.projectModules().isDisabled(projectId, moduleCode);
+    }
+
+    public java.time.LocalDateTime businessModuleActivatedAt(Long projectId, String moduleCode) {
+        return systemPermissionService.projectModules().activatedAt(projectId, moduleCode);
+    }
+
+    public com.example.siteplatform.project.service.ProjectBusinessModuleService projectModules() {
+        return systemPermissionService.projectModules();
+    }
+
     public void requireSystemPermission(Long userId, Long projectId, String permissionCode) {
+        requireBusinessModule(projectId, BusinessModuleCodes.fromPermissionCode(permissionCode));
         if (!hasSystemPermission(userId, projectId, permissionCode)) {
             throw BusinessException.forbidden("无当前项目操作权限：" + permissionCode);
         }

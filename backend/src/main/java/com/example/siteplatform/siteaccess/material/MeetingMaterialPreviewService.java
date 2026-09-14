@@ -78,12 +78,15 @@ public class MeetingMaterialPreviewService {
     @Scheduled(fixedDelay=3000,initialDelay=20000,scheduler="meetingPreviewScheduler")
     public void runNext() {
         var candidates=previews.selectList(new LambdaQueryWrapper<MeetingMaterialPreview>()
+                .inSql(MeetingMaterialPreview::getVersionId, "SELECT id FROM site_meeting_material_version WHERE project_id IN (" + com.example.siteplatform.project.service.ProjectBusinessModuleService.enabledProjectSql("SITE_ACCESS") + ")")
                 .and(q->q.eq(MeetingMaterialPreview::getStatus,"QUEUED").or(r->r.eq(MeetingMaterialPreview::getStatus,"PROCESSING").lt(MeetingMaterialPreview::getLeaseUntil,LocalDateTime.now())))
                 .orderByAsc(MeetingMaterialPreview::getId).last("LIMIT 1"));
         if(candidates.isEmpty()) return;
         MeetingMaterialPreview task=transaction.execute(tx->{
             var p=previews.lock(candidates.get(0).getId());
             if(p==null || !("QUEUED".equals(p.getStatus()) || ("PROCESSING".equals(p.getStatus()) && p.getLeaseUntil().isBefore(LocalDateTime.now())))) return null;
+            var version = versions.selectById(p.getVersionId());
+            if(version == null || service.isModuleDisabled(version.getProjectId())) return null;
             if(p.getAttempts()>=3) { p.setStatus("FAILED"); p.setFailureMessage("转换多次中断，可重新生成预览"); previews.updateById(p); return null; }
             p.setStatus("PROCESSING"); p.setWorkerId(UUID.randomUUID().toString()); p.setLeaseUntil(LocalDateTime.now().plusMinutes(35));
             p.setAttempts(p.getAttempts()+1); p.setUpdateTime(LocalDateTime.now()); MeetingMaterialService.one(previews.updateById(p)); return p;
@@ -101,9 +104,10 @@ public class MeetingMaterialPreviewService {
             try(InputStream stream=storage.load(original).getInputStream()) { Files.copy(stream,input,StandardCopyOption.REPLACE_EXISTING); }
             process=new ProcessBuilder("bash",converter,work.toString(),task.getKind(),original.getFileExtension())
                     .redirectErrorStream(true).redirectOutput(work.resolve("conversion.log").toFile()).start();
-            if(!process.waitFor(30,TimeUnit.MINUTES)) {
-                process.destroy(); if(!process.waitFor(10,TimeUnit.SECONDS)) {process.descendants().forEach(ProcessHandle::destroyForcibly); process.destroyForcibly();}
-                throw new IOException("conversion timeout");
+            long deadline=System.nanoTime()+TimeUnit.MINUTES.toNanos(30);
+            while(!process.waitFor(2,TimeUnit.SECONDS)) {
+                service.requireModule(v.getProjectId());
+                if(System.nanoTime()>deadline) throw new IOException("conversion timeout");
             }
             String ext=switch(task.getKind()) {case "OFFICE"->"pdf";case "HEIF"->"jpg";case "VIDEO"->"mp4";default->"mp3";};
             Path output=work.resolve("output."+ext);
@@ -113,6 +117,7 @@ public class MeetingMaterialPreviewService {
                 if(invitations.selectForUpdate(v.getInvitationId())==null || versions.selectById(v.getId())==null) return;
                 var current=previews.lock(task.getId());
                 if(current==null || !Objects.equals(current.getWorkerId(),task.getWorkerId()) || !"PROCESSING".equals(current.getStatus())) return;
+                service.requireModule(v.getProjectId());
                 var file=service.store(new PathMultipartFile("file","预览."+ext,"application/octet-stream",output),v.getProjectId(),v.getMaterialId(),"MEETING_MATERIAL_PREVIEW",v.getUploaderId());
                 MeetingMaterialService.one(previews.update(null,new LambdaUpdateWrapper<MeetingMaterialPreview>().eq(MeetingMaterialPreview::getId,current.getId())
                         .set(MeetingMaterialPreview::getStatus,"READY").set(MeetingMaterialPreview::getFileId,file.getId())
@@ -120,8 +125,9 @@ public class MeetingMaterialPreviewService {
             });
         } catch(Exception e) {
             if(e instanceof InterruptedException) Thread.currentThread().interrupt();
+            boolean paused=com.example.siteplatform.project.service.ProjectBusinessModuleService.isModulePause(e);
             previews.update(null,new LambdaUpdateWrapper<MeetingMaterialPreview>().eq(MeetingMaterialPreview::getId,task.getId()).eq(MeetingMaterialPreview::getWorkerId,task.getWorkerId())
-                    .set(MeetingMaterialPreview::getStatus,"FAILED").set(MeetingMaterialPreview::getFailureMessage,"预览生成失败，请重试或下载原文件")
+                    .set(MeetingMaterialPreview::getStatus,paused ? "QUEUED" : "FAILED").set(MeetingMaterialPreview::getAttempts,paused ? Math.max(0,task.getAttempts()-1) : task.getAttempts()).set(MeetingMaterialPreview::getFailureMessage,paused ? null : "预览生成失败，请重试或下载原文件")
                     .set(MeetingMaterialPreview::getLeaseUntil,null).set(MeetingMaterialPreview::getUpdateTime,LocalDateTime.now()));
         } finally {
             if(process!=null && process.isAlive()) {

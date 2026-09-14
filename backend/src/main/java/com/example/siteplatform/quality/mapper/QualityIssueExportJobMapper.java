@@ -20,7 +20,7 @@ public interface QualityIssueExportJobMapper extends BaseMapper<QualityIssueExpo
 
     @Select("""
             SELECT * FROM quality_issue_export_job
-            WHERE status = 'PENDING'
+            WHERE status = 'PENDING' AND project_id IN (SELECT project_id FROM project_business_module WHERE enabled=1 AND module_code='QUALITY')
             ORDER BY create_time ASC, id ASC
             LIMIT 1
             FOR UPDATE SKIP LOCKED

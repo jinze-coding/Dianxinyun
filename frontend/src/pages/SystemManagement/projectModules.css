@@ -1,0 +1,14 @@
+.project-module-search, .project-module-actions { display: flex; align-items: center; gap: 10px; }
+.project-module-search input { width: 240px; }
+.project-module-actions { margin-bottom: 14px; }
+.project-module-actions span { margin-right: auto; color: #7286a4; }
+.project-module-options { border: 1px solid #dce6f2; border-radius: 8px; overflow: hidden; }
+.project-module-options label { display: flex; align-items: center; gap: 12px; padding: 16px 18px; background: #f8faff; cursor: pointer; }
+.project-module-options label + label { border-top: 1px solid #e5edf6; }
+.project-module-options input { width: 16px; height: 16px; accent-color: #1677ff; }
+.project-module-tags { display: flex; gap: 8px; flex-wrap: wrap; }
+.project-module-tags span { padding: 4px 10px; border-radius: 5px; color: #2564a3; background: #edf5ff; }
+.project-module-tags .none { color: #7d8898; background: #f3f5f8; }
+.project-module-empty { text-align: center; padding: 42px !important; color: #8b9cb4; }
+.project-module-feedback { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.project-module-feedback button { border: 1px solid #dce5f0; border-radius: 5px; padding: 7px 12px; color: #47617f; background: #fff; cursor: pointer; }

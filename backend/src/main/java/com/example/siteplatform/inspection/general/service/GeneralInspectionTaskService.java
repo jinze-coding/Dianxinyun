@@ -49,7 +49,8 @@ public class GeneralInspectionTaskService {
     public List<GeneralInspectionTaskVO> listTasks(Long projectId, String status, LocalDate startDate,
                                                    LocalDate endDate, boolean mine, SysUser currentUser) {
         requireUser(currentUser);
-        LambdaQueryWrapper<GeneralInspectionTask> query = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<GeneralInspectionTask> query = new LambdaQueryWrapper<GeneralInspectionTask>()
+                .inSql(GeneralInspectionTask::getProjectId, com.example.siteplatform.project.service.ProjectBusinessModuleService.enabledProjectSql("INSPECTION"));
         if (projectId != null) {
             if (mine) permissionService.requireProjectAccess(projectId, currentUser);
             else permissionService.requireRecordView(projectId, currentUser);
@@ -366,7 +367,8 @@ public class GeneralInspectionTaskService {
     public List<GeneralInspectionRectificationVO> listRectifications(Long projectId, String status, String scope,
                                                                      SysUser currentUser) {
         requireUser(currentUser);
-        LambdaQueryWrapper<GeneralInspectionRectification> query = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<GeneralInspectionRectification> query = new LambdaQueryWrapper<GeneralInspectionRectification>()
+                .inSql(GeneralInspectionRectification::getProjectId, com.example.siteplatform.project.service.ProjectBusinessModuleService.enabledProjectSql("INSPECTION"));
         if (projectId != null) {
             permissionService.requireProjectAccess(projectId, currentUser);
             query.eq(GeneralInspectionRectification::getProjectId, projectId);

@@ -13,7 +13,7 @@ public interface GeneralInspectionExportJobMapper extends BaseMapper<GeneralInsp
 
     @Select("""
             SELECT * FROM general_inspection_export_job
-            WHERE export_type = 'EDGE' AND status = 'PENDING'
+            WHERE export_type = 'EDGE' AND status = 'PENDING' AND project_id IN (SELECT project_id FROM project_business_module WHERE enabled=1 AND module_code='INSPECTION')
             ORDER BY create_time ASC, id ASC
             LIMIT 1
             FOR UPDATE SKIP LOCKED

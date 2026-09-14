@@ -101,6 +101,7 @@ public class InspectionSubmissionReminderService {
 
     @Transactional
     public boolean remindElectricBox(Long projectId, Long boxId, LocalDate date, LocalDateTime now) {
+        if (moduleOccurrenceDisabled(projectId, date.atStartOfDay())) return false;
         ProjectInspectionSetting setting = settingMapper.selectByProjectIdForUpdate(projectId);
         if (setting == null || !Integer.valueOf(1).equals(setting.getSubmissionReminderEnabled())
                 || setting.getDailyCutoffTime() == null || setting.getReminderEffectiveTime() == null) {
@@ -143,6 +144,7 @@ public class InspectionSubmissionReminderService {
                 || task.getDueTime().isAfter(now) || !StringUtils.hasText(task.getPointTypeCode())) {
             return false;
         }
+        if (moduleOccurrenceDisabled(task.getProjectId(), task.getStartTime())) return false;
         GeneralInspectionPlan plan = planMapper.selectByIdForUpdate(task.getPlanId());
         if (plan == null || !Objects.equals(task.getProjectId(), plan.getProjectId())
                 || !EdgeInspectionConfigService.EDGE_PLAN_CODE.equals(plan.getPlanCode())
@@ -167,6 +169,12 @@ public class InspectionSubmissionReminderService {
                 "reminder:edge:" + task.getId(),
                 "EDGE_INSPECTION_TASK_DETAIL", "{\"taskId\":" + task.getId() + "}");
         return true;
+    }
+
+    private boolean moduleOccurrenceDisabled(Long projectId, LocalDateTime occurrence) {
+        if (permissionService.isBusinessModuleDisabled(projectId, "INSPECTION")) return true;
+        LocalDateTime activation = permissionService.businessModuleActivatedAt(projectId, "INSPECTION");
+        return activation != null && (occurrence == null || occurrence.isBefore(activation));
     }
 
     private boolean validElectricOwner(Long userId, Long projectId) {

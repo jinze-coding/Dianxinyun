@@ -56,7 +56,11 @@ public interface SystemRoleBusinessModuleMapper extends BaseMapper<SystemRoleBus
               ON up.user_id = upr.user_id
              AND up.project_id = upr.project_id
              AND up.status = 'ACTIVE'
-            WHERE (ur.user_id IS NOT NULL OR up.user_id IS NOT NULL)
+            WHERE ((up.user_id IS NOT NULL AND EXISTS (SELECT 1 FROM project_business_module pm
+                       WHERE pm.project_id=up.project_id AND pm.module_code=rbm.module_code AND pm.enabled=1))
+                   OR (ur.user_id IS NOT NULL AND EXISTS (SELECT 1 FROM sys_user_project scope
+                       JOIN project_business_module pm ON pm.project_id=scope.project_id AND pm.module_code=rbm.module_code AND pm.enabled=1
+                       WHERE scope.user_id=#{userId} AND scope.status='ACTIVE')))
               AND r.enabled = 1
               AND r.deleted = 0
             ORDER BY rbm.module_code

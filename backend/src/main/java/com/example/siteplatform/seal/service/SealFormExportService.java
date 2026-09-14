@@ -254,6 +254,7 @@ public class SealFormExportService {
 
     private Long reserveFile(SealFormExportJob claimed, String key) {
         SealFormExportJob job = ownedJob(claimed);
+        permissions.requireBusinessModule(job.getProjectId(), "DOCUMENT");
         currentOwner(job);
         FileResource file = new FileResource();
         file.setProjectId(job.getProjectId());
@@ -283,6 +284,7 @@ public class SealFormExportService {
 
     void complete(SealFormExportJob claimed, Long fileId, StoredFile stored, int pages) {
         SealFormExportJob job = ownedJob(claimed);
+        permissions.requireBusinessModule(job.getProjectId(), "DOCUMENT");
         SysUser owner = currentOwner(job);
         List<SealFormExportItem> rows = validateItems(job, owner);
         if (!Objects.equals(job.getFileResourceId(), fileId)) throw BusinessException.of(409, "导出文件状态已变化");
@@ -321,8 +323,10 @@ public class SealFormExportService {
         if (job == null || !"RUNNING".equals(job.getStatus()) || !Objects.equals(job.getLeaseOwner(), claimed.getLeaseOwner())) return;
         stageFile(job);
         job.setFileResourceId(null);
-        job.setStatus("FAILED");
-        String message = error instanceof BusinessException ? error.getMessage() : "PDF 合并失败，请重新生成";
+        boolean paused = com.example.siteplatform.project.service.ProjectBusinessModuleService.isModulePause(error);
+        job.setStatus(paused ? "PENDING" : "FAILED");
+        if (paused) job.setAttempts(Math.max(0,job.getAttempts()-1));
+        String message = paused ? "项目模块停用，等待恢复" : error instanceof BusinessException ? error.getMessage() : "PDF 合并失败，请重新生成";
         job.setErrorMessage(message == null ? "导出失败，请重试" : message.substring(0, Math.min(message.length(), 450)));
         job.setLeaseOwner(null);
         job.setLeaseUntil(null);

@@ -226,7 +226,22 @@ class GeneralInspectionTaskGenerationServiceTest {
     }
 
     @Test
-    void firstEnableAt1500MaterializesCurrentOpenOccurrence() throws Exception {
+    void firstEnableAt1500MaterializesCurrentOpenOccurrence() throws Exception { runActivationScenario(false); }
+
+    @Test
+    void moduleReenableSkipsCurrentOccurrenceAndStartsWithNextDay() throws Exception { runActivationScenario(true); }
+
+    @Test
+    void disabledProjectDoesNotGenerateTasksOrAdvanceCursor() {
+        GeneralInspectionPlan plan = publishedEdgePlan(LocalDateTime.now(), LocalDateTime.now());
+        when(planMapper.selectByIdForUpdate(31L)).thenReturn(plan);
+        when(permissionService.isModuleDisabled(plan.getProjectId())).thenReturn(true);
+        assertThat(service.generatePlan(31L, LocalDateTime.now(), LocalDateTime.now().plusHours(25))).isZero();
+        verify(taskMapper, never()).insert(any());
+        verify(planMapper, never()).update(any(), any());
+    }
+
+    private void runActivationScenario(boolean moduleResume) throws Exception {
         LocalDateTime enabledAt = LocalDateTime.of(2026, 8, 29, 15, 0);
         LocalDateTime now = enabledAt.plusMinutes(5);
         GeneralInspectionPlan plan = new GeneralInspectionPlan();
@@ -264,12 +279,13 @@ class GeneralInspectionTaskGenerationServiceTest {
         });
         when(taskItemMapper.insert(any())).thenReturn(1);
 
-        assertThat(service.generatePlan(31L, now, now.plusMinutes(5))).isEqualTo(1);
+        if (moduleResume) when(permissionService.moduleActivatedAt(2L)).thenReturn(enabledAt);
+        assertThat(service.generatePlan(31L, now, moduleResume ? now.plusDays(1) : now.plusMinutes(5))).isEqualTo(1);
         ArgumentCaptor<GeneralInspectionTask> taskCaptor = ArgumentCaptor.forClass(GeneralInspectionTask.class);
         verify(taskMapper).insert(taskCaptor.capture());
         assertThat(taskCaptor.getValue().getPlanVersionId()).isEqualTo(41L);
-        assertThat(taskCaptor.getValue().getStartTime()).isEqualTo(LocalDateTime.of(2026, 8, 29, 8, 0));
-        assertThat(taskCaptor.getValue().getDueTime()).isEqualTo(LocalDateTime.of(2026, 8, 29, 18, 0));
+        assertThat(taskCaptor.getValue().getStartTime()).isEqualTo(LocalDateTime.of(2026, 8, moduleResume ? 30 : 29, 8, 0));
+        assertThat(taskCaptor.getValue().getDueTime()).isEqualTo(LocalDateTime.of(2026, 8, moduleResume ? 30 : 29, 18, 0));
     }
 
     @Test

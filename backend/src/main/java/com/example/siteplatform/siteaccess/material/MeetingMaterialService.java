@@ -196,9 +196,13 @@ public class MeetingMaterialService {
         publicMeeting(invitations.selectById(v.getInvitationId())); return v;
     }
 
+    public boolean isModuleDisabled(Long projectId) { return permissions.isBusinessModuleDisabled(projectId, "SITE_ACCESS"); }
+    public void requireModule(Long projectId) { permissions.requireBusinessModule(projectId, "SITE_ACCESS"); }
+
     private void publicMeeting(SiteVisitInvitation invite) {
         if(invite==null || !"MEETING".equals(invite.getInviteType()) || "VOIDED".equals(invite.getStatus()))
             throw BusinessException.of(410,"会议资料入口已关闭");
+        permissions.requireBusinessModule(invite.getProjectId(), "SITE_ACCESS");
         var project=projects.selectById(invite.getProjectId());
         if(project==null || "stopped".equalsIgnoreCase(project.getProjectStatus())) throw BusinessException.of(410,"项目资料入口已关闭");
     }

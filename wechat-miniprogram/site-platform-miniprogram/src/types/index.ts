@@ -47,6 +47,8 @@ export interface UserMenu {
 }
 
 export interface ProjectPermissionContext {
+  enabledBusinessModules?: string[];
+  moduleConfigVersion?: number;
   projectId: number;
   projectName?: string;
   projectRoles?: ProjectRole[];
@@ -57,6 +59,8 @@ export interface ProjectPermissionContext {
 }
 
 export interface UserProjectRole {
+  enabledBusinessModules?: string[];
+  moduleConfigVersion?: number;
   projectId: number;
   projectName?: string;
   shortName?: string;

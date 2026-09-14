@@ -8,6 +8,7 @@ try{
  const pages=JSON.parse(await readFile(path.join(root,'src/pages.json'),'utf8'));
  assert.equal(pages.pages[0].path,'pages/login/index');assert.equal(pages.tabBar.list.length,5);assert.ok(pages.pages.some(p=>p.path==='pages/safety-committee/index'));
  let raw=await readFile(path.join(root,'src/api/safetyCommittee.ts'),'utf8');
+ raw=raw.replace(/import \{ moduleRequest \} from '@\/utils\/moduleNetwork';/, 'const moduleRequest = (o) => uni.request(o);');
  raw=raw.replace(/\/\/ #ifdef H5[\s\S]*?\/\/ #endif/g,'').replace(/import \{ API_BASE_URL,[^\n]+from '\.\/request';/,"const { API_BASE_URL, request, getToken, ApiRequestError, handleUnauthorized } = globalThis.committeeRequest;");
  const code=ts.transpileModule(raw,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
  await writeFile(path.join(temporary,'api.mjs'),code);

@@ -223,6 +223,16 @@ public class QualityIssueExportService {
         try {
             process(claimed.getId());
         } catch (Exception exception) {
+            if (com.example.siteplatform.project.service.ProjectBusinessModuleService.isModulePause(exception)) {
+                transactionTemplate.executeWithoutResult(status -> {
+                    var current = jobMapper.selectByIdForUpdate(claimed.getId());
+                    if (current != null && JOB_RUNNING.equals(current.getStatus())) {
+                        current.setStatus(JOB_PENDING); current.setProgress(0); current.setUpdateTime(now());
+                        requireSingle(jobMapper.updateById(current), "暂停模块导出任务");
+                    }
+                });
+                return;
+            }
             log.error("质量问题报表生成失败，jobId={}", claimed.getId(), exception);
             String message = safeErrorMessage(exception);
             transactionTemplate.executeWithoutResult(status -> markFailed(claimed.getId(), message));
@@ -252,6 +262,7 @@ public class QualityIssueExportService {
     private void process(Long jobId) {
         QualityIssueExportJob job = jobMapper.selectById(jobId);
         if (job == null || !JOB_RUNNING.equals(job.getStatus())) return;
+        projectPermissionService.requireBusinessModule(job.getProjectId(), "QUALITY");
         List<QualityIssueExportJobItem> items = itemMapper.selectList(
                 new LambdaQueryWrapper<QualityIssueExportJobItem>()
                         .eq(QualityIssueExportJobItem::getJobId, jobId)
@@ -591,6 +602,7 @@ public class QualityIssueExportService {
         if (job == null || !JOB_RUNNING.equals(job.getStatus())) {
             throw BusinessException.of(409, "质量报表任务状态已变化");
         }
+        projectPermissionService.requireBusinessModule(job.getProjectId(), "QUALITY");
         FileResource file = new FileResource();
         file.setProjectId(job.getProjectId());
         file.setFileName(stored.originalFileName());

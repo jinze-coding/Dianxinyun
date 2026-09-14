@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue';
-import { onShow } from '@dcloudio/uni-app';
+import { onShow, onHide, onUnload } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
 import AppTabBar from '@/components/AppTabBar.vue';
 import { getScopedTodoPage, getUserNotifications, markAllNotificationsRead, markNotificationRead } from '@/api/todo';
@@ -39,6 +39,9 @@ const pages = reactive<Record<ViewKey, PageMeta>>({
 });
 let requestSequence = 0;
 let loadMoreSequence = 0;
+let refreshTimer: ReturnType<typeof setInterval> | undefined;
+let pageVisible = false;
+let backgroundBusy = false;
 const { scrollStyle } = usePageScrollHeight({ bottomRpx: 124, minHeight: 300, includeSafeBottom: false });
 
 const viewOptions = computed(() => [
@@ -103,11 +106,16 @@ function consumeRequestedBusinessFilter() {
 }
 
 onShow(async () => {
+  pageVisible = true;
   hideNativeTabBar();
   if (!await auth.ensureRootAccess('/pages/todo/index')) return;
   consumeRequestedBusinessFilter();
   await refreshCurrent(true);
+  if (refreshTimer) clearInterval(refreshTimer);
+  if (pageVisible) refreshTimer = setInterval(refreshVisiblePages, 5000);
 });
+function stopRefresh() { pageVisible = false; ++requestSequence; if (refreshTimer) clearInterval(refreshTimer); refreshTimer = undefined; }
+onHide(stopRefresh); onUnload(stopRefresh);
 
 function todoFilterType(value: BusinessKey) {
   if (value === 'INSPECTION') return 'INSPECTION_ALL';
@@ -204,6 +212,23 @@ async function refreshCurrent(refreshSummary = false) {
   } finally {
     if (contextMatches(sequence, view, filter)) loading.value = false;
   }
+}
+
+// Replace the loaded pages together without clearing cards or changing the scroll position.
+async function refreshVisiblePages() {
+  if (!pageVisible || loading.value || loadingMore.value || backgroundBusy) return;
+  const sequence = requestSequence, view = activeView.value, filter = businessFilter.value;
+  const lastPage = Math.max(1, pages[view].pageNo);
+  const moreSequence = loadMoreSequence;
+  backgroundBusy = true;
+  try {
+    const payloads = await Promise.all(Array.from({ length: lastPage }, (_, index) => fetchPage(view, filter, index + 1)));
+    if (!pageVisible || !contextMatches(sequence, view, filter) || moreSequence !== loadMoreSequence) return;
+    payloads.forEach((payload, index) => applyPage(payload, index > 0));
+    errorMessage.value = '';
+  } catch {
+    // Retain the last successful page offline; the next visible interval retries.
+  } finally { backgroundBusy = false; }
 }
 
 async function loadMore() {

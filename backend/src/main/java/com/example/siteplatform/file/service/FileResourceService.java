@@ -141,6 +141,7 @@ public class FileResourceService {
             throw BusinessException.forbidden("无其他人员未保存周检照片访问权限");
         }
         permissionService.checkProjectPermission(currentUser.getId(), file.getProjectId());
+        permissionService.requireBusinessModule(file.getProjectId(), com.example.siteplatform.system.constant.BusinessModuleCodes.fromBusinessType(file.getBusinessType()));
         if (BUSINESS_EDGE_INSPECTION_EXPORT.equals(businessType)) {
             throw BusinessException.forbidden("临边巡检报表请通过导出任务接口下载");
         } else if (businessType.startsWith("EDGE_INSPECTION_")) {
@@ -271,6 +272,7 @@ public class FileResourceService {
         }
         permissionService.checkProjectPermission(currentUser.getId(), projectId);
         String normalized = normalizeBusinessType(businessType);
+        permissionService.requireBusinessModule(projectId, com.example.siteplatform.system.constant.BusinessModuleCodes.fromBusinessType(normalized));
         if (normalized.startsWith("COMMITTEE_INSPECTION_")) throw BusinessException.forbidden("安委会附件请通过巡检专属接口上传");
         if (normalized.startsWith("MEETING_MATERIAL")) throw BusinessException.forbidden("会议资料请通过会议资料专属接口上传");
         if (BUSINESS_PROJECT_PROFILE.equals(normalized)) {

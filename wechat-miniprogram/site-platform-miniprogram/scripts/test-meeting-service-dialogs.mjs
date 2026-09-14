@@ -35,7 +35,7 @@ const row = (id, previewKind = 'IMAGE') => ({ title: `测试资料 ${id}`, categ
 const rows = Array.from({ length: 23 }, (_, i) => row(i + 1));
 const data = (records = rows) => ({ title: '测试会议', ended: false, records });
 const p = platform(); let calls = 0; let fetch = async () => data();
-const materials = await component('../src/components/PublicMeetingMaterials.vue', { '@dcloudio/uni-app': p.lifecycle, '@/api/meetingMaterials': { resolveMeetingMaterials: () => { calls++; return fetch(); }, publicMaterialUrl: (code) => `https://example.invalid/${code}` } });
+const materials = await component('../src/components/PublicMeetingMaterials.vue', { '@dcloudio/uni-app': p.lifecycle, '@/utils/moduleNetwork': { moduleRequest: (o) => uni.request(o), moduleDownload: (o) => uni.downloadFile(o) }, '@/api/meetingMaterials': { resolveMeetingMaterials: () => { calls++; return fetch(); }, publicMaterialUrl: (code) => `https://example.invalid/${code}` } });
 const app = mount(materials, { visible: false, inviteToken: 'synthetic-invitation' });
 try {
   const { vm, props } = app; const { io, hooks } = p;

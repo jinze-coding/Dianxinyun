@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { moduleRequest, moduleDownload } from '@/utils/moduleNetwork';
+
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { onHide, onShow } from '@dcloudio/uni-app';
 import MeetingServiceDialog from '@/components/MeetingServiceDialog.vue';
@@ -170,7 +172,7 @@ async function open(row: PublicMeetingMaterial, original = false) {
   if (!original && current.previewKind === 'TEXT') { selected.value = current; loadText(current, 0); return; }
   const usePreview = !original && current.previewStatus === 'READY' && ['PDF', 'OFFICE'].includes(current.previewKind);
   downloading.value = current.publicCode; progress.value = 0; removeTemporary();
-  task = uni.downloadFile({
+  task = moduleDownload({
     url: publicMaterialUrl(current.publicCode, usePreview), timeout: 1200000,
     success: (response) => {
       if (!isCurrent()) { removeTemporary(response.tempFilePath); return; }
@@ -199,7 +201,7 @@ function loadText(row: PublicMeetingMaterial, part: number) {
   const ticket = ++textEpoch;
   textTask?.abort();
   textPreview.value = '正在读取…';
-  textTask = uni.request({ url: publicMaterialUrl(row.publicCode), dataType: 'text',
+  textTask = moduleRequest({ url: publicMaterialUrl(row.publicCode), dataType: 'text',
     header: { Range: `bytes=${part * 1048576}-${(part + 1) * 1048576 - 1}` },
     success: (response) => {
       if (!active || ticket !== textEpoch || selected.value?.publicCode !== row.publicCode) return;

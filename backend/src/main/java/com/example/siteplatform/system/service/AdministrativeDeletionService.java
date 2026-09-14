@@ -78,6 +78,7 @@ public class AdministrativeDeletionService {
         String type = normalizeType(request.getTargetType());
         if ("USER".equals(type)) validateUserDeletion(request.getTargetId(), operator, false);
         DeletionImpactVO impact = buildImpact(type, request.getTargetId());
+        requireTargetModule(type, request.getTargetId());
         String signature = signature(impact);
         String token = UUID.randomUUID().toString();
         TokenPayload payload = new TokenPayload(type, request.getTargetId(), operator.getId(), impact.getTargetName(), signature);
@@ -102,6 +103,7 @@ public class AdministrativeDeletionService {
             lockTarget(type, request.getTargetId());
         }
         DeletionImpactVO current = buildImpact(type, request.getTargetId());
+        requireTargetModule(type, request.getTargetId());
         validateAndConsumeToken(request, operator, type, current);
         switch (type) {
             case "USER" -> deleteUser(request.getTargetId());
@@ -242,6 +244,7 @@ public class AdministrativeDeletionService {
         Map<String, Object> project = requireRow(
                 "SELECT id, project_name FROM project_info WHERE id = ? AND deleted = 0", id, "项目不存在");
         impact.setTargetName(text(project.get("project_name")));
+        add(impact, "projectModules", "项目模块配置", count("project_business_module", "project_id", id));
         add(impact, "members", "成员与角色", count("sys_user_project", "project_id", id));
         add(impact, "documents", "资料与目录", countSql("SELECT COUNT(*) FROM project_document WHERE project_id = ?", id)
                 + countSql("SELECT COUNT(*) FROM document_folder WHERE project_id = ?", id));
@@ -517,6 +520,31 @@ public class AdministrativeDeletionService {
                 """, id));
     }
 
+    private void requireTargetModule(String type, Long id) {
+        String table = switch (type) {
+            case "DOCUMENT_FOLDER" -> "document_folder";
+            case "PROJECT_DOCUMENT" -> "project_document";
+            case "FILE" -> "file_resource";
+            case "ELECTRIC_BOX" -> "electric_box";
+            case "INSPECTION_RECORD" -> "inspection_record";
+            case "QUALITY_ISSUE" -> "quality_issue";
+            case "SITE_ACCESS_INVITATION" -> "site_visit_invitation";
+            case "MEETING_MATERIAL" -> "site_meeting_material";
+            case "COMMITTEE_INSPECTION" -> "safety_committee_record";
+            default -> null;
+        };
+        if (table == null) return; // Project/user/role administration remains a foundation capability.
+        String module = switch (type) {
+            case "DOCUMENT_FOLDER", "PROJECT_DOCUMENT" -> "DOCUMENT";
+            case "FILE", "QUALITY_ISSUE" -> "QUALITY";
+            case "ELECTRIC_BOX", "INSPECTION_RECORD" -> "INSPECTION";
+            case "SITE_ACCESS_INVITATION", "MEETING_MATERIAL" -> "SITE_ACCESS";
+            default -> "SAFETY_COMMITTEE";
+        };
+        Long projectId = jdbc.queryForObject("SELECT project_id FROM " + table + " WHERE id=?", Long.class, id);
+        projectPermissionService.requireBusinessModule(projectId, module);
+    }
+
     private void lockTarget(String type, Long id) {
         if ("COMMITTEE_INSPECTION".equals(type)) {
             Map<String,Object> record = requireRow("SELECT project_id FROM safety_committee_record WHERE id = ?", id, "巡检记录不存在");
@@ -679,6 +707,7 @@ public class AdministrativeDeletionService {
                 "sys_user_project_role", "sys_user_project", "electric_box")) {
             update("DELETE FROM `" + table + "` WHERE project_id = ?", projectId);
         }
+        update("DELETE FROM project_business_module WHERE project_id = ?", projectId);
         requireSingle(update("DELETE FROM project_info WHERE id = ?", projectId), "项目状态已变化，请重新预览");
         invalidateUsers(affectedUsers);
         registerCommittedFilePurge(files);

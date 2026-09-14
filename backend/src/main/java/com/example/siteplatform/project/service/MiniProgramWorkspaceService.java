@@ -45,6 +45,9 @@ public class MiniProgramWorkspaceService {
     @Autowired
     private DeviceInfoMapper deviceMapper;
 
+    @Autowired
+    private com.example.siteplatform.file.service.FileResourceService fileAccess;
+
     public MiniProgramWorkspaceOverviewVO getOverview(Long projectId, SysUser currentUser) {
         projectPermissionService.checkProjectPermission(currentUser.getId(), projectId);
         ProjectInfo project = projectInfoMapper.selectById(projectId);
@@ -59,8 +62,8 @@ public class MiniProgramWorkspaceService {
                 .orderByAsc(CameraResource::getCameraName));
         List<FileResource> files = fileMapper.selectList(new LambdaQueryWrapper<FileResource>()
                 .eq(FileResource::getProjectId, projectId)
-                .orderByDesc(FileResource::getCreateTime)
-                .last("LIMIT 3"));
+                .orderByDesc(FileResource::getCreateTime)).stream()
+                .filter(file -> fileAccess.canReadInList(currentUser, file)).toList();
         List<DeviceInfo> devices = deviceMapper.selectList(new LambdaQueryWrapper<DeviceInfo>()
                 .eq(DeviceInfo::getProjectId, projectId)
                 .orderByDesc(DeviceInfo::getLastReport)
@@ -80,16 +83,15 @@ public class MiniProgramWorkspaceService {
         overview.setTodayEntryCount(countTodayEntries(projectId));
         overview.setCameraTotal(cameras.size());
         overview.setOnlineCameraCount(onlineCameraCount);
-        overview.setFileTotal(toInt(fileMapper.selectCount(new LambdaQueryWrapper<FileResource>()
-                .eq(FileResource::getProjectId, projectId))));
-        overview.setTodayFileCount(countTodayFiles(projectId));
+        overview.setFileTotal(files.size());
+        overview.setTodayFileCount((int) files.stream().filter(file -> file.getCreateTime() != null && file.getCreateTime().toLocalDate().equals(LocalDate.now())).count());
         overview.setDeviceTotal(toInt(deviceMapper.selectCount(new LambdaQueryWrapper<DeviceInfo>()
                 .eq(DeviceInfo::getProjectId, projectId))));
         overview.setAlarmDeviceCount(alarmDeviceCount);
         overview.setProjectProgress(calculateProgress(project));
         overview.setRiskAlert(buildRiskAlert(cameras.size() - onlineCameraCount, alarmDeviceCount));
         overview.setCameras(cameras.stream().limit(4).map(this::toCameraItem).toList());
-        overview.setRecentFiles(files.stream().map(this::toFileItem).toList());
+        overview.setRecentFiles(files.stream().limit(3).map(this::toFileItem).toList());
         overview.setDevices(devices.stream().map(this::toDeviceItem).toList());
         return overview;
     }

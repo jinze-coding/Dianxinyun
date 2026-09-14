@@ -1,9 +1,45 @@
 <script setup lang="ts">
-import { onShow } from '@dcloudio/uni-app';
+import { onShow, onHide } from '@dcloudio/uni-app';
+import { watch } from 'vue';
+import { setNetworkProject } from '@/utils/moduleNetwork';
+import { useProjectStore } from '@/stores/project';
+import { getProjectModules } from '@/api/project';
+import { useTodoStore } from '@/stores/todo';
 import { getToken } from '@/api/request';
 import { useAuthStore } from '@/stores/auth';
 
 const auth = useAuthStore();
+const projects = useProjectStore();
+let moduleTimer: ReturnType<typeof setInterval> | undefined;
+let moduleEpoch = 0;
+let visible = false;
+let busyEpoch: number | undefined;
+async function syncModules(refreshUser = false) {
+  if (!visible || !getToken() || !projects.state.currentProjectId || busyEpoch === moduleEpoch) return;
+  const epoch = moduleEpoch;
+  const projectId = projects.state.currentProjectId;
+  busyEpoch = epoch;
+  try {
+    const modules = await getProjectModules(projectId);
+    if (!visible || epoch !== moduleEpoch || projectId !== projects.state.currentProjectId) return;
+    const context = (auth.state.user?.projectContexts || auth.state.user?.projectRoles || []).find((item) => Number(item.projectId) === projectId);
+    if (refreshUser || context?.moduleConfigVersion !== modules.moduleConfigVersion) {
+      uni.$emit('project-module-availability', modules);
+      await auth.loadUser();
+      if (epoch !== moduleEpoch || !visible) return;
+      await enforceCurrentPageAccess();
+      void useTodoStore().loadSummary();
+    }
+  } catch (error) {
+    if (epoch === moduleEpoch && (error as { status?: number; code?: number })?.code === 403) {
+      await auth.loadUser().catch(() => null);
+      await enforceCurrentPageAccess();
+    }
+  } finally { if (busyEpoch === epoch) busyEpoch = undefined; }
+}
+watch(() => projects.state.currentProjectId, (id) => { setNetworkProject(id); moduleEpoch += 1; void syncModules(true); }, { immediate: true });
+uni.onNetworkStatusChange((status) => { if (status.isConnected) void syncModules(true); });
+
 const PUBLIC_PREFIXES = [
   'pages/login/',
   'pages/wechat-bind/',
@@ -38,8 +74,10 @@ async function enforceCurrentPageAccess() {
   try {
     if (!auth.state.user) await auth.loadUser();
     const rule = PAGE_TO_ROOT.find(([prefix]) => route.startsWith(prefix));
-    if (rule && !auth.canAccessRoot(rule[1])) {
-      uni.showToast({ title: '当前账号无此功能权限', icon: 'none' });
+    const pageProject = Number(currentPage?.options?.projectId) || projects.state.currentProjectId;
+    const sealDisabled = route.startsWith('pages/seal/') && !auth.isProjectModuleEnabled(pageProject, 'DOCUMENT');
+    if (sealDisabled || (rule && !auth.canAccessRoot(rule[1], auth.state.user, pageProject))) {
+      uni.showToast({ title: '当前项目未启用此功能或已无权限', icon: 'none' });
       uni.switchTab({ url: auth.firstAuthorizedPage(), fail: () => uni.reLaunch({ url: auth.firstAuthorizedPage() }) });
     }
   } catch {
@@ -47,7 +85,12 @@ async function enforceCurrentPageAccess() {
   }
 }
 
+onHide(() => { visible = false; moduleEpoch += 1; if (moduleTimer) clearInterval(moduleTimer); moduleTimer = undefined; });
 onShow(() => {
+  visible = true; moduleEpoch += 1;
+  if (moduleTimer) clearInterval(moduleTimer);
+  moduleTimer = setInterval(() => { void syncModules(); if (getToken()) void useTodoStore().loadSummary(); }, 5000);
+  void syncModules(true);
   // 首次冷启动时页面栈可能尚未建立，下一事件循环再次读取可覆盖深链直达子页。
   setTimeout(() => {
     enforceCurrentPageAccess();

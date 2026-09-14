@@ -1,3 +1,4 @@
+import { moduleUpload, moduleDownload } from '@/utils/moduleNetwork';
 import type {
   DocumentCategory,
   DocumentFolder,
@@ -163,7 +164,7 @@ export async function getProjectDocumentRecycleBin(projectId: number, keyword = 
 function uploadMultipart<T>(path: string, filePath: string, formData: Record<string, string | number | undefined>): Promise<T> {
   const token = getToken();
   return new Promise((resolve, reject) => {
-    uni.uploadFile({
+    moduleUpload({
       url: `${API_BASE_URL}${path}`,
       filePath,
       name: 'file',
@@ -329,7 +330,7 @@ export async function downloadProjectDocumentFile(id: number, versionId?: number
   const token = getToken();
   const query = versionId ? `?versionId=${versionId}` : '';
   return new Promise<string>((resolve, reject) => {
-    uni.downloadFile({
+    moduleDownload({
       url: `${API_BASE_URL}/project-documents/${id}/${preview ? 'preview' : 'download'}${query}`,
       header: token ? { Authorization: `Bearer ${token}` } : {},
       success: async (response) => {

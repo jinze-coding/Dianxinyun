@@ -37,6 +37,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class ProjectServiceWriteIntegrityTest {
 
+    @Mock private com.example.siteplatform.system.service.SystemPermissionService systemPermissionService;
     @Mock private ProjectInfoMapper projectMapper;
     @Mock private ProjectPermissionService permissionService;
     @Mock private OperationLogMapper operationLogMapper;
@@ -51,6 +52,7 @@ class ProjectServiceWriteIntegrityTest {
     @BeforeEach
     void setUp() {
         service = new ProjectService();
+        ReflectionTestUtils.setField(service, "systemPermissionService", systemPermissionService);
         ReflectionTestUtils.setField(service, "projectMapper", projectMapper);
         ReflectionTestUtils.setField(service, "projectPermissionService", permissionService);
         ReflectionTestUtils.setField(service, "operationLogMapper", operationLogMapper);

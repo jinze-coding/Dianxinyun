@@ -176,6 +176,11 @@ export default function PersonalInboxPage({ projectId, projectList = [], theme: 
 
   useEffect(() => { loadCurrent(); }, [loadCurrent]);
   useEffect(() => {
+    const refresh = () => { void loadCurrent(); void loadSummary().catch(() => {}); };
+    window.addEventListener('project-module-availability', refresh);
+    return () => window.removeEventListener('project-module-availability', refresh);
+  }, [loadCurrent, loadSummary]);
+  useEffect(() => {
     loadSummary().catch((loadError) => setError(errorText(loadError, '待办汇总加载失败')));
   }, [loadSummary]);
 

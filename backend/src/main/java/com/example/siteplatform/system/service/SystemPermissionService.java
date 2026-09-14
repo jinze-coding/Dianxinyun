@@ -24,6 +24,7 @@ import java.util.Set;
 @Service
 public class SystemPermissionService {
 
+    private final com.example.siteplatform.project.service.ProjectBusinessModuleService projectModules;
     private final SystemMenuMapper menuMapper;
     private final SystemPermissionMapper permissionMapper;
     private final SysUserMapper userMapper;
@@ -31,7 +32,9 @@ public class SystemPermissionService {
 
     public SystemPermissionService(SystemMenuMapper menuMapper, SystemPermissionMapper permissionMapper,
                                    SysUserMapper userMapper,
-                                   SystemRoleBusinessModuleMapper roleBusinessModuleMapper) {
+                                   SystemRoleBusinessModuleMapper roleBusinessModuleMapper,
+                                   com.example.siteplatform.project.service.ProjectBusinessModuleService projectModules) {
+        this.projectModules = projectModules;
         this.menuMapper = menuMapper;
         this.permissionMapper = permissionMapper;
         this.userMapper = userMapper;
@@ -75,8 +78,9 @@ public class SystemPermissionService {
 
     public boolean hasProjectPermission(Long userId, Long projectId, String permissionCode) {
         if (userId == null || projectId == null || permissionCode == null) return false;
-        if (isPlatformAdmin(userId)) return true;
         String businessModule = BusinessModuleCodes.fromPermissionCode(permissionCode);
+        if (projectModules.isDisabled(projectId, businessModule)) return false;
+        if (isPlatformAdmin(userId)) return true;
         if (businessModule != null && !businessModuleCodes(userId, projectId).contains(businessModule)) {
             return false;
         }
@@ -92,7 +96,7 @@ public class SystemPermissionService {
     public List<String> projectPermissionCodes(Long userId, Long projectId) {
         if (userId == null || projectId == null) return List.of();
         if (isPlatformAdmin(userId)) {
-            return allEnabledPermissionCodes();
+            return filterBusinessPermissionCodes(allEnabledPermissionCodes(), businessModuleCodes(userId, projectId));
         }
         Set<String> effectiveModules = businessModuleCodes(userId, projectId);
         List<String> codes = permissionMapper.selectProjectCodesByUserIdAndProject(userId, projectId);
@@ -103,13 +107,13 @@ public class SystemPermissionService {
     public List<String> projectMenuCodes(Long userId, Long projectId) {
         if (userId == null || projectId == null) return List.of();
         if (isPlatformAdmin(userId)) {
-            return menuMapper.selectList(new LambdaQueryWrapper<SystemMenu>()
+            return filterBusinessMenuCodes(menuMapper.selectList(new LambdaQueryWrapper<SystemMenu>()
                             .eq(SystemMenu::getEnabled, 1)
                             .eq(SystemMenu::getVisible, 1)
                             .eq(SystemMenu::getDeleted, 0)
                             .orderByAsc(SystemMenu::getSortOrder)
                             .orderByAsc(SystemMenu::getId))
-                    .stream().map(SystemMenu::getMenuCode).filter(java.util.Objects::nonNull).distinct().toList();
+                    .stream().map(SystemMenu::getMenuCode).filter(java.util.Objects::nonNull).distinct().toList(), businessModuleCodes(userId, projectId));
         }
         List<String> codes = menuMapper.selectEnabledCodesByUserIdAndProject(userId, projectId);
         return filterBusinessMenuCodes(codes, businessModuleCodes(userId, projectId));
@@ -128,6 +132,7 @@ public class SystemPermissionService {
     }
 
     public void requireProjectPermission(SysUser user, Long projectId, String permissionCode) {
+        projectModules.requireEnabled(projectId, BusinessModuleCodes.fromPermissionCode(permissionCode));
         if (user == null || !hasProjectPermission(user.getId(), projectId, permissionCode)) {
             throw BusinessException.forbidden("无当前项目操作权限：" + permissionCode);
         }
@@ -195,10 +200,20 @@ public class SystemPermissionService {
     /** 当前项目中有效的平台/项目角色共同授予的模块。 */
     public Set<String> businessModuleCodes(Long userId, Long projectId) {
         if (userId == null || projectId == null) return Set.of();
-        if (isPlatformAdmin(userId)) return Set.copyOf(BusinessModuleCodes.ALL);
-        List<String> codes = roleBusinessModuleMapper.selectModuleCodesByUserIdAndProject(userId, projectId);
-        return normalizeBusinessModuleCodes(codes);
+        Set<String> granted = isPlatformAdmin(userId) ? Set.copyOf(BusinessModuleCodes.ALL)
+                : normalizeBusinessModuleCodes(roleBusinessModuleMapper.selectModuleCodesByUserIdAndProject(userId, projectId));
+        return granted.stream().filter(code -> !projectModules.isDisabled(projectId, code)).collect(java.util.stream.Collectors.toSet());
     }
+
+    public void populateProjectModules(com.example.siteplatform.auth.dto.UserProjectRoleVO context) {
+        var state = projectModules.state(context.getProjectId());
+        context.setEnabledBusinessModules(state.enabledBusinessModules());
+        context.setModuleConfigVersion(state.moduleConfigVersion());
+    }
+
+    public void initializeProjectModules(Long projectId, Long actorId) { projectModules.initialize(projectId, actorId); }
+
+    public com.example.siteplatform.project.service.ProjectBusinessModuleService projectModules() { return projectModules; }
 
     public boolean hasBusinessModule(Long userId, Long projectId, String moduleCode) {
         return businessModuleCodes(userId, projectId).contains(moduleCode);

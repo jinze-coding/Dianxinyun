@@ -1,3 +1,4 @@
+import { moduleRequest } from '@/utils/moduleNetwork';
 import type { Result } from '@/types';
 import { MINI_PROGRAM_BUILD_ID } from '@/constants/release';
 
@@ -102,7 +103,7 @@ export function request<T>(url: string, options: RequestOptions = {}): Promise<T
   const token = getToken();
   const requestUrl = `${API_BASE_URL}${url}`;
   return new Promise((resolve, reject) => {
-    uni.request({
+    moduleRequest({
       url: requestUrl,
       method: options.method || 'GET',
       data: options.data as Record<string, unknown>,

@@ -57,8 +57,8 @@ public interface UserNotificationMapper extends BaseMapper<UserNotification> {
                 </when>
                 <otherwise>1 = 0</otherwise>
               </choose>
-            </script>
-            """)
+            AND
+            """ + com.example.siteplatform.system.constant.BusinessModuleCodes.NOTIFICATION_ENABLED_SQL + "</script>")
     int markAllReadInScope(@Param("userId") Long userId,
                            @Param("projectIds") List<Long> projectIds,
                            @Param("includeGlobal") boolean includeGlobal,

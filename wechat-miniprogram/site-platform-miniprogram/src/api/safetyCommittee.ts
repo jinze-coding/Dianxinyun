@@ -1,3 +1,4 @@
+import { moduleRequest } from '@/utils/moduleNetwork';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
 import { API_BASE_URL, request, getToken, ApiRequestError, handleUnauthorized } from './request';
@@ -64,7 +65,7 @@ async function sendChunk(url: string, chunk: Uint8Array, control: UploadControl)
   const body = new Uint8Array(head.length + chunk.length + tail.length); body.set(head); body.set(chunk,head.length); body.set(tail,head.length+chunk.length);
   check(control);
   await new Promise<void>((resolve,reject) => {
-    const task = uni.request({ url: `${API_BASE_URL}${url}`, method: 'PUT', data: body.buffer, timeout: 180000,
+    const task = moduleRequest({ url: `${API_BASE_URL}${url}`, method: 'PUT', data: body.buffer, timeout: 180000,
       header: { Authorization: `Bearer ${getToken()}`, 'Content-Type': `multipart/form-data; boundary=${boundary}` },
       success: r => { const data = r.data as { code: number; message: string }; if (r.statusCode === 200 && data.code === 200) resolve(); else { if (r.statusCode === 401) handleUnauthorized(data.message); reject(new ApiRequestError(data.message || '分片上传失败',data.code,r.statusCode)); } }, fail: reject });
     control.abort = () => task.abort();

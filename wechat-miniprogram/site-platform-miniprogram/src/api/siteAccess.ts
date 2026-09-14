@@ -1,3 +1,4 @@
+import { moduleRequest } from '@/utils/moduleNetwork';
 import { API_BASE_URL, request } from './request';
 
 export type SiteVisitStatus = 'PENDING' | 'SUBMITTED' | 'OPEN' | 'EXPIRED' | 'VOIDED';
@@ -328,7 +329,7 @@ function downloadProjectProfileImage(
   mimeType?: string
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    uni.request({
+    moduleRequest({
       url: `${API_BASE_URL}${path}`,
       method: 'POST',
       data: { ...requestData, imageIndex },
@@ -393,7 +394,7 @@ export function downloadPublicGuardProjectProfileImage(
 
 export function downloadPublicProjectRouteImage(inviteToken: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    uni.request({
+    moduleRequest({
       url: `${API_BASE_URL}/public/site-access/project-location/route-image`,
       method: 'POST',
       data: { inviteToken },

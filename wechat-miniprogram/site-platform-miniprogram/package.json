@@ -12,6 +12,7 @@
     "build:h5": "uni build -p h5",
     "build:mp-weixin": "uni build -p mp-weixin && npm run verify:visitor-forms",
     "build:mp-weixin:real": "uni build -p mp-weixin --mode mp-real && npm run verify:mp-weixin:real && npm run verify:visitor-forms",
+    "test:project-modules": "node scripts/test-project-modules.mjs",
     "test:safety-committee": "node scripts/test-safety-committee.mjs && node scripts/test-safety-committee-filters.mjs",
     "type-check": "vue-tsc --noEmit",
     "test:project-location": "node --experimental-strip-types scripts/test-project-map-navigation.mjs && node --experimental-strip-types scripts/test-project-location-card.mjs",

@@ -46,6 +46,7 @@ public class UnifiedElectricBoxScanService {
             throw BusinessException.notFound("巡检码无效或已换码");
         }
 
+        permissionService.requireBusinessModule(box.getProjectId(), "INSPECTION");
         boolean authenticated = currentUser != null;
         boolean projectAuthorized = authenticated
                 && permissionService.getInspectionPermissionCodes(currentUser.getId(), box.getProjectId()).size() > 0;

@@ -6,6 +6,8 @@ import com.example.siteplatform.system.entity.SystemRole;
 @Data
 public class UserProjectRoleVO {
     private Long projectId;
+    private java.util.List<String> enabledBusinessModules;
+    private Long moduleConfigVersion;
     private String projectName;
     private String shortName;
     private String projectRoleCode;

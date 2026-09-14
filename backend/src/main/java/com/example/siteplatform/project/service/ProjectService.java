@@ -263,6 +263,7 @@ public class ProjectService {
         created.setCreateTime(LocalDateTime.now());
         created.setUpdateTime(LocalDateTime.now());
         requireSingleWrite(projectMapper.insert(created), "项目新增");
+        systemPermissionService.initializeProjectModules(created.getId(), currentUser.getId());
         return created;
     }
 
@@ -290,6 +291,7 @@ public class ProjectService {
         if (!occupiedModules.isEmpty()) {
             throw BusinessException.of(409, "项目仍有关联成员或业务数据，禁止直接删除；请先归档并完成数据处置");
         }
+        jdbcTemplate.update("DELETE FROM project_business_module WHERE project_id=?", projectId);
         if (projectMapper.deleteById(projectId) != 1) {
             throw BusinessException.of(409, "项目状态已变化，请刷新后重试");
         }
@@ -423,6 +425,7 @@ public class ProjectService {
     }
 
     private List<ElectricBox> queryVisibleActiveBoxes(Long projectId, SysUser currentUser, boolean manager) {
+        if (projectPermissionService.isBusinessModuleDisabled(projectId, "INSPECTION")) return List.of();
         LambdaQueryWrapper<ElectricBox> wrapper = new LambdaQueryWrapper<ElectricBox>()
                 .eq(ElectricBox::getProjectId, projectId)
                 .eq(ElectricBox::getStatus, "ACTIVE")
@@ -460,6 +463,7 @@ public class ProjectService {
     }
 
     private Integer countTodayInspections(Long projectId, SysUser currentUser, boolean manager) {
+        if (projectPermissionService.isBusinessModuleDisabled(projectId, "INSPECTION")) return 0;
         LambdaQueryWrapper<InspectionRecord> wrapper = new LambdaQueryWrapper<InspectionRecord>()
                 .eq(InspectionRecord::getProjectId, projectId)
                 .eq(InspectionRecord::getSource, "ELECTRICIAN_DAILY")

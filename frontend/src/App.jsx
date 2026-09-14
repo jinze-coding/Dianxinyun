@@ -1,3 +1,6 @@
+import { setApiProjectContext } from './services/api';
+import { getProjectModules } from './services/projectModules';
+import { isProjectModuleEnabled, PAGE_MODULES, projectContext } from './utils/projectModules';
 import SafetyCommitteePage from './pages/SafetyCommittee';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { DEFAULT_THEME_ID, getThemeById } from './constants/themes';
@@ -7059,6 +7062,7 @@ export default function App() {
   const [projectListLoading, setProjectListLoading] = useState(isAuth);
   const [projectListError, setProjectListError] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
+  const [moduleNotice, setModuleNotice] = useState('');
   const [currentUserError, setCurrentUserError] = useState('');
   const [inboxCounts, setInboxCounts] = useState({ todoCount: 0, notificationCount: 0 });
   const [sealApplicationTarget, setSealApplicationTarget] = useState(null);
@@ -7085,12 +7089,15 @@ export default function App() {
     || hasProjectPermission(currentUser, currentProject, 'system.approval.view', 'system.approval.manage')
   ) : false;
 
+  const inboxRequestSequence = useRef(0);
   const refreshInboxCounts = useCallback(async () => {
-    if (!currentUser || currentProject === null) return;
+    if (!currentUser || currentProject === null || document.visibilityState === 'hidden') return;
+    const sequence = ++inboxRequestSequence.current;
     const [todoResult, notificationResult] = await Promise.allSettled([
       getPersonalTodoSummary({ projectId: currentProject }),
       getUnreadNotificationCount(),
     ]);
+    if (sequence !== inboxRequestSequence.current) return;
     const todoData = todoResult.status === 'fulfilled' && Number(todoResult.value?.code) === 200
       ? (todoResult.value.data?.todoSummary || todoResult.value.data?.todos || todoResult.value.data || {}) : null;
     setInboxCounts((current) => ({
@@ -7104,8 +7111,10 @@ export default function App() {
   useEffect(() => {
     if (!currentUser || currentProject === null) return undefined;
     refreshInboxCounts();
-    const timer = window.setInterval(refreshInboxCounts, 60_000);
-    return () => window.clearInterval(timer);
+    const timer = window.setInterval(refreshInboxCounts, 5000);
+    document.addEventListener('visibilitychange', refreshInboxCounts);
+    window.addEventListener('online', refreshInboxCounts);
+    return () => { ++inboxRequestSequence.current; window.clearInterval(timer); document.removeEventListener('visibilitychange', refreshInboxCounts); window.removeEventListener('online', refreshInboxCounts); };
   }, [currentProject, currentUser, refreshInboxCounts]);
 
   // 获取项目列表
@@ -7154,13 +7163,69 @@ export default function App() {
     }
   }, [isAuth, fetchProjectList, fetchCurrentUser]);
 
+  useEffect(() => { setApiProjectContext(currentProject, PAGE_MODULES[currentPage]); }, [currentProject, currentPage]);
+  useEffect(() => {
+    let timer;
+    const notify = () => {
+      setModuleNotice('当前项目已停用此模块，已返回个人待办');
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setModuleNotice(''), 6000);
+    };
+    window.addEventListener('project-module-disabled', notify);
+    return () => { window.removeEventListener('project-module-disabled', notify); window.clearTimeout(timer); };
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser || currentProject === null) return undefined;
+    let active = true;
+    let checking = false;
+    const version = projectContext(currentUser, currentProject)?.moduleConfigVersion;
+    const checkModules = async () => {
+      if (!active || checking || document.visibilityState === 'hidden') return;
+      checking = true;
+      try {
+        const state = await getProjectModules(currentProject);
+        if (!active || Number(state.moduleConfigVersion) === Number(version)) return;
+        window.dispatchEvent(new CustomEvent('project-module-availability', { detail: state }));
+        const response = await getCurrentUser();
+        if (active && response.code === 200) {
+          setCurrentUser(response.data);
+          void refreshInboxCounts();
+        }
+      } catch (error) {
+        if (active && error?.response?.status === 403) {
+          const response = await getCurrentUser().catch(() => null);
+          if (active && response?.code === 200) setCurrentUser(response.data);
+        }
+      } finally { checking = false; }
+    };
+    const changed = (event) => {
+      if (!event.detail?.projectId || Number(event.detail.projectId) === Number(currentProject)) void checkModules();
+    };
+    void checkModules();
+    const timer = window.setInterval(checkModules, 5000);
+    document.addEventListener('visibilitychange', checkModules);
+    window.addEventListener('online', checkModules);
+    window.addEventListener('project-modules-changed', changed);
+    return () => {
+      active = false; window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', checkModules);
+      window.removeEventListener('online', checkModules);
+      window.removeEventListener('project-modules-changed', changed);
+    };
+  }, [currentProject, currentUser, refreshInboxCounts]);
+
   useEffect(() => {
     if (!currentUser) return;
     if (currentPage === PAGE_IDS.PERSONAL_INBOX) return;
     if (currentPage === PAGE_IDS.PROJECT_INFORMATION && currentProject !== null) return;
     if (currentPage === PAGE_IDS.SYSTEM_MANAGEMENT && canAccessSystem) return;
-    if (currentPage === PAGE_IDS.DOCUMENT_MANAGEMENT && (sealApplicationTarget?.id || documentDistributionTarget?.id)) return;
+    if (currentPage === PAGE_IDS.DOCUMENT_MANAGEMENT && isProjectModuleEnabled(currentUser, currentProject, 'DOCUMENT') && (sealApplicationTarget?.id || documentDistributionTarget?.id)) return;
     if (visibleNavItems.some((item) => item.id === currentPage)) return;
+    if (!isProjectModuleEnabled(currentUser, currentProject, PAGE_MODULES[currentPage])) {
+      setSealApplicationTarget(null); setDocumentDistributionTarget(null);
+      window.dispatchEvent(new CustomEvent('project-module-disabled'));
+    }
     setCurrentPage(AUTHENTICATED_LANDING_PAGE);
   }, [canAccessSystem, currentPage, currentProject, currentUser, documentDistributionTarget, sealApplicationTarget, visibleNavItems]);
 
@@ -7233,6 +7298,7 @@ export default function App() {
   }, []);
 
   const changeProject = useCallback((projectId) => {
+    setApiProjectContext(projectId);
     setSiteAccessReturnState(null);
     setSealApplicationTarget(null);
     setQualityIssueTarget(null);
@@ -7343,7 +7409,7 @@ export default function App() {
     if (currentPage === PAGE_IDS.PROJECT_INFORMATION) {
       return <ProjectInformationPage projectId={currentProject} onBack={closeProjectInformation} onSaved={fetchProjectList} />;
     }
-    if (currentPage === PAGE_IDS.DOCUMENT_MANAGEMENT && (sealApplicationTarget?.id || documentDistributionTarget?.id)) {
+    if (currentPage === PAGE_IDS.DOCUMENT_MANAGEMENT && isProjectModuleEnabled(currentUser, currentProject, 'DOCUMENT') && (sealApplicationTarget?.id || documentDistributionTarget?.id)) {
       return <DocumentCenterPage {...pageProps} sealApplicationTarget={sealApplicationTarget} documentDistributionTarget={documentDistributionTarget} />;
     }
     if (!visibleNavItems.some((item) => item.id === currentPage)) {
@@ -7412,6 +7478,7 @@ export default function App() {
 
   return (
     <div data-theme={DEFAULT_THEME_ID} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: theme.pageBg }}>
+      {moduleNotice && <div role="status" style={{ position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 1200, background: '#fff8e8', color: '#8a641c', border: '1px solid #f0dba9', borderRadius: 6, padding: '10px 20px' }}>{moduleNotice}</div>}
       <TopNav
         currentPage={currentPage}
         onPageChange={navigatePage}

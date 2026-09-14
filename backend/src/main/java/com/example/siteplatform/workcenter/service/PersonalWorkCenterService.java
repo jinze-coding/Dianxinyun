@@ -166,7 +166,7 @@ public class PersonalWorkCenterService {
         List<PersonalTodoVO> todos = SCOPE_CC.equals(normalizedScope)
                 ? sealCcTodos(projectScope, user)
                 : pendingTodos(projectScope, user);
-        List<PersonalTodoVO> filtered = filterTodoType(todos, type);
+        List<PersonalTodoVO> filtered = filterTodoType(todos.stream().filter(this::moduleTodoVisible).toList(), type);
         filtered.sort(TODO_ORDER);
         return page(filtered, pageNo, pageSize);
     }
@@ -175,8 +175,8 @@ public class PersonalWorkCenterService {
     public WorkSummaryVO workSummary(Long projectId, SysUser currentUser) {
         SysUser user = requireEnabledUser(currentUser);
         ProjectScope projectScope = resolveProjectScope(user, projectId);
-        List<PersonalTodoVO> pending = pendingTodos(projectScope, user);
-        List<PersonalTodoVO> cc = sealCcTodos(projectScope, user);
+        List<PersonalTodoVO> pending = pendingTodos(projectScope, user).stream().filter(this::moduleTodoVisible).toList();
+        List<PersonalTodoVO> cc = sealCcTodos(projectScope, user).stream().filter(this::moduleTodoVisible).toList();
         long unread = countUnreadNotifications(projectScope, user.getId());
 
         Map<String, Long> byBusinessType = countBy(pending, PersonalTodoVO::getBusinessType);
@@ -254,6 +254,7 @@ public class PersonalWorkCenterService {
         Map<Long, String> projectNames = Map.of();
         if (notification.getProjectId() != null) {
             projectNames = resolveProjectScope(user, notification.getProjectId()).projectNames();
+            projectPermissionService.requireBusinessModule(notification.getProjectId(), com.example.siteplatform.system.constant.BusinessModuleCodes.fromBusinessType(notification.getBusinessType()));
         }
         if (Integer.valueOf(1).equals(notification.getIsRead())) {
             return toNotificationVO(notification, projectNames);
@@ -296,10 +297,15 @@ public class PersonalWorkCenterService {
         }
     }
 
+    private boolean moduleTodoVisible(PersonalTodoVO todo) {
+        String module = com.example.siteplatform.system.constant.BusinessModuleCodes.fromBusinessType(todo.getBusinessType());
+        return module == null || !projectPermissionService.isBusinessModuleDisabled(todo.getProjectId(), module);
+    }
+
     private List<PersonalTodoVO> pendingTodos(ProjectScope scope, SysUser user) {
         List<PersonalTodoVO> todos = new ArrayList<>();
         for (InspectionTodoVO source : safeList(
-                inspectionService.listTodos(scope.requestedProjectId(), user))) {
+                (scope.requestedProjectId() != null && projectPermissionService.isBusinessModuleDisabled(scope.requestedProjectId(), "INSPECTION")) ? List.<InspectionTodoVO>of() : inspectionService.listTodos(scope.requestedProjectId(), user))) {
             PersonalTodoVO todo = toInspectionTodo(source);
             if (todo != null && scope.projectIds().contains(todo.getProjectId())) {
                 todos.add(todo);
@@ -795,7 +801,8 @@ public class PersonalWorkCenterService {
 
     private LambdaQueryWrapper<UserNotification> notificationScopeQuery(ProjectScope scope, Long userId) {
         LambdaQueryWrapper<UserNotification> query = new LambdaQueryWrapper<UserNotification>()
-                .eq(UserNotification::getUserId, userId);
+                .eq(UserNotification::getUserId, userId)
+                .apply(com.example.siteplatform.system.constant.BusinessModuleCodes.NOTIFICATION_ENABLED_SQL);
         if (scope.requestedProjectId() != null) {
             query.eq(UserNotification::getProjectId, scope.requestedProjectId());
         } else if (scope.projectIds().isEmpty()) {

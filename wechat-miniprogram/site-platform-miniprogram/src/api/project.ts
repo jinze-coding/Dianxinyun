@@ -83,3 +83,12 @@ export async function getProjectProfile(projectId: number): Promise<ProjectProfi
   }
   return request<ProjectProfile>(`/projects/${projectId}/profile`);
 }
+
+export interface ProjectModuleState {
+  projectId: number;
+  enabledBusinessModules: string[];
+  moduleConfigVersion: number;
+}
+export function getProjectModules(projectId: number): Promise<ProjectModuleState> {
+  return request<ProjectModuleState>(`/projects/${projectId}/business-modules`);
+}

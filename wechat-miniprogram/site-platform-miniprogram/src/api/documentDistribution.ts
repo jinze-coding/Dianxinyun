@@ -1,3 +1,4 @@
+import { moduleUpload, moduleDownload } from '@/utils/moduleNetwork';
 import type { Result } from '@/types';
 import { API_BASE_URL, getToken, handleUnauthorized, request } from './request';
 
@@ -74,7 +75,7 @@ export function confirmDocumentDistribution(id: number, scene?: string, signatur
     });
   }
   return new Promise<DocumentDistributionDetail>((resolve, reject) => {
-    uni.uploadFile({
+    moduleUpload({
       url: `${API_BASE_URL}/me/document-distributions/${id}/confirm`,
       filePath: signaturePath,
       name: 'signature',
@@ -114,7 +115,7 @@ export function downloadDistributionFile(item: DocumentDistributionItem, distrib
     + `&distributionBatchId=${encodeURIComponent(distributionBatchId)}`
     + (acknowledgeSuperseded ? '&acknowledgeSuperseded=true' : '');
   return new Promise<string>((resolve, reject) => {
-    uni.downloadFile({
+    moduleDownload({
       url: `${API_BASE_URL}/project-documents/${item.documentId}/download?${query}`,
       header: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
       success: async (response) => {

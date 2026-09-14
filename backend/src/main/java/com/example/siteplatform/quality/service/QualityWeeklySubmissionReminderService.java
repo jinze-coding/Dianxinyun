@@ -39,6 +39,7 @@ public class QualityWeeklySubmissionReminderService {
     public boolean remind(Long projectId, LocalDate weekStart, LocalDateTime now) {
         if (projectId == null || weekStart == null || now == null) return false;
         LocalDate normalizedWeekStart = weekStart.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        if (settingService.isModuleOccurrenceDisabled(projectId, normalizedWeekStart.atStartOfDay())) return false;
         QualityWeeklyReminderSetting setting = settingService.lockForUpdate(projectId);
         if (setting == null || setting.getResponsibleUserId() == null) return false;
         LocalDateTime scheduledAt = settingService.scheduledAt(setting, normalizedWeekStart);

@@ -605,6 +605,9 @@ public class DocumentCirculationService {
                         .last("LIMIT " + Math.max(1, Math.min(limit, 200))));
         int processed = 0;
         for (DocumentDistributionBatch candidate : candidates) {
+            if (permissionService.isBusinessModuleDisabled(candidate.getProjectId(), "DOCUMENT")) continue;
+            LocalDateTime moduleStart = permissionService.businessModuleActivatedAt(candidate.getProjectId(), "DOCUMENT");
+            if (moduleStart != null && candidate.getDeadline().isBefore(moduleStart)) continue;
             DocumentDistributionBatch batch = distributionBatchMapper.selectForUpdate(candidate.getId());
             if (batch == null || batch.getOverdueNotificationTime() != null
                     || Set.of("COMPLETED", "VOIDED").contains(batch.getStatus())
@@ -959,6 +962,7 @@ public class DocumentCirculationService {
     private void requireRecipientAccess(DocumentDistributionBatch batch, DocumentDistributionRecipient recipient,
                                         SysUser user) {
         if (user == null || user.getId() == null) throw BusinessException.unauthorized("请先登录");
+        permissionService.requireBusinessModule(batch.getProjectId(), "DOCUMENT");
         if (recipient == null || !user.getId().equals(recipient.getUserId())) {
             throw BusinessException.forbidden("您不在该发放批次接收名单内");
         }

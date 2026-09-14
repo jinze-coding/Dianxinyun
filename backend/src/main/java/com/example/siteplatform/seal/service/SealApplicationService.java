@@ -152,6 +152,7 @@ public class SealApplicationService {
                                                           SysUser currentUser) {
         String normalizedScope = normalizeScope(scope);
         List<Long> activeProjectIds = activeProjectIds(currentUser);
+        if (projectId != null) permissionService.requireBusinessModule(projectId, "DOCUMENT");
         if (projectId != null && !activeProjectIds.contains(projectId)) {
             throw BusinessException.forbidden("仅当前项目有效成员可查看用印申请");
         }
@@ -160,6 +161,7 @@ public class SealApplicationService {
             permissionService.requireSystemPermission(currentUser.getId(), projectId, SystemPermissionCodes.SEAL_VIEW);
         }
         LambdaQueryWrapper<SealApplication> query = new LambdaQueryWrapper<SealApplication>()
+                .inSql(SealApplication::getProjectId, com.example.siteplatform.project.service.ProjectBusinessModuleService.enabledProjectSql("DOCUMENT"))
                 .in(SealApplication::getProjectId, projectId == null
                         ? (activeProjectIds.isEmpty() ? List.of(-1L) : activeProjectIds) : List.of(projectId));
         switch (normalizedScope) {
@@ -878,6 +880,7 @@ public class SealApplicationService {
     }
 
     private void requireActiveMember(SysUser user, Long projectId) {
+        permissionService.requireBusinessModule(projectId, "DOCUMENT");
         if (user == null) throw BusinessException.unauthorized("请先登录");
         permissionService.checkProjectPermission(user.getId(), projectId);
         if (!"ACTIVE".equals(permissionService.getProjectAccessStatus(user.getId(), projectId))) {

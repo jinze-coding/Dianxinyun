@@ -453,6 +453,7 @@ public class InspectionService {
         List<ProjectInfo> projects;
         if (requestedProjectId != null) {
             projectPermissionService.checkProjectPermission(currentUser.getId(), requestedProjectId);
+            projectPermissionService.requireBusinessModule(requestedProjectId, "INSPECTION");
             ProjectInfo project = projectInfoMapper.selectById(requestedProjectId);
             projects = project == null ? List.of() : List.of(project);
         } else {
@@ -464,6 +465,7 @@ public class InspectionService {
         List<InspectionTodoVO> todos = new ArrayList<>();
         for (ProjectInfo project : projects) {
             Long projectId = project.getId();
+            if (projectPermissionService.isBusinessModuleDisabled(projectId, "INSPECTION")) continue;
             String projectName = StringUtils.hasText(project.getShortName()) ? project.getShortName() : project.getProjectName();
             boolean canSubmitDaily = projectPermissionService.hasSystemPermission(currentUser.getId(), projectId,
                     SystemPermissionCodes.INSPECTION_SUBMIT);
@@ -906,6 +908,7 @@ public class InspectionService {
         if (!Integer.valueOf(1).equals(box.getPublicAccessEnabled())) {
             throw BusinessException.forbidden("该电箱公开扫码访问已停用");
         }
+        projectPermissionService.requireBusinessModule(box.getProjectId(), "INSPECTION");
         LocalDate endDate = LocalDate.now();
         LocalDate startDate = endDate.minusDays(29);
         List<InspectionRecord> records = inspectionRecordMapper.selectList(new LambdaQueryWrapper<InspectionRecord>()
@@ -1927,6 +1930,7 @@ public class InspectionService {
         if (!Integer.valueOf(1).equals(box.getPublicAccessEnabled())) {
             throw BusinessException.forbidden("该电箱公开扫码访问已停用");
         }
+        projectPermissionService.requireBusinessModule(box.getProjectId(), "INSPECTION");
         return box;
     }
 
@@ -2339,6 +2343,7 @@ public class InspectionService {
     }
 
     private void applyProjectScope(LambdaQueryWrapper<InspectionRecord> wrapper, Long projectId, SysUser currentUser) {
+        wrapper.inSql(InspectionRecord::getProjectId, com.example.siteplatform.project.service.ProjectBusinessModuleService.enabledProjectSql("INSPECTION"));
         if (projectId != null) {
             projectPermissionService.checkProjectPermission(currentUser.getId(), projectId);
             projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
@@ -2359,6 +2364,7 @@ public class InspectionService {
 
     private void applyRectificationProjectScope(LambdaQueryWrapper<InspectionRectification> wrapper, Long projectId,
                                                 SysUser currentUser) {
+        wrapper.inSql(InspectionRectification::getProjectId, com.example.siteplatform.project.service.ProjectBusinessModuleService.enabledProjectSql("INSPECTION"));
         if (projectId != null) {
             projectPermissionService.checkProjectPermission(currentUser.getId(), projectId);
             projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
@@ -2415,6 +2421,7 @@ public class InspectionService {
         if (box == null) {
             throw BusinessException.notFound("电箱不存在");
         }
+        projectPermissionService.requireBusinessModule(box.getProjectId(), "INSPECTION");
         return box;
     }
 

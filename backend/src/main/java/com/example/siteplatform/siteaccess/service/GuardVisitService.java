@@ -513,6 +513,7 @@ public class GuardVisitService {
 
     private void validateUsableQr(SiteGuardVisitQr qr) {
         if (qr == null) throw BusinessException.notFound("门卫登记入口不存在");
+        permissionService.requireBusinessModule(qr.getProjectId(), "SITE_ACCESS");
         if (QR_ROTATED.equals(qr.getQrStatus())) throw BusinessException.of(410, "门卫登记码已轮换");
         if (QR_DISABLED.equals(qr.getQrStatus())) throw BusinessException.of(410, "门卫登记入口已停用");
         if (!QR_ENABLED.equals(qr.getQrStatus())) throw BusinessException.notFound("门卫登记入口不存在");
@@ -839,6 +840,7 @@ public class GuardVisitService {
     }
 
     private void requireCurrentQr(SiteGuardVisitQr qr) {
+        permissionService.requireBusinessModule(qr.getProjectId(), "SITE_ACCESS");
         if (QR_ROTATED.equals(qr.getQrStatus())) throw stateConflict("门卫登记码已轮换，请刷新后重试");
     }
 
@@ -906,6 +908,7 @@ public class GuardVisitService {
     }
 
     private ProjectInfo requireProject(Long projectId) {
+        permissionService.requireBusinessModule(projectId, "SITE_ACCESS");
         ProjectInfo project = projectId == null ? null : projectMapper.selectById(projectId);
         if (project == null || Integer.valueOf(1).equals(project.getDeleted())) {
             throw BusinessException.notFound("项目不存在");
@@ -914,6 +917,7 @@ public class GuardVisitService {
     }
 
     private ProjectInfo requireProjectForUpdate(Long projectId) {
+        permissionService.requireBusinessModule(projectId, "SITE_ACCESS");
         ProjectInfo project = projectId == null ? null : projectMapper.selectByIdForUpdate(projectId);
         if (project == null || Integer.valueOf(1).equals(project.getDeleted())) {
             throw BusinessException.notFound("项目不存在");

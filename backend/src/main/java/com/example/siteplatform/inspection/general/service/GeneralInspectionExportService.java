@@ -176,6 +176,16 @@ public class GeneralInspectionExportService {
         try {
             process(claimed.getId());
         } catch (Exception exception) {
+            if (com.example.siteplatform.project.service.ProjectBusinessModuleService.isModulePause(exception)) {
+                transactionTemplate.executeWithoutResult(status -> {
+                    var current = exportJobMapper.selectByIdForUpdate(claimed.getId());
+                    if (current != null && JOB_RUNNING.equals(current.getStatus())) {
+                        current.setStatus(JOB_PENDING); current.setProgress(0); current.setUpdateTime(now());
+                        requireSingle(exportJobMapper.updateById(current), "暂停模块导出任务");
+                    }
+                });
+                return;
+            }
             log.error("临边巡检报表生成失败，jobId={}", claimed.getId(), exception);
             String message = safeErrorMessage(exception);
             transactionTemplate.executeWithoutResult(status -> markFailed(claimed.getId(), message));
@@ -202,6 +212,7 @@ public class GeneralInspectionExportService {
     private void process(Long jobId) {
         GeneralInspectionExportJob job = exportJobMapper.selectById(jobId);
         if (job == null || !EXPORT_TYPE.equals(job.getExportType()) || !JOB_RUNNING.equals(job.getStatus())) return;
+        permissionService.requireModule(job.getProjectId());
         List<GeneralInspectionExportJobTask> snapshots = exportJobTaskMapper.selectList(
                 new LambdaQueryWrapper<GeneralInspectionExportJobTask>()
                         .eq(GeneralInspectionExportJobTask::getJobId, jobId)
@@ -239,6 +250,7 @@ public class GeneralInspectionExportService {
     private void completeJob(Long jobId, StoredFile stored) {
         GeneralInspectionExportJob job = exportJobMapper.selectByIdForUpdate(jobId);
         if (job == null || !JOB_RUNNING.equals(job.getStatus())) throw conflict("导出任务状态已变化");
+        permissionService.requireModule(job.getProjectId());
         FileResource file = new FileResource();
         file.setProjectId(job.getProjectId());
         file.setFileName(stored.originalFileName());

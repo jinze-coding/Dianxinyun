@@ -13,6 +13,10 @@ public class GeneralInspectionPermissionService {
 
     private final ProjectPermissionService projectPermissionService;
 
+    public void requireModule(Long projectId) { projectPermissionService.requireBusinessModule(projectId, "INSPECTION"); }
+    public boolean isModuleDisabled(Long projectId) { return projectPermissionService.isBusinessModuleDisabled(projectId, "INSPECTION"); }
+    public java.time.LocalDateTime moduleActivatedAt(Long projectId) { return projectPermissionService.businessModuleActivatedAt(projectId, "INSPECTION"); }
+
     public boolean isPlatformAdmin(SysUser user) {
         return user != null && user.getId() != null && projectPermissionService.isPlatformAdmin(user.getId());
     }
@@ -91,7 +95,7 @@ public class GeneralInspectionPermissionService {
     }
 
     public boolean hasActiveProjectAccess(Long projectId, Long userId) {
-        return projectId != null && userId != null
+        return projectId != null && userId != null && !isModuleDisabled(projectId)
                 && "ACTIVE".equals(projectPermissionService.getProjectAccessStatus(userId, projectId));
     }
 
@@ -106,6 +110,7 @@ public class GeneralInspectionPermissionService {
     }
 
     private void checkProjectAccess(Long projectId, SysUser user) {
+        requireModule(projectId);
         requireUser(user);
         if (projectId == null) throw new BusinessException("项目ID不能为空");
         projectPermissionService.checkProjectPermission(user.getId(), projectId);

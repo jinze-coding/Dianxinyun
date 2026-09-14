@@ -643,6 +643,7 @@ public class SiteAccessService {
                 : invitationMapper.selectOne(new LambdaQueryWrapper<SiteVisitInvitation>()
                 .eq(SiteVisitInvitation::getTokenHash, hash).last("LIMIT 1"));
         if (invitation == null) throw BusinessException.notFound("邀请不存在或已失效");
+        projectPermissionService.requireBusinessModule(invitation.getProjectId(), "SITE_ACCESS");
         return invitation;
     }
 
@@ -676,6 +677,7 @@ public class SiteAccessService {
                 || (!STATUS_PENDING.equals(status) && !STATUS_SUBMITTED.equals(status) && !STATUS_OPEN.equals(status))) {
             throw stateConflict("当前邀请不可查看项目信息");
         }
+        projectPermissionService.requireBusinessModule(invitation.getProjectId(), "SITE_ACCESS");
         return invitation;
     }
 
@@ -988,6 +990,7 @@ public class SiteAccessService {
     }
 
     private ProjectInfo requireProject(Long projectId) {
+        projectPermissionService.requireBusinessModule(projectId, "SITE_ACCESS");
         ProjectInfo project = projectInfoMapper.selectById(projectId);
         if (project == null || Integer.valueOf(1).equals(project.getDeleted())) {
             throw BusinessException.notFound("项目不存在");
@@ -997,6 +1000,7 @@ public class SiteAccessService {
 
     /** Serializes invitation creation with project deletion to prevent orphaned visitor data. */
     private ProjectInfo requireProjectForUpdate(Long projectId) {
+        projectPermissionService.requireBusinessModule(projectId, "SITE_ACCESS");
         ProjectInfo project = projectInfoMapper.selectByIdForUpdate(projectId);
         if (project == null || Integer.valueOf(1).equals(project.getDeleted())) {
             throw BusinessException.notFound("项目不存在");
@@ -1007,6 +1011,7 @@ public class SiteAccessService {
     private SiteVisitInvitation requireInvitation(Long id) {
         SiteVisitInvitation invitation = id == null ? null : invitationMapper.selectById(id);
         if (invitation == null) throw BusinessException.notFound("外访邀请不存在");
+        projectPermissionService.requireBusinessModule(invitation.getProjectId(), "SITE_ACCESS");
         return invitation;
     }
 

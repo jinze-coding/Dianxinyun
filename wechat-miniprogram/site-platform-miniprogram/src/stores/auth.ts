@@ -1,4 +1,5 @@
 import { reactive } from 'vue';
+import { useProjectStore } from './project';
 import type { User } from '@/types';
 import { getCurrentUser, login as loginApi, logout as logoutApi } from '@/api/auth';
 import { getToken, setToken } from '@/api/request';
@@ -115,11 +116,26 @@ function collectProjectMenuCodes(user: User, projectId: number): string[] {
   return Array.from(codes);
 }
 
+function moduleForPermission(code: string): string | undefined {
+  const value = String(code || '').toUpperCase();
+  if (/^(DOCUMENT\.|SEAL\.)/.test(value)) return 'DOCUMENT';
+  if (/^(INSPECTION\.|BOX_|INSPECTION_|EDGE_INSPECTION_|CUSTOM_INSPECTION_|SUMMARY_|RECTIFICATION_)/.test(value)) return 'INSPECTION';
+  if (value.startsWith('QUALITY.')) return 'QUALITY';
+  if (value.startsWith('SAFETY_COMMITTEE.')) return 'SAFETY_COMMITTEE';
+  return undefined;
+}
+
+function isProjectModuleEnabled(user: User | null, projectId: number, module?: string): boolean {
+  if (!module) return true;
+  const context = (user?.projectContexts || user?.projectRoles || []).find((item) => Number(item.projectId) === Number(projectId));
+  return !Array.isArray(context?.enabledBusinessModules) || context.enabledBusinessModules.includes(module);
+}
+
 function hasProjectPermission(user: User | null, projectId: number, ...permissionCodes: string[]): boolean {
   if (!user || !projectId) return false;
-  if (user.roles?.includes('PLATFORM_ADMIN')) return true;
   const granted = new Set(collectProjectPermissionCodes(user, projectId));
-  return permissionCodes.filter(Boolean).some((code) => granted.has(code));
+  return permissionCodes.filter(Boolean).some((code) => isProjectModuleEnabled(user, projectId, moduleForPermission(code))
+    && (user.roles?.includes('PLATFORM_ADMIN') || granted.has(code)));
 }
 
 function storedProjectId(): number {
@@ -136,14 +152,16 @@ function activeProjectIds(user: User): number[] {
   ));
 }
 
-function canAccessRoot(path: string, user: User | null = state.user): boolean {
+function canAccessRoot(path: string, user: User | null = state.user, projectId = useProjectStore().state.currentProjectId): boolean {
   const rule = ROOT_PAGE_RULES.find((item) => item.path === path);
   if (!rule || rule.path === '/pages/profile/index') return true;
   if (!user) return false;
   // 个人待办是所有已登录用户的基础工作台，不依赖项目业务菜单。
   if (rule.path === PERSONAL_TODO_PAGE) return true;
+  const module = ({ '/pages/documents/index': 'DOCUMENT', '/pages/inspection/index': 'INSPECTION', '/pages/quality/index': 'QUALITY', '/pages/safety-committee/index': 'SAFETY_COMMITTEE' } as Record<string, string>)[path];
+  if (!isProjectModuleEnabled(user, projectId, module)) return false;
   if (user.roles?.includes('PLATFORM_ADMIN')) return true;
-  const projectIds = activeProjectIds(user);
+  const projectIds = projectId > 0 ? [projectId] : activeProjectIds(user);
   const projectMenus = projectIds.flatMap((projectId) => collectProjectMenuCodes(user, projectId));
   const menus = flattenMenus(user);
   const hasMiniMenuCatalog = projectMenus.some((code) => code.startsWith('MINI_'))
@@ -152,7 +170,7 @@ function canAccessRoot(path: string, user: User | null = state.user): boolean {
     (hasMiniMenuCatalog ? rule.miniMenuCodes : rule.legacyMenuCodes)
       .map((code) => code.toUpperCase())
   );
-  if (projectMenus.length) return projectMenus.some((code) => allowedCodes.has(code));
+  if (projectIds.some((id) => projectContexts(user, id).some((context) => Array.isArray(context.menuCodes))) || projectMenus.length) return projectMenus.some((code) => allowedCodes.has(code));
   // 兼容旧会话；服务端对项目范围和操作权限仍会强制校验。
   return menus.some((menu) => {
     if (hasMiniMenuCatalog && !isMiniProgramMenu(menu)) return false;
@@ -169,7 +187,9 @@ function requiresInitialPasswordSetup(user: User | null = state.user): boolean {
   return user?.initialPasswordSetupRequired === true;
 }
 
+let userRefreshVersion = 0;
 function persistUser(user: User | null) {
+  userRefreshVersion += 1;
   state.user = user;
   if (user) uni.setStorageSync(USER_CACHE_KEY, user);
   else uni.removeStorageSync(USER_CACHE_KEY);
@@ -196,9 +216,11 @@ export function useAuthStore() {
     if (!state.tokenReady) {
       return null;
     }
+    const request = ++userRefreshVersion;
+    const token = getToken();
     const user = await getCurrentUser();
-    persistUser(user);
-    return user;
+    if (request === userRefreshVersion && token === getToken() && state.tokenReady) persistUser(user);
+    return state.user;
   }
 
   async function logout() {
@@ -238,7 +260,7 @@ export function useAuthStore() {
     uni.switchTab({ url: firstAuthorizedPage(), fail: () => uni.reLaunch({ url: firstAuthorizedPage() }) });
   }
 
-  async function ensureRootAccess(path: string): Promise<boolean> {
+  async function ensureRootAccess(path: string, projectId?: number): Promise<boolean> {
     if (!getToken() && !USE_MOCK) {
       uni.reLaunch({ url: '/pages/login/index' });
       return false;
@@ -249,7 +271,7 @@ export function useAuthStore() {
         uni.reLaunch({ url: '/pages/initial-password/index' });
         return false;
       }
-      if (canAccessRoot(path)) return true;
+      if (canAccessRoot(path, state.user, projectId)) return true;
       uni.showToast({ title: '当前账号无此功能权限', icon: 'none' });
       const target = firstAuthorizedPage();
       uni.switchTab({ url: target, fail: () => uni.reLaunch({ url: target }) });
@@ -265,7 +287,7 @@ export function useAuthStore() {
     projectId?: number,
     ...permissionCodes: string[]
   ): Promise<boolean> {
-    if (!await ensureRootAccess(path)) return false;
+    if (!await ensureRootAccess(path, projectId)) return false;
     if (!permissionCodes.filter(Boolean).length) return true;
     const resolvedProjectId = Number(projectId) > 0 ? Number(projectId) : storedProjectId();
     if (hasProjectPermission(state.user, resolvedProjectId, ...permissionCodes)) return true;
@@ -285,6 +307,7 @@ export function useAuthStore() {
 
   return {
     state,
+    isProjectModuleEnabled: (projectId: number, module: string) => isProjectModuleEnabled(state.user, projectId, module),
     login,
     completeLogin,
     loadUser,

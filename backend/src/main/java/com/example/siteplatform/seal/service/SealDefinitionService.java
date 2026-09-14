@@ -293,6 +293,7 @@ public class SealDefinitionService {
     }
 
     private void requireActiveMember(SysUser user, Long projectId) {
+        permissionService.requireBusinessModule(projectId, "DOCUMENT");
         if (user == null) throw BusinessException.unauthorized("请先登录");
         permissionService.checkProjectPermission(user.getId(), projectId);
         if (!"ACTIVE".equals(permissionService.getProjectAccessStatus(user.getId(), projectId))) {

@@ -1,3 +1,4 @@
+import { moduleUpload, moduleDownload } from '@/utils/moduleNetwork';
 import { API_BASE_URL, getToken, handleUnauthorized, request, USE_MOCK } from './request';
 
 export interface FileResourceItem {
@@ -49,7 +50,7 @@ export async function uploadPhoto(filePath: string, fileType: string, options: U
   }
   const token = getToken();
   return new Promise((resolve, reject) => {
-    uni.uploadFile({
+    moduleUpload({
       url: `${API_BASE_URL}/files`,
       filePath,
       name: 'file',
@@ -104,7 +105,7 @@ export async function downloadFileToTempPath(id: number): Promise<string> {
   }
   const token = getToken();
   return new Promise((resolve, reject) => {
-    uni.downloadFile({
+    moduleDownload({
       url: `${API_BASE_URL}/files/${id}/download`,
       header: token ? { Authorization: `Bearer ${token}` } : {},
       success: async (response) => {

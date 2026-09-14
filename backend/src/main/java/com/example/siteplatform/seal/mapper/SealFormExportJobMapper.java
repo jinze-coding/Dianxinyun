@@ -14,7 +14,7 @@ public interface SealFormExportJobMapper extends BaseMapper<SealFormExportJob> {
 
     @Select("""
         SELECT * FROM seal_form_export_job
-        WHERE status = 'PENDING' OR (status = 'RUNNING' AND lease_until < NOW())
+        WHERE (status = 'PENDING' OR (status = 'RUNNING' AND lease_until < NOW())) AND project_id IN (SELECT project_id FROM project_business_module WHERE enabled=1 AND module_code='DOCUMENT')
         ORDER BY create_time, id LIMIT 1 FOR UPDATE SKIP LOCKED
         """)
     SealFormExportJob nextForUpdate();

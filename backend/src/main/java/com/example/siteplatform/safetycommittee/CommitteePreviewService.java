@@ -54,6 +54,7 @@ public class CommitteePreviewService {
     @Scheduled(fixedDelay=3000,initialDelay=20000,scheduler="committeePreviewScheduler")
     public void runNext() {
         var list=attachments.selectList(new LambdaQueryWrapper<CommitteeAttachment>().isNotNull(CommitteeAttachment::getRecordId)
+                .inSql(CommitteeAttachment::getProjectId, com.example.siteplatform.project.service.ProjectBusinessModuleService.enabledProjectSql("SAFETY_COMMITTEE"))
                 .and(q->q.eq(CommitteeAttachment::getPreviewStatus,"QUEUED")
                         .or(r->r.eq(CommitteeAttachment::getPreviewStatus,"PROCESSING").lt(CommitteeAttachment::getLeaseUntil,CommitteeService.now())))
                 .orderByAsc(CommitteeAttachment::getId).last("LIMIT 1"));
@@ -63,6 +64,7 @@ public class CommitteePreviewService {
             service.lockProject(candidate.getProjectId()); var a=attachments.lock(candidate.getId());
             if(a==null || records.selectById(a.getRecordId())==null || !("QUEUED".equals(a.getPreviewStatus())
                     || ("PROCESSING".equals(a.getPreviewStatus()) && a.getLeaseUntil()!=null && a.getLeaseUntil().isBefore(CommitteeService.now())))) return null;
+            if(permissions.isBusinessModuleDisabled(a.getProjectId(), "SAFETY_COMMITTEE")) return null;
             if(a.getAttempts()>=3) {
                 a.setPreviewStatus("FAILED");a.setFailureMessage("转换多次中断，请重新生成预览");CommitteeService.one(attachments.updateById(a));return null;
             }
@@ -78,7 +80,12 @@ public class CommitteePreviewService {
             try(InputStream in=storage.load(original).getInputStream()){Files.copy(in,input,StandardCopyOption.REPLACE_EXISTING);}
             process=new ProcessBuilder("bash",converter,work.toString(),task.getPreviewKind(),original.getFileExtension())
                     .redirectErrorStream(true).redirectOutput(work.resolve("conversion.log").toFile()).start();
-            if(!process.waitFor(30,TimeUnit.MINUTES) || process.exitValue()!=0) throw new IOException("converter failed");
+            long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(30);
+            while (!process.waitFor(2,TimeUnit.SECONDS)) {
+                permissions.requireBusinessModule(task.getProjectId(), "SAFETY_COMMITTEE");
+                if (System.nanoTime() > deadline) throw new IOException("converter timeout");
+            }
+            if(process.exitValue()!=0) throw new IOException("converter failed");
             String ext=switch(task.getPreviewKind()){case "OFFICE"->"pdf";case "VIDEO"->"mp4";default->"jpg";};
             Path output=work.resolve("output."+ext);
             if(!Files.isRegularFile(output) || Files.size(output)<=0 || Files.size(output)>1024L*1024*1024) throw new IOException("invalid preview");
@@ -88,6 +95,7 @@ public class CommitteePreviewService {
                 service.lockProject(task.getProjectId()); var a=attachments.lock(task.getId());
                 if(a==null || !Objects.equals(a.getWorkerId(),task.getWorkerId()) || !"PROCESSING".equals(a.getPreviewStatus())
                         || records.selectById(a.getRecordId())==null) return;
+                permissions.requireBusinessModule(a.getProjectId(), "SAFETY_COMMITTEE");
                 var preview=service.store(file,a.getProjectId(),a.getRecordId(),CommitteeService.PREVIEW,a.getUploaderId());
                 if(a.getPreviewFileId()!=null) service.retire(service.file(a.getPreviewFileId()));
                 CommitteeService.one(attachments.update(null,new LambdaUpdateWrapper<CommitteeAttachment>().eq(CommitteeAttachment::getId,a.getId())
@@ -97,9 +105,10 @@ public class CommitteePreviewService {
             });
         } catch(Exception e) {
             if(e instanceof InterruptedException) Thread.currentThread().interrupt();
+            boolean paused = com.example.siteplatform.project.service.ProjectBusinessModuleService.isModulePause(e);
             transaction.executeWithoutResult(tx->attachments.update(null,new LambdaUpdateWrapper<CommitteeAttachment>()
                     .eq(CommitteeAttachment::getId,task.getId()).eq(CommitteeAttachment::getWorkerId,task.getWorkerId())
-                    .set(CommitteeAttachment::getPreviewStatus,"FAILED").set(CommitteeAttachment::getFailureMessage,"预览转换未完成，可下载原文件或重新生成")
+                    .set(CommitteeAttachment::getPreviewStatus,paused ? "QUEUED" : "FAILED").set(CommitteeAttachment::getAttempts,paused ? Math.max(0,task.getAttempts()-1) : task.getAttempts()).set(CommitteeAttachment::getFailureMessage,paused ? null : "预览转换未完成，可下载原文件或重新生成")
                     .set(CommitteeAttachment::getWorkerId,null).set(CommitteeAttachment::getLeaseUntil,null).set(CommitteeAttachment::getUpdateTime,CommitteeService.now())));
         } finally {
             if(process!=null && process.isAlive()){process.descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}

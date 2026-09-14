@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { moduleDownload } from '@/utils/moduleNetwork';
+
 const runtime=uni;
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { onHide, onShow } from '@dcloudio/uni-app';
@@ -45,7 +47,7 @@ async function download(original = false) {
     }else{const a=document.createElement('a');a.href=source;a.target='_blank';a.rel='noopener';a.click();}
     // #endif
     // #ifdef MP-WEIXIN
-    const path=await new Promise<string>((resolve,reject)=>{task=uni.downloadFile({url:source,success:r=>r.statusCode===200?resolve(r.tempFilePath):reject(new Error('文件读取资格已变化，请重新打开')),fail:reject});});
+    const path=await new Promise<string>((resolve,reject)=>{task=moduleDownload({url:source,success:r=>r.statusCode===200?resolve(r.tempFilePath):reject(new Error('文件读取资格已变化，请重新打开')),fail:reject});});
     task=undefined; if(!alive) return;
     clearTemporary(); temporary=path; nativeDocument=true;
     const ext=original?file.value.extension:file.value.previewKind==='OFFICE'?'pdf':file.value.extension;

@@ -152,6 +152,12 @@ public class QualityWeeklyReminderSettingService {
         return weekStart == null ? List.of() : settingMapper.selectEnabledSettings(weekStart);
     }
 
+    public boolean isModuleOccurrenceDisabled(Long projectId, LocalDateTime occurrence) {
+        if (projectPermissionService.isBusinessModuleDisabled(projectId, "QUALITY")) return true;
+        LocalDateTime activation = projectPermissionService.businessModuleActivatedAt(projectId, "QUALITY");
+        return activation != null && occurrence.isBefore(activation);
+    }
+
     public boolean isEligibleResponsibleUser(Long userId, Long projectId) {
         return userId != null && projectId != null
                 && isEligibleResponsibleUser(userMapper.selectById(userId), projectId);

@@ -67,6 +67,7 @@ public class GeneralInspectionTaskGenerationService {
     public int generatePlan(Long planId, LocalDateTime now, LocalDateTime horizon) {
         GeneralInspectionPlan plan = planMapper.selectByIdForUpdate(planId);
         if (plan == null || !"PUBLISHED".equals(plan.getStatus()) || !Integer.valueOf(0).equals(plan.getDeleted())) return 0;
+        if (permissionService.isModuleDisabled(plan.getProjectId())) return 0;
         if (now == null) now = LocalDateTime.now(BUSINESS_ZONE);
         if (horizon == null) horizon = now.plusHours(25);
 
@@ -82,6 +83,8 @@ public class GeneralInspectionTaskGenerationService {
                 LinkedHashMap::new));
 
         LocalDateTime generationLowerBound = plan.getEdgeGenerationLowerBoundTime();
+        LocalDateTime moduleStart = permissionService.moduleActivatedAt(plan.getProjectId());
+        if (moduleStart != null && (generationLowerBound == null || moduleStart.isAfter(generationLowerBound))) generationLowerBound = moduleStart;
         boolean edgePlan = EdgeInspectionConfigService.EDGE_PLAN_CODE.equals(plan.getPlanCode());
         LocalDate startDate = calculateCatchupStart(plan, configs.values(), now);
         LocalDate endDate = horizon.toLocalDate().plusDays(1);
@@ -95,6 +98,7 @@ public class GeneralInspectionTaskGenerationService {
                     LocalDateTime due = dueTime(date, slot);
                     if (!eligibleForActivationWindow(edgePlan, generationLowerBound,
                             taskStart, due, now)) continue;
+                    if (moduleStart != null && taskStart.isBefore(moduleStart)) continue;
                     if (taskStart.isAfter(horizon)) continue;
                     for (GeneralInspectionPlanConfig.PointAssignment assignment : assignments(plan, config)) {
                         if (materialize(plan, versions, version, config, slot, assignment, date,

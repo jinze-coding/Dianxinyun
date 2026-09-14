@@ -419,6 +419,7 @@ public class MeetingVisitService {
         if (!SiteAccessService.INVITE_TYPE_MEETING.equals(invitation.getInviteType())) {
             throw BusinessException.of(403, "当前二维码不是会议邀请");
         }
+        permissionService.requireBusinessModule(invitation.getProjectId(), "SITE_ACCESS");
         return invitation;
     }
 
@@ -723,6 +724,7 @@ public class MeetingVisitService {
         if (invitation == null || !SiteAccessService.INVITE_TYPE_MEETING.equals(invitation.getInviteType())) {
             throw BusinessException.notFound("会议邀请不存在");
         }
+        permissionService.requireBusinessModule(invitation.getProjectId(), "SITE_ACCESS");
         return invitation;
     }
 
@@ -748,12 +750,14 @@ public class MeetingVisitService {
     }
 
     private ProjectInfo requireProject(Long projectId) {
+        permissionService.requireBusinessModule(projectId, "SITE_ACCESS");
         ProjectInfo project = projectId == null ? null : projectMapper.selectById(projectId);
         if (project == null || Integer.valueOf(1).equals(project.getDeleted())) throw BusinessException.notFound("项目不存在");
         return project;
     }
 
     private ProjectInfo requireProjectForUpdate(Long projectId) {
+        permissionService.requireBusinessModule(projectId, "SITE_ACCESS");
         ProjectInfo project = projectId == null ? null : projectMapper.selectByIdForUpdate(projectId);
         if (project == null || Integer.valueOf(1).equals(project.getDeleted())) throw BusinessException.notFound("项目不存在");
         return project;

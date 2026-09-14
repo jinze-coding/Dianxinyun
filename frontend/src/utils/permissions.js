@@ -1,4 +1,5 @@
 import { PAGE_IDS } from '../constants/dicts.js';
+import { isProjectModuleEnabled, PAGE_MODULES, permissionModule, projectContext } from './projectModules.js';
 
 const PAGE_ACCESS_RULES = {
   [PAGE_IDS.SAFETY_COMMITTEE]: { menuCodes: ['WEB_SAFETY_COMMITTEE', 'SAFETY_COMMITTEE_RECORDS'] },
@@ -73,7 +74,7 @@ export function collectProjectMenuCodes(user, projectId) {
     (context?.menuCodes || []).forEach((code) => result.add(code));
   });
   // 兼容尚未返回按项目菜单的旧会话；后端权限校验仍是最终安全边界。
-  if (!result.size) collectAssignedMenuCodes(user).forEach((code) => result.add(code));
+  if (!result.size && !Array.isArray(projectContext(user, projectId)?.menuCodes)) collectAssignedMenuCodes(user).forEach((code) => result.add(code));
   return [...result];
 }
 
@@ -84,9 +85,9 @@ export function hasPermission(user, ...codes) {
 }
 
 export function hasProjectPermission(user, projectId, ...codes) {
-  if (isPlatformAdmin(user)) return true;
   const granted = collectPermissionCodes(user, projectId);
-  return codes.filter(Boolean).some((code) => granted.has(code));
+  return codes.filter(Boolean).some((code) => isProjectModuleEnabled(user, projectId, permissionModule(code))
+    && (isPlatformAdmin(user) || granted.has(code)));
 }
 
 export function hasAssignedMenu(user, ...menuCodes) {
@@ -101,15 +102,17 @@ export function hasAssignedProjectMenu(user, projectId, ...menuCodes) {
     && String(item?.accessStatus || 'ACTIVE').toUpperCase() === 'ACTIVE');
   if (!hasActiveContext) return false;
   const projectMenus = collectProjectMenuCodes(user, projectId);
-  if (projectMenus.length) return projectMenus.some((code) => expected.has(code));
+  if (Array.isArray(projectContext(user, projectId)?.menuCodes) || projectMenus.length) return projectMenus.some((code) => expected.has(code));
   // 兼容尚未返回按项目菜单的旧会话，服务端仍是最终安全边界。
   return hasAssignedMenu(user, ...menuCodes);
 }
 
 export function canAccessPage(user, pageId, projectId = null) {
   if (!user) return false;
+  if (pageId === PAGE_IDS.PERSONAL_INBOX) return true;
   const rule = PAGE_ACCESS_RULES[pageId];
   if (!rule) return false;
+  if (!isProjectModuleEnabled(user, projectId, PAGE_MODULES[pageId])) return false;
   if (isPlatformAdmin(user)) return true;
   if (rule.platformOnly && !isPlatformAdmin(user)) return false;
   if (projectId !== null && projectId !== undefined) {

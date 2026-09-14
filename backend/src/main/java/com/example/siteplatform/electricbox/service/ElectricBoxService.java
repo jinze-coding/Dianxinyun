@@ -136,7 +136,8 @@ public class ElectricBoxService {
             projectPermissionService.requireSystemPermission(currentUser.getId(), projectId,
                     SystemPermissionCodes.INSPECTION_VIEW);
         }
-        LambdaQueryWrapper<ElectricBox> wrapper = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<ElectricBox> wrapper = new LambdaQueryWrapper<ElectricBox>()
+                .inSql(ElectricBox::getProjectId, com.example.siteplatform.project.service.ProjectBusinessModuleService.enabledProjectSql("INSPECTION"));
         if (projectId != null) {
             wrapper.eq(ElectricBox::getProjectId, projectId);
         } else if (!projectPermissionService.isPlatformAdmin(currentUser.getId())) {
@@ -563,6 +564,7 @@ public class ElectricBoxService {
         if (box == null) {
             throw BusinessException.notFound("电箱不存在");
         }
+        projectPermissionService.requireBusinessModule(box.getProjectId(), "INSPECTION");
         return box;
     }
 

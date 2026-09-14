@@ -1,3 +1,4 @@
+import { moduleDownload } from '@/utils/moduleNetwork';
 import { checkItems } from '@/mock/data';
 import type { CheckResult, InspectionAssignee, InspectionItemResult, InspectionRecord } from '@/types';
 import { API_BASE_URL, getToken, request, USE_MOCK } from './request';
@@ -233,7 +234,7 @@ export async function exportInspectionRecords(params: {
   ].filter(Boolean).join('&');
   const token = getToken();
   return new Promise((resolve, reject) => {
-    uni.downloadFile({
+    moduleDownload({
       url: `${API_BASE_URL}/inspection/records/export?${query}`,
       header: token ? { Authorization: `Bearer ${token}` } : {},
       success: (response) => {

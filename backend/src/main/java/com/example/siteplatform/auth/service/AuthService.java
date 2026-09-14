@@ -280,6 +280,7 @@ public class AuthService {
         vo.setWechatBound(binding != null && "ACTIVE".equals(binding.getStatus()));
         vo.setWechatBindingStatus(binding == null ? "UNBOUND" : binding.getStatus());
         vo.setRoles(roles == null ? List.of() : roles);
+        projectRoles.forEach(systemPermissionService::populateProjectModules);
         vo.setProjectRoles(projectRoles);
         vo.setProjectContexts(projectRoles);
         vo.setAccessibleProjectIds(projectRoles.stream().map(UserProjectRoleVO::getProjectId).toList());

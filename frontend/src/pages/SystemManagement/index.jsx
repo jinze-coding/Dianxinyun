@@ -74,6 +74,7 @@ import {
 import ProjectRoleAssignmentTree from './ProjectRoleAssignmentTree';
 import ApprovalManagementPage from '../ApprovalManagement';
 import './index.css';
+import ProjectModuleSettings from './ProjectModuleSettings';
 
 const STATUS_TEXT = {
   PENDING: '待审核',
@@ -90,6 +91,7 @@ const RETIRED_MENU_CODES = new Set(['SYSTEM_PROJECT']);
 const RETIRED_PERMISSION_CODES = new Set(['project.member.manage']);
 
 const TABS = [
+  { id: 'projectModules', label: '项目模块', code: 'SYSTEM_PROJECT_MODULE', permissions: [] },
   { id: 'registration', label: '注册审核', code: 'SYSTEM_REGISTRATION', permissions: ['system.registration.review'] },
   { id: 'users', label: '用户管理', code: 'SYSTEM_USER', permissions: ['system.user.view'] },
   { id: 'approval', label: '用印审批', code: 'SYSTEM_APPROVAL', permissions: ['system.approval.view', 'system.approval.manage'] },
@@ -1038,7 +1040,7 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
   const loadData = useCallback(async (overrides = {}) => {
     if (!activeTab) return;
     const requestSequence = ++requestSequenceRef.current;
-    if (activeTab === 'approval') {
+    if (['approval', 'projectModules'].includes(activeTab)) {
       setRows([]);
       setTotal(0);
       setError('');
@@ -1518,6 +1520,7 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
   );
 
   const renderContent = () => {
+    if (activeTab === 'projectModules') return <ProjectModuleSettings ModalFrame={ModalFrame} PageBar={PageBar} Pagination={Pagination} />;
     if (activeTab === 'approval') return <ApprovalManagementPage currentUser={currentUser} initialProjectId={currentProject} projectList={projectList} />;
     if (loading) return <Loading />;
     if (error) return <ErrorState text={error} onRetry={loadData} />;

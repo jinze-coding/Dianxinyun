@@ -85,6 +85,15 @@ class QualityWeeklySubmissionReminderServiceTest {
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
+    @Test
+    void disabledOrPreActivationWeekCannotSendReminderOrTouchDraft() {
+        LocalDate week = LocalDate.of(2026, 9, 14);
+        when(settingService.isModuleOccurrenceDisabled(9L, week.atStartOfDay())).thenReturn(true);
+        assertFalse(service.remind(9L, week, week.plusDays(6).atTime(18, 0)));
+        org.mockito.Mockito.verifyNoInteractions(inspectionMapper, projectMapper, notificationService);
+        verify(settingService, never()).lockForUpdate(9L);
+    }
+
     private QualityWeeklyReminderSetting setting() {
         QualityWeeklyReminderSetting setting = new QualityWeeklyReminderSetting();
         setting.setId(41L);

@@ -1,3 +1,4 @@
+import { moduleUpload, moduleDownload } from '@/utils/moduleNetwork';
 import type {
   PageResult,
   SealApplication,
@@ -223,7 +224,7 @@ export function uploadSealApplicationFile(
   const formData: Record<string, string> = { fileRole };
   if (itemId) formData.itemId = String(itemId);
   return new Promise((resolve, reject) => {
-    uni.uploadFile({
+    moduleUpload({
       url: `${API_BASE_URL}/seal/applications/${applicationId}/files`,
       filePath,
       name: 'file',
@@ -278,7 +279,7 @@ function downloadSealPath(path: string): Promise<string> {
   if (USE_MOCK) return Promise.resolve('/static/mock-photo.svg');
   const token = getToken();
   return new Promise((resolve, reject) => {
-    uni.downloadFile({
+    moduleDownload({
       url: `${API_BASE_URL}${path}`,
       header: token ? { Authorization: `Bearer ${token}` } : {},
       success: async (response) => {

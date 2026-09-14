@@ -27,7 +27,7 @@ class SystemPermissionServiceTest {
         SystemPermissionMapper permissionMapper = mock(SystemPermissionMapper.class);
         SysUserMapper userMapper = mock(SysUserMapper.class);
         SystemRoleBusinessModuleMapper moduleMapper = mock(SystemRoleBusinessModuleMapper.class);
-        SystemPermissionService service = new SystemPermissionService(menuMapper, permissionMapper, userMapper, moduleMapper);
+        SystemPermissionService service = new SystemPermissionService(menuMapper, permissionMapper, userMapper, moduleMapper, mock(com.example.siteplatform.project.service.ProjectBusinessModuleService.class));
         when(userMapper.selectRoleCodesByUserId(12L))
                 .thenReturn(List.of(ProjectPermissionService.ROLE_PLATFORM_ADMIN));
         when(moduleMapper.selectModuleCodesByUserId(12L)).thenReturn(List.of("DOCUMENT"));
@@ -42,7 +42,7 @@ class SystemPermissionServiceTest {
         SystemPermissionMapper permissionMapper = mock(SystemPermissionMapper.class);
         SysUserMapper userMapper = mock(SysUserMapper.class);
         SystemRoleBusinessModuleMapper moduleMapper = mock(SystemRoleBusinessModuleMapper.class);
-        SystemPermissionService service = new SystemPermissionService(menuMapper, permissionMapper, userMapper, moduleMapper);
+        SystemPermissionService service = new SystemPermissionService(menuMapper, permissionMapper, userMapper, moduleMapper, mock(com.example.siteplatform.project.service.ProjectBusinessModuleService.class));
         when(userMapper.selectRoleCodesByUserId(12L))
                 .thenReturn(List.of(ProjectPermissionService.ROLE_PLATFORM_ADMIN));
         SystemPermission document = new SystemPermission();
@@ -71,7 +71,7 @@ class SystemPermissionServiceTest {
         SystemPermissionMapper permissionMapper = mock(SystemPermissionMapper.class);
         SysUserMapper userMapper = mock(SysUserMapper.class);
         SystemRoleBusinessModuleMapper moduleMapper = mock(SystemRoleBusinessModuleMapper.class);
-        SystemPermissionService service = new SystemPermissionService(menuMapper, permissionMapper, userMapper, moduleMapper);
+        SystemPermissionService service = new SystemPermissionService(menuMapper, permissionMapper, userMapper, moduleMapper, mock(com.example.siteplatform.project.service.ProjectBusinessModuleService.class));
         when(userMapper.selectRoleCodesByUserId(1L)).thenReturn(List.of());
         when(permissionMapper.selectCodesByUserId(1L)).thenReturn(List.of());
 
@@ -85,7 +85,7 @@ class SystemPermissionServiceTest {
         SystemPermissionMapper permissionMapper = mock(SystemPermissionMapper.class);
         SysUserMapper userMapper = mock(SysUserMapper.class);
         SystemRoleBusinessModuleMapper moduleMapper = mock(SystemRoleBusinessModuleMapper.class);
-        SystemPermissionService service = new SystemPermissionService(menuMapper, permissionMapper, userMapper, moduleMapper);
+        SystemPermissionService service = new SystemPermissionService(menuMapper, permissionMapper, userMapper, moduleMapper, mock(com.example.siteplatform.project.service.ProjectBusinessModuleService.class));
         when(userMapper.selectRoleCodesByUserId(7L)).thenReturn(List.of());
         when(permissionMapper.selectCodesByUserId(7L)).thenReturn(List.of("system.role.manage"));
         when(permissionMapper.selectPlatformCodesByUserId(7L)).thenReturn(List.of());
@@ -101,7 +101,7 @@ class SystemPermissionServiceTest {
         SystemPermissionMapper permissionMapper = mock(SystemPermissionMapper.class);
         SysUserMapper userMapper = mock(SysUserMapper.class);
         SystemRoleBusinessModuleMapper moduleMapper = mock(SystemRoleBusinessModuleMapper.class);
-        SystemPermissionService service = new SystemPermissionService(menuMapper, permissionMapper, userMapper, moduleMapper);
+        SystemPermissionService service = new SystemPermissionService(menuMapper, permissionMapper, userMapper, moduleMapper, mock(com.example.siteplatform.project.service.ProjectBusinessModuleService.class));
         when(userMapper.selectRoleCodesByUserId(7L)).thenReturn(List.of());
         when(moduleMapper.selectModuleCodesByUserIdAndProject(7L, 101L)).thenReturn(List.of("DOCUMENT"));
         when(moduleMapper.selectModuleCodesByUserIdAndProject(7L, 202L)).thenReturn(List.of("DOCUMENT"));
@@ -120,7 +120,7 @@ class SystemPermissionServiceTest {
         SystemPermissionMapper permissionMapper = mock(SystemPermissionMapper.class);
         SysUserMapper userMapper = mock(SysUserMapper.class);
         SystemRoleBusinessModuleMapper moduleMapper = mock(SystemRoleBusinessModuleMapper.class);
-        SystemPermissionService service = new SystemPermissionService(menuMapper, permissionMapper, userMapper, moduleMapper);
+        SystemPermissionService service = new SystemPermissionService(menuMapper, permissionMapper, userMapper, moduleMapper, mock(com.example.siteplatform.project.service.ProjectBusinessModuleService.class));
         when(userMapper.selectRoleCodesByUserId(7L)).thenReturn(List.of());
         when(moduleMapper.selectModuleCodesByUserIdAndProject(7L, 101L))
                 .thenReturn(List.of("DOCUMENT", "INSPECTION"));
@@ -141,7 +141,7 @@ class SystemPermissionServiceTest {
         SystemPermissionMapper permissionMapper = mock(SystemPermissionMapper.class);
         SysUserMapper userMapper = mock(SysUserMapper.class);
         SystemRoleBusinessModuleMapper moduleMapper = mock(SystemRoleBusinessModuleMapper.class);
-        SystemPermissionService service = new SystemPermissionService(menuMapper, permissionMapper, userMapper, moduleMapper);
+        SystemPermissionService service = new SystemPermissionService(menuMapper, permissionMapper, userMapper, moduleMapper, mock(com.example.siteplatform.project.service.ProjectBusinessModuleService.class));
         when(userMapper.selectRoleCodesByUserId(7L)).thenReturn(List.of());
         when(moduleMapper.selectModuleCodesByUserIdAndProject(7L, 101L)).thenReturn(List.of("INSPECTION"));
         when(permissionMapper.selectCodesByUserIdAndProject(7L, 101L)).thenReturn(List.of("document.manage"));
