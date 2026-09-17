@@ -25,9 +25,13 @@ public class ProjectBusinessModuleService {
     private final OperationLogMapper logs;
     public static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
-    public record State(Long projectId, List<String> enabledBusinessModules, long moduleConfigVersion) {}
+    public record State(Long projectId, List<String> enabledBusinessModules, long moduleConfigVersion, boolean inboxEntryVisible) {
+        public State(Long projectId, List<String> enabledBusinessModules, long moduleConfigVersion) {
+            this(projectId, enabledBusinessModules, moduleConfigVersion, true);
+        }
+    }
     public record Row(Long projectId, String projectName, String shortName,
-                      List<String> enabledBusinessModules, long moduleConfigVersion) {}
+                      List<String> enabledBusinessModules, long moduleConfigVersion, boolean inboxEntryVisible) {}
 
     public static boolean isModulePause(Throwable error) {
         for (Throwable cause = error; cause != null; cause = cause.getCause()) {
@@ -38,7 +42,8 @@ public class ProjectBusinessModuleService {
     }
 
     public State state(Long projectId) {
-        var rows = jdbc.queryForList("SELECT module_code, enabled, version FROM project_business_module WHERE project_id=?", projectId);
+        var rows = jdbc.queryForList("SELECT m.module_code, m.enabled, m.version, p.inbox_entry_visible FROM project_business_module m "
+                + "JOIN project_info p ON p.id=m.project_id AND p.deleted=0 WHERE m.project_id=?", projectId);
         if (rows.isEmpty() && projects.selectById(projectId) == null) throw BusinessException.notFound("项目不存在");
         if (rows.size() != BusinessModuleCodes.ALL.size()) {
             throw BusinessException.of(503, "项目模块配置不完整，请联系管理员");
@@ -49,7 +54,9 @@ public class ProjectBusinessModuleService {
             if (((Number) row.get("version")).longValue() != version) throw BusinessException.of(503, "项目模块配置版本不一致");
             if (((Number) row.get("enabled")).intValue() == 1) enabled.add((String) row.get("module_code"));
         }
-        return new State(projectId, BusinessModuleCodes.ALL.stream().filter(enabled::contains).toList(), version);
+        Object inboxVisible = rows.get(0).get("inbox_entry_visible");
+        return new State(projectId, BusinessModuleCodes.ALL.stream().filter(enabled::contains).toList(), version,
+                Boolean.TRUE.equals(inboxVisible) || (inboxVisible instanceof Number value && value.intValue() == 1));
     }
 
     public boolean isDisabled(Long projectId, String moduleCode) {
@@ -102,20 +109,31 @@ public class ProjectBusinessModuleService {
         String search = "%" + (keyword == null ? "" : keyword.trim()) + "%";
         Long total = jdbc.queryForObject("SELECT COUNT(*) FROM project_info WHERE deleted=0 AND (project_name LIKE ? OR short_name LIKE ?)", Long.class, search, search);
         var rows = jdbc.query("SELECT id,project_name,short_name FROM project_info WHERE deleted=0 AND (project_name LIKE ? OR short_name LIKE ?) ORDER BY id LIMIT ? OFFSET ?",
-                (rs, n) -> { var state = state(rs.getLong("id")); return new Row(state.projectId(), rs.getString("project_name"), rs.getString("short_name"), state.enabledBusinessModules(), state.moduleConfigVersion()); },
+                (rs, n) -> { var state = state(rs.getLong("id")); return new Row(state.projectId(), rs.getString("project_name"), rs.getString("short_name"), state.enabledBusinessModules(), state.moduleConfigVersion(), state.inboxEntryVisible()); },
                 search, search, size, ((long) page - 1) * size);
         return PageResult.of(page, size, total == null ? 0 : total, rows);
     }
 
     @Transactional
     public State update(Long projectId, List<String> moduleCodes, long expectedVersion, SysUser actor) {
+        return update(projectId, moduleCodes, expectedVersion, null, actor);
+    }
+
+    @Transactional
+    public State update(Long projectId, List<String> moduleCodes, long expectedVersion, Boolean inboxEntryVisible, SysUser actor) {
         if (moduleCodes == null || moduleCodes.size() > 5 || new HashSet<>(moduleCodes).size() != moduleCodes.size()
                 || !BusinessModuleCodes.ALL.containsAll(moduleCodes)) throw new BusinessException("请选择有效且不重复的业务模块");
         if (projects.selectByIdForUpdate(projectId) == null) throw BusinessException.notFound("项目不存在");
         State before = state(projectId);
         if (expectedVersion != before.moduleConfigVersion()) throw BusinessException.of(409, "配置已被其他管理员修改，请刷新后核对再保存");
-        if (new HashSet<>(moduleCodes).equals(new HashSet<>(before.enabledBusinessModules()))) return before;
+        boolean showInbox = inboxEntryVisible == null ? before.inboxEntryVisible() : inboxEntryVisible;
+        boolean inboxChanged = showInbox != before.inboxEntryVisible();
+        if (!inboxChanged && new HashSet<>(moduleCodes).equals(new HashSet<>(before.enabledBusinessModules()))) return before;
         LocalDateTime now = LocalDateTime.now(ZONE);
+        if (inboxChanged && jdbc.update("UPDATE project_info SET inbox_entry_visible=? WHERE id=? AND deleted=0 AND inbox_entry_visible=?",
+                showInbox ? 1 : 0, projectId, before.inboxEntryVisible() ? 1 : 0) != 1) {
+            throw BusinessException.of(409, "待办入口配置保存冲突，请刷新后重试");
+        }
         for (String module : BusinessModuleCodes.ALL) {
             boolean enabled = moduleCodes.contains(module);
             boolean reenabled = enabled && !before.enabledBusinessModules().contains(module);
@@ -126,6 +144,7 @@ public class ProjectBusinessModuleService {
         log.setUserId(actor.getId()); log.setUsername(actor.getUsername());
         log.setOperationType("UPDATE_PROJECT_MODULES"); log.setBusinessType("PROJECT_MODULES"); log.setBusinessId(projectId);
         log.setOperationDesc("启用模块 " + before.enabledBusinessModules() + " → " + BusinessModuleCodes.ALL.stream().filter(moduleCodes::contains).toList()
+                + "；显示待办/消息 " + before.inboxEntryVisible() + " → " + showInbox
                 + "；版本 " + expectedVersion + " → " + (expectedVersion + 1));
         log.setCreateTime(now);
         if (logs.insert(log) != 1) throw BusinessException.of(409, "项目模块审计写入失败");

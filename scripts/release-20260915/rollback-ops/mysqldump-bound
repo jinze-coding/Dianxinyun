@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+socket_file=/root/releases/20260915-0912/formal-switch/mysql-socket
+[ -f "$socket_file" ] && [ ! -L "$socket_file" ]
+dxy_socket="$(cat "$socket_file")"
+[[ "$dxy_socket" =~ ^/[a-zA-Z0-9_./-]+$ ]] && [ -S "$dxy_socket" ]
+exec /usr/bin/mysqldump --no-defaults --user=root --protocol=SOCKET --socket="$dxy_socket" "$@"

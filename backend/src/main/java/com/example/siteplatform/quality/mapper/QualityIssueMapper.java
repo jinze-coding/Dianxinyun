@@ -15,6 +15,24 @@ import java.util.List;
 public interface QualityIssueMapper extends BaseMapper<QualityIssue> {
 
     @Select("""
+            SELECT * FROM quality_issue
+            WHERE weekly_inspection_id = #{inspectionId} AND deleted = 0
+            ORDER BY id ASC FOR UPDATE
+            """)
+    List<QualityIssue> selectWeeklyIssuesForUpdate(@Param("inspectionId") Long inspectionId);
+
+    @Update("""
+            UPDATE quality_issue
+            SET status = 'WITHDRAWN', deleted = 1, version = version + 1, update_time = #{updateTime}
+            WHERE id = #{id} AND weekly_inspection_id = #{inspectionId}
+              AND deleted = 0 AND status = 'PENDING' AND version = #{expectedVersion}
+              AND rectified_time IS NULL AND review_time IS NULL
+            """)
+    int withdrawWeeklyIssue(@Param("id") Long id, @Param("inspectionId") Long inspectionId,
+                            @Param("expectedVersion") Integer expectedVersion,
+                            @Param("updateTime") LocalDateTime updateTime);
+
+    @Select("""
             SELECT id, project_id, issue_no, title, location, severity, status,
                    assignee_id, deadline, create_time
             FROM quality_issue

@@ -24,6 +24,7 @@ const PAGE_SIZE = 20;
 const TODO_BUSINESS_FILTER_KEY = 'site_platform_todo_business_filter';
 const projectStore = useProjectStore();
 const authStore = useAuthStore();
+const permissionsReady = ref(false);
 const summary = ref<ProjectDocumentSummary | null>(null);
 const folders = ref<DocumentFolder[]>([]);
 const documents = ref<ProjectDocument[]>([]);
@@ -43,6 +44,8 @@ const { scrollStyle } = usePageScrollHeight({ bottomRpx: 124, minHeight: 320, in
 
 const projects = computed(() => projectStore.state.projects);
 const currentProject = computed(() => projects.value.find((item) => item.id === projectStore.state.currentProjectId));
+const canOpenSeal = computed(() => permissionsReady.value && authStore.hasProjectMenu(projectStore.state.currentProjectId, 'DOCUMENT_SEAL', 'DOCUMENT'));
+const canOpenCirculation = computed(() => permissionsReady.value && authStore.hasProjectMenu(projectStore.state.currentProjectId, 'DOCUMENT_CIRCULATION', 'DOCUMENT'));
 const canUpload = computed(() => Boolean(currentProject.value)
   && authStore.hasProjectPermission(currentProject.value!.id, 'document.upload'));
 const canManage = computed(() => Boolean(currentProject.value)
@@ -67,14 +70,17 @@ function hideNativeTabBar() { uni.hideTabBar({ animation: false, fail: () => und
 
 onShow(async () => {
   hideNativeTabBar();
-  if (!await authStore.ensureRootAccess('/pages/documents/index')) return;
   await refreshAll();
 });
 
 async function refreshAll() {
   loading.value = true;
   errorMessage.value = '';
+  permissionsReady.value = false;
   try {
+    await authStore.loadUser();
+    if (!await authStore.ensureRootAccess('/pages/documents/index')) return;
+    permissionsReady.value = true;
     await projectStore.loadProjects();
     if (!currentProject.value) {
       summary.value = null; folders.value = []; documents.value = []; total.value = 0;
@@ -156,8 +162,12 @@ function formatTime(value?: string) { return value ? value.replace('T', ' ').sli
 function fileMark(document: ProjectDocument) { return (extensionOf(document.currentVersion?.fileName) || document.currentVersion?.fileExtension || 'FILE').slice(0, 5).toUpperCase(); }
 function openUpload() { navigateTo(`/pages/documents/upload?projectId=${currentProject.value?.id || 0}&folderId=${selectedFolderId.value || 0}`); }
 function openDetail(document: ProjectDocument) { navigateTo(`/pages/documents/detail?id=${document.id}`); }
-function openSealManagement() { navigateTo(`/pages/seal/list?projectId=${currentProject.value?.id || 0}`); }
+function openSealManagement() {
+  if (!canOpenSeal.value) return;
+  navigateTo(`/pages/seal/list?projectId=${currentProject.value?.id || 0}`);
+}
 function openDocumentCirculation() {
+  if (!canOpenCirculation.value) return;
   uni.setStorageSync(TODO_BUSINESS_FILTER_KEY, 'DOCUMENT');
   uni.switchTab({ url: '/pages/todo/index' });
 }
@@ -182,10 +192,10 @@ function openDocumentCirculation() {
           <button class="active" type="button">
             <text class="domain-mark document-mark">资</text><view><text>工程资料</text><text>目录、版本与文件</text></view>
           </button>
-          <button type="button" @tap="openSealManagement">
+          <button v-if="canOpenSeal" type="button" @tap="openSealManagement">
             <text class="domain-mark seal-mark">印</text><view><text>用印管理</text><text>申请、审批与台账</text></view>
           </button>
-          <button type="button" @tap="openDocumentCirculation">
+          <button v-if="canOpenCirculation" type="button" @tap="openDocumentCirculation">
             <text class="domain-mark circulation-mark">图</text><view><text>图纸收发</text><text>通知、下载与签收</text></view>
           </button>
         </view>
@@ -264,7 +274,7 @@ function openDocumentCirculation() {
 
 <style scoped src="../../styles/workspace-page.css"></style>
 <style scoped>
-.business-domain-nav { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12rpx; }
+.business-domain-nav { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0,1fr); gap: 12rpx; }
 .business-domain-nav button { display: flex; min-width: 0; min-height: 112rpx; align-items: center; gap: 12rpx; padding: 15rpx 13rpx; border: 1rpx solid #e0e6ea; border-radius: 17rpx; background: #fff; color: #536678; text-align: left; box-shadow: 0 8rpx 24rpx rgba(43,56,72,.045); }
 .business-domain-nav button::after { border: 0; }
 .business-domain-nav button.active { border-color: #a9c2d2; background: #eaf2f6; color: #315f86; }

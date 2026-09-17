@@ -84,3 +84,11 @@ export function logout() {
 export function isLoggedIn() {
   return !!getToken();
 }
+
+export async function setupInitialPassword(newPassword) {
+  const result = await post('/auth/initial-password', { newPassword });
+  if (result.code !== 200 || !result.data?.token) throw new Error(result.message || '密码设置失败');
+  setToken(result.data.token);
+  setUserInfo(result.data);
+  return result.data;
+}

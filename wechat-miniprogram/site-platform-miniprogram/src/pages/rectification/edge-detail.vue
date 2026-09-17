@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CorrectionNotice from '@/components/CorrectionNotice.vue';
 import { computed, ref } from 'vue';
 import { onLoad, onShow } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
@@ -221,6 +222,7 @@ function goBack() {
   <view class="page-shell">
     <AppNavBar title="临边巡检整改单" @back="goBack" />
     <scroll-view class="page-scroll" scroll-y enable-flex :style="scrollStyle">
+    <CorrectionNotice :record="sheet" />
       <view class="content">
         <view v-if="loading" class="state">正在加载整改单…</view>
         <template v-else-if="sheet">

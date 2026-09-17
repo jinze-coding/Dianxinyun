@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CorrectionNotice from '@/components/CorrectionNotice.vue';
 import { computed, ref } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
@@ -152,6 +153,7 @@ async function openFile(item: DocumentDistributionItem) {
   <view class="page">
     <AppNavBar title="图纸签收" @back="goBack" />
     <scroll-view scroll-y class="scroll">
+    <CorrectionNotice :record="detail" />
       <view class="content">
         <view v-if="loading" class="state">正在加载签收任务…</view>
         <view v-else-if="errorMessage" class="state error"><text>{{ errorMessage }}</text><button @tap="loadDetail">重新加载</button></view>

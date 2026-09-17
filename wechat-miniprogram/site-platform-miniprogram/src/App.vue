@@ -15,7 +15,8 @@ let moduleEpoch = 0;
 let visible = false;
 let busyEpoch: number | undefined;
 async function syncModules(refreshUser = false) {
-  if (!visible || !getToken() || !projects.state.currentProjectId || busyEpoch === moduleEpoch) return;
+  if (!visible || !getToken() || !auth.state.user || auth.requiresInitialPasswordSetup()
+    || !projects.state.currentProjectId || busyEpoch === moduleEpoch) return;
   const epoch = moduleEpoch;
   const projectId = projects.state.currentProjectId;
   busyEpoch = epoch;
@@ -28,7 +29,7 @@ async function syncModules(refreshUser = false) {
       await auth.loadUser();
       if (epoch !== moduleEpoch || !visible) return;
       await enforceCurrentPageAccess();
-      void useTodoStore().loadSummary();
+      if (!auth.requiresInitialPasswordSetup()) void useTodoStore().loadSummary();
     }
   } catch (error) {
     if (epoch === moduleEpoch && (error as { status?: number; code?: number })?.code === 403) {
@@ -37,11 +38,12 @@ async function syncModules(refreshUser = false) {
     }
   } finally { if (busyEpoch === epoch) busyEpoch = undefined; }
 }
-watch(() => projects.state.currentProjectId, (id) => { setNetworkProject(id); moduleEpoch += 1; void syncModules(true); }, { immediate: true });
+watch(() => projects.state.currentProjectId, (id) => { setNetworkProject(id); moduleEpoch += 1; if (visible) void enforceCurrentPageAccess(); void syncModules(true); }, { immediate: true });
 uni.onNetworkStatusChange((status) => { if (status.isConnected) void syncModules(true); });
 
 const PUBLIC_PREFIXES = [
   'pages/login/',
+  'pages/legal/',
   'pages/wechat-bind/',
   'pages/register/',
   'pages/registration-status/',
@@ -50,6 +52,7 @@ const PUBLIC_PREFIXES = [
   'pages/web-login-confirm/'
 ];
 const PAGE_TO_ROOT: Array<[string, string]> = [
+  ['pages/todo/', '/pages/todo/index'],
   ['pages/documents/', '/pages/documents/index'],
   ['pages/inspection/', '/pages/inspection/index'],
   ['pages/quality/', '/pages/quality/index'],
@@ -73,11 +76,15 @@ async function enforceCurrentPageAccess() {
   }
   try {
     if (!auth.state.user) await auth.loadUser();
+    if (auth.requiresInitialPasswordSetup()) {
+      if (route !== 'pages/initial-password/index') uni.reLaunch({ url: '/pages/initial-password/index' });
+      return;
+    }
     const rule = PAGE_TO_ROOT.find(([prefix]) => route.startsWith(prefix));
     const pageProject = Number(currentPage?.options?.projectId) || projects.state.currentProjectId;
     const sealDisabled = route.startsWith('pages/seal/') && !auth.isProjectModuleEnabled(pageProject, 'DOCUMENT');
     if (sealDisabled || (rule && !auth.canAccessRoot(rule[1], auth.state.user, pageProject))) {
-      uni.showToast({ title: '当前项目未启用此功能或已无权限', icon: 'none' });
+      if (!route.startsWith('pages/todo/')) uni.showToast({ title: '当前项目未启用此功能或已无权限', icon: 'none' });
       uni.switchTab({ url: auth.firstAuthorizedPage(), fail: () => uni.reLaunch({ url: auth.firstAuthorizedPage() }) });
     }
   } catch {
@@ -89,7 +96,7 @@ onHide(() => { visible = false; moduleEpoch += 1; if (moduleTimer) clearInterval
 onShow(() => {
   visible = true; moduleEpoch += 1;
   if (moduleTimer) clearInterval(moduleTimer);
-  moduleTimer = setInterval(() => { void syncModules(); if (getToken()) void useTodoStore().loadSummary(); }, 5000);
+  moduleTimer = setInterval(() => { void syncModules(); if (getToken() && auth.state.user && !auth.requiresInitialPasswordSetup()) void useTodoStore().loadSummary(); }, 5000);
   void syncModules(true);
   // 首次冷启动时页面栈可能尚未建立，下一事件循环再次读取可覆盖深链直达子页。
   setTimeout(() => {

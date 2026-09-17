@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CorrectionNotice from '@/components/CorrectionNotice.vue';
 import { computed, reactive, ref } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
@@ -289,6 +290,7 @@ function remove() {
   <view class="detail-page">
     <AppNavBar title="资料详情" @back="goBack" />
     <scroll-view class="detail-scroll" scroll-y>
+    <CorrectionNotice :record="detail" />
       <view class="detail-content">
         <view v-if="loading" class="detail-state"><text>正在加载资料详情</text></view>
         <view v-else-if="errorMessage" class="detail-state"><text>{{ errorMessage }}</text><button @tap="loadDetail">重新加载</button></view>

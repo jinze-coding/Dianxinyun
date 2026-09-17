@@ -99,7 +99,7 @@ class CommitteeIntegrationTest {
             var refreshed=call("GET",filtered+"&pageNo=2",null,readerToken);
             for(String field:List.of("records","total","latestId"))assertThat(refreshed.path(field)).isEqualTo(pageTwo.path(field));
             var sameDay=call("GET",base()+"/records?projectId="+project+"&startDate=2024-02-29&endDate=2024-02-29",null,readerToken);
-            assertThat(sameDay.path("total").asLong()).isEqualTo(2);assertThat(sameDay.path("records").get(1).path("id").asLong()).isEqualTo(fire);
+            assertThat(sameDay.path("total").asLong()).isEqualTo(2);assertThat(sameDay.path("records").get(0).path("id").asLong()).isEqualTo(fire);
             var empty=call("GET",base()+"/records?projectId="+project+"&startDate=2024-02-26&endDate=2024-02-26",null,readerToken);
             assertThat(empty.path("total").asLong()).isZero();assertThat(empty.path("latestId").asLong()).isZero();assertThat(empty.path("records").isEmpty()).isTrue();
             assertThat(call("GET",base()+"/records?projectId="+project,null,readerToken).path("total").asLong()).isGreaterThan(23);
@@ -107,6 +107,52 @@ class CommitteeIntegrationTest {
                 assertThat(status("GET",base()+"/records?projectId="+project+"&"+dates,null,readerToken)).as(dates).isEqualTo(400);
             assertThat(status("GET",base()+"/records?projectId="+otherProject+"&startDate=2024-02-28&endDate=2024-02-29",null,readerToken)).isEqualTo(403);
         }finally{for(Long id:fixtureIds)deleteRecord(id);}
+    }
+    @Test void categoryOrderSpansPagesAndKeepsLatestIndependentFromFirstCategory()throws Exception {
+        var ids=new ArrayList<Long>();var groups=new LinkedHashMap<String,List<Long>>();
+        try {
+            var categories=call("GET",base()+"/categories?projectId="+project,null,readerToken);
+            var directory=new ArrayList<String>();categories.forEach(value->directory.add(value.asText()));
+            assertThat(directory).containsExactlyElementsOf(CommitteeService.CATEGORIES);
+            // Reverse insertion order and equal timestamps expose category and stable-ID ordering separately.
+            for(int i=directory.size()-1;i>=0;i--) {
+                String category=directory.get(i);var group=new ArrayList<Long>();
+                group.add(datedRecord(ids,project,category,"2024-05-01 08:00:00"));
+                group.add(datedRecord(ids,project,category,"2024-05-02 12:00:00"));
+                group.add(datedRecord(ids,project,category,"2024-05-02 12:00:00"));
+                Collections.reverse(group);groups.put(category,group);
+            }
+            var expected=new ArrayList<Long>();directory.forEach(category->expected.addAll(groups.get(category)));
+            String path=base()+"/records?projectId="+project+"&startDate=2024-05-01&endDate=2024-05-02";
+            var first=call("GET",path,null,readerToken);var second=call("GET",path+"&pageNo=2",null,readerToken);
+            assertThat(first.path("total").asInt()).isEqualTo(33);assertThat(second.path("total")).isEqualTo(first.path("total"));
+            var actual=new ArrayList<Long>();first.path("records").forEach(row->actual.add(row.path("id").asLong()));
+            second.path("records").forEach(row->actual.add(row.path("id").asLong()));
+            assertThat(first.path("records").size()).isEqualTo(20);assertThat(second.path("records").size()).isEqualTo(13);
+            assertThat(actual).containsExactlyElementsOf(expected).doesNotHaveDuplicates();
+            String filter=path+"&category="+java.net.URLEncoder.encode(directory.get(1),StandardCharsets.UTF_8);
+            var filtered=call("GET",filter,null,readerToken);var selected=new ArrayList<Long>();
+            filtered.path("records").forEach(row->selected.add(row.path("id").asLong()));
+            assertThat(selected).containsExactlyElementsOf(groups.get(directory.get(1)));
+            assertThat(filtered.path("latestId").asLong()).isEqualTo(selected.get(0));
+            long newest=datedRecord(ids,project,"其他","2024-05-02 23:59:59.999999");
+            var refreshed=call("GET",path,null,readerToken);
+            assertThat(refreshed.path("records")).isEqualTo(first.path("records"));
+            assertThat(refreshed.path("total").asInt()).isEqualTo(34);assertThat(refreshed.path("latestId").asLong()).isEqualTo(newest);
+            assertThat(refreshed.path("records").get(0).path("id").asLong()).isNotEqualTo(newest);
+            assertThat(call("GET",path+"&pageNo=2",null,readerToken).path("latestId").asLong()).isEqualTo(newest);
+            var unchangedFilter=call("GET",filter,null,readerToken);
+            for(String field:List.of("records","total","latestId"))assertThat(unchangedFilter.path(field)).isEqualTo(filtered.path(field));
+            datedRecord(ids,project,"其他","2024-05-03 00:00:00");
+            var outside=call("GET",path,null,readerToken);
+            for(String field:List.of("records","total","latestId"))assertThat(outside.path(field)).isEqualTo(refreshed.path(field));
+            long moved=groups.get("其他").get(2);
+            call("PUT",base()+"/records/"+moved,Map.of("category",directory.get(0),"conclusion","分类修正", "attachmentIds",List.of(),"expectedVersion",1),adminToken);
+            var reordered=call("GET",path,null,readerToken);
+            assertThat(reordered.path("records").get(3).path("id").asLong()).isEqualTo(moved);
+            assertThat(reordered.path("records").get(3).path("category").asText()).isEqualTo(directory.get(0));
+            assertThat(reordered.path("latestId").asLong()).isEqualTo(newest);
+        }finally{for(Long id:ids)deleteRecord(id);}
     }
     long datedRecord(List<Long> ids,long projectId,String category,String time)throws Exception{
         var data=createData(category,key(),List.of());data.put("projectId",projectId);

@@ -14,6 +14,7 @@ import com.example.siteplatform.quality.dto.QualityWeeklyActionRequest;
 import com.example.siteplatform.quality.dto.QualityWeeklyDraftCreateRequest;
 import com.example.siteplatform.quality.dto.QualityWeeklyDraftItemRequest;
 import com.example.siteplatform.quality.dto.QualityWeeklyDraftSaveRequest;
+import com.example.siteplatform.quality.dto.QualityWeeklyReturnRequest;
 import com.example.siteplatform.quality.entity.QualityIssue;
 import com.example.siteplatform.quality.entity.QualityIssueLog;
 import com.example.siteplatform.quality.entity.QualityWeeklyInspection;
@@ -468,6 +469,96 @@ public class QualityWeeklyInspectionService {
         recordOperation(currentUser, "QUALITY_WEEKLY_SUBMIT", inspection.getId(),
                 "提交质量周检" + inspectionNo + "，生成质量问题" + items.size() + "项");
         notifyAssigneesAfterCommit(createdIssues);
+        return toVO(inspection, currentUser, true);
+    }
+
+    @Transactional
+    public QualityWeeklyInspectionVO returnToDraft(Long id, QualityWeeklyReturnRequest request, SysUser currentUser) {
+        if (currentUser == null || currentUser.getId() == null) {
+            throw BusinessException.unauthorized("请先登录");
+        }
+        if (!projectPermissionService.isPlatformAdmin(currentUser.getId())) {
+            throw BusinessException.forbidden("仅系统管理员可将已提交周检退回草稿");
+        }
+        if (request == null || request.getExpectedVersion() == null || request.getExpectedVersion() < 0) {
+            throw new BusinessException("请提供有效的周检版本");
+        }
+        String reason = trimToNull(request.getReason());
+        if (reason == null || reason.length() > 200) throw new BusinessException("退回原因须为1至200个字符");
+        // Match submission/reminder lock order; issue locks also serialize against rectification and reassignment.
+        reminderSettingService.lockByInspectionId(id);
+        QualityWeeklyInspection inspection = requireInspectionForUpdate(id);
+        requireManage(currentUser, inspection.getProjectId());
+        if (!STATUS_SUBMITTED.equals(inspection.getStatus()) || versionOf(inspection) != request.getExpectedVersion()) {
+            throw stateConflict("周检状态或版本已变化，请刷新后重试");
+        }
+        List<QualityIssue> issues = safeList(issueMapper.selectWeeklyIssuesForUpdate(id));
+        int submittedIssueCount = numberOrZero(inspection.getSubmittedIssueCount());
+        if (issues.size() > submittedIssueCount
+                || !safeList(draftItemMapper.selectByInspectionId(id)).isEmpty()) {
+            throw stateConflict("周检问题数量或草稿状态异常，不能退回草稿");
+        }
+        // Permanent deletion keeps the submission count but removes the issue and its files.
+        // Reopen only the surviving content; never recreate deleted issues or their attachments.
+        int deletedIssueCount = submittedIssueCount - issues.size();
+        for (QualityIssue issue : issues) {
+            if (!QualityIssueService.STATUS_PENDING.equals(issue.getStatus())
+                    || issue.getRectifiedTime() != null || issue.getReviewTime() != null
+                    || issue.getReviewerId() != null || StringUtils.hasText(issue.getRectificationDescription())
+                    || StringUtils.hasText(issue.getRectificationPhotoFileIds())
+                    || logMapper.selectCount(new LambdaQueryWrapper<QualityIssueLog>()
+                        .eq(QualityIssueLog::getIssueId, issue.getId())
+                        .in(QualityIssueLog::getActionType, "RECTIFY", "REVIEW_PASS", "REVIEW_REJECT")) > 0) {
+                throw stateConflict("已有问题发生整改、复查或作废，不能退回草稿");
+            }
+        }
+        LocalDateTime returnedTime = now();
+        String submittedNo = inspection.getInspectionNo();
+        for (QualityIssue issue : issues) {
+            QualityWeeklyInspectionDraftItem item = new QualityWeeklyInspectionDraftItem();
+            BeanUtils.copyProperties(issue, item, "id", "createTime", "updateTime");
+            item.setInspectionId(id);
+            item.setItemKey("returned-" + issue.getId() + "-" + UUID.randomUUID());
+            item.setItemOrder(issue.getInspectionItemOrder());
+            item.setCreateTime(returnedTime);
+            item.setUpdateTime(returnedTime);
+            requireSingleWrite(draftItemMapper.insert(item), "退回周检问题草稿恢复");
+            if (item.getId() == null) throw stateConflict("退回周检问题草稿主键生成失败");
+            List<Long> photoIds = weeklyFileService.returnFinalFilesToDraft(inspection.getProjectId(),
+                    QualityWeeklyFileService.ISSUE_FINAL, issue.getId(),
+                    QualityWeeklyFileService.WEEKLY_DRAFT_ITEM, item.getId());
+            requireSingleWrite(issueMapper.withdrawWeeklyIssue(issue.getId(), id,
+                    issue.getVersion() == null ? 0 : issue.getVersion(), returnedTime), "原质量问题撤回");
+            QualityIssueLog log = new QualityIssueLog();
+            log.setIssueId(issue.getId());
+            log.setProjectId(inspection.getProjectId());
+            log.setActionType("WEEKLY_RETURN");
+            log.setFromStatus(issue.getStatus());
+            log.setToStatus("WITHDRAWN");
+            log.setOperatorId(currentUser.getId());
+            log.setOperatorName(displayName(currentUser));
+            log.setComment("周检退回草稿，草稿项 " + item.getId() + "；原因：" + reason);
+            log.setPhotoFileIds(joinIds(photoIds));
+            log.setCreateTime(returnedTime);
+            requireSingleWrite(logMapper.insert(log), "周检退回问题日志");
+        }
+        weeklyFileService.returnFinalFilesToDraft(inspection.getProjectId(), QualityWeeklyFileService.WEEKLY_FINAL,
+                id, QualityWeeklyFileService.WEEKLY_DRAFT, id);
+        requireSingleWrite(inspectionMapper.returnToDraft(id, request.getExpectedVersion(), currentUser.getId(),
+                displayName(currentUser), returnedTime), "周检退回草稿");
+        inspection.setStatus(STATUS_DRAFT);
+        inspection.setInspectionNo(null);
+        inspection.setSubmittedIssueCount(0);
+        inspection.setSubmittedById(null);
+        inspection.setSubmittedByName(null);
+        inspection.setSubmittedTime(null);
+        inspection.setLastEditedById(currentUser.getId());
+        inspection.setLastEditedByName(displayName(currentUser));
+        inspection.setVersion(request.getExpectedVersion() + 1);
+        inspection.setUpdateTime(returnedTime);
+        recordOperation(currentUser, "QUALITY_WEEKLY_RETURN", id,
+                "周检" + submittedNo + "退回草稿，原提交" + submittedIssueCount + "个问题，恢复"
+                        + issues.size() + "个现存问题，" + deletedIssueCount + "个已删除问题不恢复；原因：" + reason);
         return toVO(inspection, currentUser, true);
     }
 

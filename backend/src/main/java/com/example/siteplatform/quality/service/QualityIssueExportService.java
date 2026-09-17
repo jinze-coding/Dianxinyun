@@ -82,6 +82,10 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class QualityIssueExportService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.example.siteplatform.system.correction.CorrectionNoticeService correctionNotices;
+    private String corrected(String text,String type,Long id) { return correctionNotices==null?(text==null?"":text):correctionNotices.append(text,type,id); }
+
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final String JOB_PENDING = "PENDING";
     private static final String JOB_RUNNING = "RUNNING";
@@ -424,7 +428,7 @@ public class QualityIssueExportService {
                     issueSequence++, text(issue.getRecordDate()), text(issue.getIssueNo()),
                     issue.getWeeklyInspectionId() == null ? "历史独立" : "周检问题",
                     weekly == null ? "-" : text(weekly.getInspectionNo()), text(issue.getTitle()),
-                    text(issue.getLocation()), text(issue.getDescription()), severityLabel(issue.getSeverity()),
+                    text(issue.getLocation()), corrected(text(issue.getDescription()),"QUALITY_ISSUE",issue.getId()), severityLabel(issue.getSeverity()),
                     text(issue.getAssigneeName()), text(issue.getDeadline()), statusLabel(issue.getStatus()),
                     overdueDays(issue), text(issue.getRectificationDescription()), formatTime(issue.getRectifiedTime()),
                     text(issue.getReviewerName()), formatTime(issue.getReviewTime()), text(issue.getReviewComment()));

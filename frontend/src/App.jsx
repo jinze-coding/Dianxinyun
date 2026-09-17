@@ -1,11 +1,13 @@
+import CorrectionNotice from './components/CorrectionNotice';
 import { setApiProjectContext } from './services/api';
 import { getProjectModules } from './services/projectModules';
 import { isProjectModuleEnabled, PAGE_MODULES, projectContext } from './utils/projectModules';
 import SafetyCommitteePage from './pages/SafetyCommittee';
+import InitialPasswordPage from './pages/Login/InitialPasswordPage';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { DEFAULT_THEME_ID, getThemeById } from './constants/themes';
 import { AUTHENTICATED_LANDING_PAGE, NAV_ITEMS, PAGE_IDS } from './constants/dicts';
-import { isLoggedIn, getCurrentUser, logout } from './services/auth';
+import { isLoggedIn, getCurrentUser, logout, getToken } from './services/auth';
 import { getProjectList, addProject, updateProject } from './services/project';
 import { confirmAdministrativeDeletion } from './services/administrativeDeletion';
 import { getPersonnelList, addPersonnel, updatePersonnel, deletePersonnel } from './services/personnel';
@@ -49,7 +51,7 @@ import { readMeetingScreenReturn } from './pages/SiteAccessManagement/meetingScr
 import ProjectInformationPage from './pages/ProjectInformation';
 import EdgeInspectionManagement from './pages/EdgeInspectionManagement';
 import { getPersonalTodoSummary, getUnreadNotificationCount } from './services/personalInbox';
-import { canAccessPage, collectProjectMenuCodes, hasProjectPermission, isPlatformAdmin } from './utils/permissions';
+import { canAccessPage, collectProjectMenuCodes, hasProjectPermission, isPlatformAdmin, projectLandingPage } from './utils/permissions';
 import { pageMenuAllowed } from './utils/roleAuthorization';
 import { buildElectricBoxQrLabelHtml, normalizeQrImageSource } from './utils/html';
 import {
@@ -60,6 +62,8 @@ import {
   validateInspectionExportRange,
 } from './utils/inspectionExport';
 import { requireProjectList } from './utils/projectList';
+import { browserNavigationStorage, clearBrowserNavigation, readBrowserNavigation, restoreBrowserNavigation, writeBrowserNavigation } from './utils/browserNavigation';
+import { BrowserNavigationContext, useNavigationTab } from './components/BrowserNavigation';
 import { createProjectRequestGuard } from './utils/projectRequestContext';
 import { resolveBusinessRoute } from './utils/businessRoute';
 import { TOP_NAV_ITEMS_STYLE, TOP_NAV_SCROLLER_STYLE } from './utils/topNavLayout';
@@ -193,7 +197,7 @@ function VideoCell({ cam, theme: T, onFullscreen, fullscreen }) {
 // ============================================
 // 顶部导航
 // ============================================
-function TopNav({ currentPage, onPageChange, onOpenProjectInformation, currentProject, onProjectChange, projectList, onRefreshProjects, theme, onLogout, currentUser, visibleNavItems, canAccessSystem, inboxCount = 0 }) {
+function TopNav({ currentPage, onPageChange, onOpenProjectInformation, currentProject, onProjectChange, projectList, onRefreshProjects, theme, onLogout, currentUser, visibleNavItems, canAccessSystem, inboxCount = 0, showInbox = true }) {
   const [showProjects, setShowProjects] = useState(false);
   const [showProjectMgmt, setShowProjectMgmt] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -468,7 +472,7 @@ function TopNav({ currentPage, onPageChange, onOpenProjectInformation, currentPr
           {formatTime(time)}
         </div>
 
-        <button
+        {showInbox && <button
           onClick={() => onPageChange(PAGE_IDS.PERSONAL_INBOX)}
           style={{
             position: 'relative', display: 'flex', alignItems: 'center', gap: 6,
@@ -483,7 +487,7 @@ function TopNav({ currentPage, onPageChange, onOpenProjectInformation, currentPr
           <span aria-hidden="true">🔔</span>
           <span>待办/消息</span>
           {inboxCount > 0 && <b style={{ minWidth: 17, height: 17, display: 'inline-grid', placeItems: 'center', padding: '0 3px', borderRadius: 9, background: T.danger, color: '#fff', fontSize: 10, lineHeight: 1 }}>{inboxCount > 99 ? '99+' : inboxCount}</b>}
-        </button>
+        </button>}
 
         {canAccessSystem && (
           <button
@@ -6153,6 +6157,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   const renderRecordDrawer = () => selectedRecord && (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)', zIndex: 1002, display: 'flex', justifyContent: 'flex-end' }} onClick={() => setSelectedRecord(null)}>
       <div style={{ width: 520, height: '100%', background: T.modalBg, borderLeft: `1px solid ${T.borderColor}`, padding: 18, overflow: 'auto' }} onClick={e => e.stopPropagation()}>
+        <CorrectionNotice record={selectedRecord} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div>
             <div style={{ fontSize: 16, color: T.textPrimary, fontWeight: 800 }}>{selectedRecord.boxCode} 巡检详情</div>
@@ -6195,6 +6200,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   const renderRectificationDrawer = () => selectedRectification && (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)', zIndex: 1002, display: 'flex', justifyContent: 'flex-end' }} onClick={closeRectificationDrawer}>
       <div style={{ width: 520, height: '100%', background: T.modalBg, borderLeft: `1px solid ${T.borderColor}`, padding: 18, overflow: 'auto' }} onClick={e => e.stopPropagation()}>
+        <CorrectionNotice record={selectedRectification} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div>
             <div style={{ fontSize: 16, color: T.textPrimary, fontWeight: 800 }}>{selectedRectification.orderNo || `ZG-${selectedRectification.id}`}</div>
@@ -6345,6 +6351,7 @@ function InspectionBackendPanel({ projectId, theme: T, activeTab, currentUser, o
   const renderBoxDrawer = () => selectedBox && (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)', zIndex: 1002, display: 'flex', justifyContent: 'flex-end' }} onClick={() => setSelectedBox(null)}>
       <div style={{ width: 'min(500px, 100vw)', maxWidth: '100vw', height: '100%', background: T.modalBg, borderLeft: `1px solid ${T.borderColor}`, padding: 18, overflowY: 'auto', overflowX: 'hidden' }} onClick={e => e.stopPropagation()}>
+        <CorrectionNotice record={selectedBox} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div>
             <div style={{ fontSize: 16, color: T.textPrimary, fontWeight: 800 }}>{selectedBox.boxCode}</div>
@@ -6947,8 +6954,8 @@ function ElectricInspectionPage({ projectId, theme: T, currentUser, businessTarg
     ...(visibleElectricTabs.length ? [{ id: 'electric', label: '电箱巡检', description: '电箱台账、六项日检、记录与整改' }] : []),
     ...(edgeAreaVisible ? [{ id: 'edge', label: '临边巡检', description: '固定检查表、点位、周期任务与整改闭环' }] : []),
   ], [edgeAreaVisible, visibleElectricTabs.length]);
-  const [activeArea, setActiveArea] = useState(visibleAreas[0]?.id || '');
-  const [activeTab, setActiveTab] = useState(visibleElectricTabs[0]?.id || '');
+  const [activeArea, setActiveArea] = useNavigationTab('inspectionArea', visibleAreas[0]?.id || '', visibleAreas.map((area) => area.id));
+  const [activeTab, setActiveTab] = useNavigationTab('electricTab', visibleElectricTabs[0]?.id || '', visibleElectricTabs.map((tab) => tab.id));
   const [menuNotice, setMenuNotice] = useState('');
 
   useEffect(() => {
@@ -7062,8 +7069,13 @@ export default function App() {
   const [projectListLoading, setProjectListLoading] = useState(isAuth);
   const [projectListError, setProjectListError] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
+  const currentUserRef = useRef(null);
+  currentUserRef.current = currentUser;
   const [moduleNotice, setModuleNotice] = useState('');
   const [currentUserError, setCurrentUserError] = useState('');
+  const [navigationReady, setNavigationReady] = useState(false);
+  const navigationRestored = useRef(false);
+  const projectRequestSequence = useRef(0);
   const [inboxCounts, setInboxCounts] = useState({ todoCount: 0, notificationCount: 0 });
   const [sealApplicationTarget, setSealApplicationTarget] = useState(null);
   const [qualityIssueTarget, setQualityIssueTarget] = useState(null);
@@ -7089,9 +7101,11 @@ export default function App() {
     || hasProjectPermission(currentUser, currentProject, 'system.approval.view', 'system.approval.manage')
   ) : false;
 
+  const showInbox = canAccessPage(currentUser, PAGE_IDS.PERSONAL_INBOX, currentProject);
+  const landingPage = projectLandingPage(currentUser, currentProject);
   const inboxRequestSequence = useRef(0);
   const refreshInboxCounts = useCallback(async () => {
-    if (!currentUser || currentProject === null || document.visibilityState === 'hidden') return;
+    if (!showInbox || !currentUser || currentUser.initialPasswordSetupRequired || currentProject === null || document.visibilityState === 'hidden') return;
     const sequence = ++inboxRequestSequence.current;
     const [todoResult, notificationResult] = await Promise.allSettled([
       getPersonalTodoSummary({ projectId: currentProject }),
@@ -7106,68 +7120,89 @@ export default function App() {
       notificationCount: notificationResult.status === 'fulfilled' && Number(notificationResult.value?.code) === 200
         ? Number(notificationResult.value.data?.count ?? notificationResult.value.data?.unreadCount ?? notificationResult.value.data ?? 0) : current.notificationCount,
     }));
-  }, [currentProject, currentUser]);
+  }, [currentProject, currentUser, showInbox]);
 
   useEffect(() => {
-    if (!currentUser || currentProject === null) return undefined;
+    if (!showInbox) { ++inboxRequestSequence.current; setInboxCounts({ todoCount: 0, notificationCount: 0 }); return undefined; }
+    if (!currentUser || currentUser.initialPasswordSetupRequired || currentProject === null) return undefined;
     refreshInboxCounts();
     const timer = window.setInterval(refreshInboxCounts, 5000);
     document.addEventListener('visibilitychange', refreshInboxCounts);
     window.addEventListener('online', refreshInboxCounts);
     return () => { ++inboxRequestSequence.current; window.clearInterval(timer); document.removeEventListener('visibilitychange', refreshInboxCounts); window.removeEventListener('online', refreshInboxCounts); };
-  }, [currentProject, currentUser, refreshInboxCounts]);
+  }, [currentProject, currentUser, refreshInboxCounts, showInbox]);
 
-  // 获取项目列表
+  // Restore only after both the account and its current project list are verified.
   const fetchProjectList = useCallback(async () => {
+    const token = getToken();
+    const sequence = ++projectRequestSequence.current;
+    const isCurrent = () => sequence === projectRequestSequence.current && token === getToken();
     setProjectListLoading(true);
     setProjectListError('');
     try {
       const res = await getProjectList();
+      if (!isCurrent()) return;
       const projects = requireProjectList(res);
       setProjectList(projects);
-      setCurrentProject(prevProjectId => {
-        if (projects.length === 0) return null;
-        return projects.some(project => project.id === prevProjectId)
-          ? prevProjectId
-          : projects[0].id;
-      });
+      if (!navigationRestored.current) {
+        const restored = restoreBrowserNavigation(readBrowserNavigation(browserNavigationStorage()), currentUserRef.current, projects);
+        setCurrentProject(restored.projectId);
+        setCurrentPage(restored.pageId);
+        setProjectInformationReturnPage(restored.returnPageId);
+        navigationRestored.current = true;
+        setNavigationReady(true);
+      } else {
+        setCurrentProject((previous) => projects.find((project) => Number(project.id) === Number(previous))?.id ?? projects[0]?.id ?? null);
+      }
     } catch (e) {
+      if (!isCurrent()) return;
       console.error('获取项目列表失败', e);
-      setProjectList([]);
-      setCurrentProject(null);
+      // Keep the saved selection on network failure so retry can still restore it.
       setProjectListError(e?.message || '项目加载失败');
     } finally {
-      setProjectListLoading(false);
+      if (isCurrent()) setProjectListLoading(false);
     }
   }, []);
 
   const fetchCurrentUser = useCallback(async () => {
+    const token = getToken();
     setCurrentUserError('');
     try {
       const res = await getCurrentUser();
+      if (token !== getToken()) return;
       if (res.code === 200 && res.data) {
         setCurrentUser(res.data);
       } else {
         setCurrentUserError(res.message || '账号权限加载失败');
       }
     } catch (e) {
+      if (token !== getToken()) return;
       console.error('获取当前用户信息失败', e);
       setCurrentUserError(e.message || '账号权限加载失败');
     }
   }, []);
 
   useEffect(() => {
-    if (isAuth) {
-      fetchProjectList();
-      fetchCurrentUser();
+    if (isAuth) fetchCurrentUser();
+  }, [isAuth, fetchCurrentUser]);
+
+  useEffect(() => {
+    if (currentUser?.initialPasswordSetupRequired) {
+      clearBrowserNavigation(browserNavigationStorage());
+      navigationRestored.current = false;
+      setNavigationReady(false);
     }
-  }, [isAuth, fetchProjectList, fetchCurrentUser]);
+  }, [currentUser?.initialPasswordSetupRequired]);
+
+  useEffect(() => {
+    if (isAuth && currentUser?.id && !currentUser.initialPasswordSetupRequired) fetchProjectList();
+  }, [isAuth, currentUser?.id, currentUser?.initialPasswordSetupRequired, fetchProjectList]);
 
   useEffect(() => { setApiProjectContext(currentProject, PAGE_MODULES[currentPage]); }, [currentProject, currentPage]);
   useEffect(() => {
     let timer;
     const notify = () => {
-      setModuleNotice('当前项目已停用此模块，已返回个人待办');
+      setModuleNotice('当前项目已停用此模块，已切换至可用页面');
       window.clearTimeout(timer);
       timer = window.setTimeout(() => setModuleNotice(''), 6000);
     };
@@ -7176,7 +7211,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!currentUser || currentProject === null) return undefined;
+    if (!currentUser || currentUser.initialPasswordSetupRequired || currentProject === null) return undefined;
     let active = true;
     let checking = false;
     const version = projectContext(currentUser, currentProject)?.moduleConfigVersion;
@@ -7216,8 +7251,8 @@ export default function App() {
   }, [currentProject, currentUser, refreshInboxCounts]);
 
   useEffect(() => {
-    if (!currentUser) return;
-    if (currentPage === PAGE_IDS.PERSONAL_INBOX) return;
+    if (!currentUser || !navigationReady || projectListLoading || projectListError) return;
+    if (currentPage === PAGE_IDS.PERSONAL_INBOX && showInbox) return;
     if (currentPage === PAGE_IDS.PROJECT_INFORMATION && currentProject !== null) return;
     if (currentPage === PAGE_IDS.SYSTEM_MANAGEMENT && canAccessSystem) return;
     if (currentPage === PAGE_IDS.DOCUMENT_MANAGEMENT && isProjectModuleEnabled(currentUser, currentProject, 'DOCUMENT') && (sealApplicationTarget?.id || documentDistributionTarget?.id)) return;
@@ -7226,11 +7261,15 @@ export default function App() {
       setSealApplicationTarget(null); setDocumentDistributionTarget(null);
       window.dispatchEvent(new CustomEvent('project-module-disabled'));
     }
-    setCurrentPage(AUTHENTICATED_LANDING_PAGE);
-  }, [canAccessSystem, currentPage, currentProject, currentUser, documentDistributionTarget, sealApplicationTarget, visibleNavItems]);
+    setCurrentPage(landingPage);
+  }, [landingPage, showInbox, canAccessSystem, currentPage, currentProject, currentUser, documentDistributionTarget, sealApplicationTarget, visibleNavItems, navigationReady, projectListLoading, projectListError]);
 
   useEffect(() => {
     const handleAuthExpired = () => {
+      ++projectRequestSequence.current;
+      navigationRestored.current = false;
+      setNavigationReady(false);
+      clearBrowserNavigation(browserNavigationStorage());
       setSiteAccessReturnState(null);
       setCurrentUser(null);
       setCurrentUserError('');
@@ -7251,6 +7290,10 @@ export default function App() {
   }, []);
 
   const handleLogin = useCallback(() => {
+    ++projectRequestSequence.current;
+    navigationRestored.current = false;
+    setNavigationReady(false);
+    clearBrowserNavigation(browserNavigationStorage());
     setSiteAccessReturnState(null);
     setProjectList([]);
     setCurrentProject(null);
@@ -7266,6 +7309,10 @@ export default function App() {
   }, []);
 
   const handleLogout = useCallback(async () => {
+    ++projectRequestSequence.current;
+    navigationRestored.current = false;
+    setNavigationReady(false);
+    clearBrowserNavigation(browserNavigationStorage());
     setSiteAccessReturnState(null);
     try {
       await logout();
@@ -7305,6 +7352,7 @@ export default function App() {
     setInspectionBusinessTarget(null);
     setDocumentDistributionTarget(null);
     setCurrentProject(projectId);
+    setCurrentPage((page) => page === PAGE_IDS.PERSONAL_INBOX ? projectLandingPage(currentUserRef.current, projectId) : page);
   }, []);
 
   const returnFromMeetingScreen = useCallback((meetingProjectId) => {
@@ -7319,8 +7367,8 @@ export default function App() {
     setMeetingScreenTarget(null);
     setSiteAccessReturnState(allowed ? restored : null);
     if (allowed) setCurrentProject(targetProjectId);
-    setCurrentPage(allowed ? PAGE_IDS.SITE_ACCESS : AUTHENTICATED_LANDING_PAGE);
-  }, [currentProject, currentUser, projectList]);
+    setCurrentPage(allowed ? PAGE_IDS.SITE_ACCESS : landingPage);
+  }, [currentProject, currentUser, projectList, landingPage]);
 
   const openProjectInformation = useCallback(() => {
     if (currentProject === null) return;
@@ -7335,15 +7383,15 @@ export default function App() {
   const closeProjectInformation = useCallback(() => {
     const returnPage = projectInformationReturnPage;
     if (returnPage === PAGE_IDS.SYSTEM_MANAGEMENT && !canAccessSystem) {
-      setCurrentPage(AUTHENTICATED_LANDING_PAGE);
+      setCurrentPage(landingPage);
       return;
     }
-    if (returnPage === PAGE_IDS.PERSONAL_INBOX || visibleNavItems.some((item) => item.id === returnPage)) {
+    if ((returnPage === PAGE_IDS.PERSONAL_INBOX && showInbox) || visibleNavItems.some((item) => item.id === returnPage)) {
       setCurrentPage(returnPage);
       return;
     }
-    setCurrentPage(AUTHENTICATED_LANDING_PAGE);
-  }, [canAccessSystem, projectInformationReturnPage, visibleNavItems]);
+    setCurrentPage(landingPage);
+  }, [canAccessSystem, projectInformationReturnPage, visibleNavItems, showInbox, landingPage]);
 
   const openInboxBusiness = useCallback((item) => {
     const target = resolveBusinessRoute(item);
@@ -7375,6 +7423,15 @@ export default function App() {
     }
   }, [projectList]);
 
+  const navigationContext = useMemo(() => navigationReady && isAuth && currentUser && !currentUser.initialPasswordSetupRequired
+    && !projectListLoading && !projectListError && meetingScreenTarget === null
+    ? { userId: Number(currentUser.id), projectId: currentProject, pageId: currentPage, returnPageId: projectInformationReturnPage } : null,
+  [navigationReady, isAuth, currentUser, projectListLoading, projectListError, meetingScreenTarget, currentProject, currentPage, projectInformationReturnPage]);
+
+  useEffect(() => {
+    if (navigationContext) writeBrowserNavigation(browserNavigationStorage(), navigationContext);
+  }, [navigationContext]);
+
   const handleInboxCountsChange = useCallback((values) => {
     setInboxCounts((current) => ({
       todoCount: values.todoCount ?? current.todoCount,
@@ -7399,12 +7456,12 @@ export default function App() {
           currentUser={currentUser}
           currentProject={currentProject}
           projectList={projectList}
-          onBack={() => setCurrentPage(AUTHENTICATED_LANDING_PAGE)}
+          onBack={() => setCurrentPage(landingPage)}
         />
       ) : <NoAuthorizedPage theme={theme} />;
     }
     if (currentPage === PAGE_IDS.PERSONAL_INBOX) {
-      return <PersonalInboxPage {...pageProps} onOpenBusiness={openInboxBusiness} onCountsChange={handleInboxCountsChange} />;
+      return showInbox ? <PersonalInboxPage {...pageProps} onOpenBusiness={openInboxBusiness} onCountsChange={handleInboxCountsChange} /> : null;
     }
     if (currentPage === PAGE_IDS.PROJECT_INFORMATION) {
       return <ProjectInformationPage projectId={currentProject} onBack={closeProjectInformation} onSaved={fetchProjectList} />;
@@ -7421,7 +7478,7 @@ export default function App() {
       case PAGE_IDS.PERSON_MANAGEMENT:
         return <PersonnelManagementPage {...pageProps} />;
       case PAGE_IDS.SAFETY_COMMITTEE:
-        return <SafetyCommitteePage key={currentProject} {...pageProps} onAccessLost={() => setCurrentPage(AUTHENTICATED_LANDING_PAGE)} />;
+        return <SafetyCommitteePage key={currentProject} {...pageProps} onAccessLost={() => setCurrentPage(landingPage)} />;
       case PAGE_IDS.QUALITY_MANAGEMENT:
         return <QualityManagementPage {...pageProps} businessTarget={qualityIssueTarget} />;
       case PAGE_IDS.DOCUMENT_MANAGEMENT:
@@ -7453,6 +7510,10 @@ export default function App() {
         ) : '正在加载账号权限…'}
       </div>
     );
+  }
+
+  if (currentUser.initialPasswordSetupRequired) {
+    return <InitialPasswordPage user={currentUser} onComplete={fetchCurrentUser} onLogout={handleLogout} />;
   }
 
   if (meetingScreenTarget !== null) {
@@ -7492,6 +7553,7 @@ export default function App() {
         currentUser={currentUser}
         visibleNavItems={visibleNavItems}
         canAccessSystem={canAccessSystem}
+        showInbox={showInbox}
         inboxCount={inboxCounts.todoCount + inboxCounts.notificationCount}
       />
       {(projectListLoading || projectListError || projectList.length === 0) && (
@@ -7535,7 +7597,11 @@ export default function App() {
         </div>
       )}
       <main style={{ flex: 1, overflow: 'hidden' }}>
-        {renderPage()}
+        {navigationReady && (
+          <BrowserNavigationContext.Provider key={`${currentUser.id}:${currentProject}:${currentPage}`} value={navigationContext}>
+            {renderPage()}
+          </BrowserNavigationContext.Provider>
+        )}
       </main>
     </div>
   );

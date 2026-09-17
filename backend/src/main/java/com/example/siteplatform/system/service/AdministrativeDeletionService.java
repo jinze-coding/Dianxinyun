@@ -39,6 +39,9 @@ import java.util.UUID;
 
 @Service
 public class AdministrativeDeletionService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.example.siteplatform.system.correction.CorrectionDeletionSupport correctionDeletionSupport;
+
     private static final String TOKEN_PREFIX = "admin:deletion:";
     private static final Duration TOKEN_TTL = Duration.ofMinutes(5);
     private static final Set<String> SUPPORTED_TARGETS = Set.of(
@@ -105,6 +108,8 @@ public class AdministrativeDeletionService {
         DeletionImpactVO current = buildImpact(type, request.getTargetId());
         requireTargetModule(type, request.getTargetId());
         validateAndConsumeToken(request, operator, type, current);
+        List<FileResource> correctionFiles = correctionDeletionSupport == null ? List.of() : correctionDeletionSupport.files(type, request.getTargetId());
+        stageFiles(correctionFiles);
         switch (type) {
             case "USER" -> deleteUser(request.getTargetId());
             case "PROJECT" -> deleteProject(request.getTargetId(), operator);
@@ -121,6 +126,7 @@ public class AdministrativeDeletionService {
             case "COMMITTEE_INSPECTION" -> deleteCommitteeRecord(request.getTargetId());
             default -> throw new BusinessException("不支持的删除类型");
         }
+        registerCommittedFilePurge(correctionFiles);
         recordDeletion(operator, current);
     }
 
@@ -169,6 +175,12 @@ public class AdministrativeDeletionService {
             case "MEETING_MATERIAL" -> meetingMaterialImpact(impact, id);
             case "COMMITTEE_INSPECTION" -> committeeImpact(impact, id);
             default -> throw new BusinessException("不支持的删除类型");
+        }
+        if(correctionDeletionSupport != null) {
+            var correctionFiles=correctionDeletionSupport.files(type,id);
+            add(impact,"correctionFiles","纠错历史及暂存附件",correctionFiles.size());
+            impact.setFileCount(impact.getFileCount()+correctionFiles.size());
+            impact.setFileBytes(impact.getFileBytes()+correctionFiles.stream().mapToLong(f->f.getFileSize()==null?0L:f.getFileSize()).sum());
         }
         impact.setTotalAssociatedCount(impact.getItems().stream().mapToLong(DeletionImpactVO.Item::getCount).sum());
         return impact;
@@ -610,6 +622,7 @@ public class AdministrativeDeletionService {
         update("DELETE FROM sys_user_project_role WHERE user_id = ?", userId);
         update("DELETE FROM sys_user_project WHERE user_id = ?", userId);
         update("DELETE FROM sys_user_role WHERE user_id = ?", userId);
+        update("UPDATE system_user_import_item SET credential_cipher=NULL,download_until=NULL WHERE user_id = ?", userId);
         requireSingle(update("DELETE FROM sys_user WHERE id = ? AND deleted = 0", userId),
                 "用户状态已变化，请重新预览");
         invalidateUsers(List.of(userId));

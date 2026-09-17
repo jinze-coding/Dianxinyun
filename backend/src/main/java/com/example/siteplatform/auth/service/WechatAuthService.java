@@ -124,6 +124,7 @@ public class WechatAuthService {
     public WechatSessionResponse bindLogin(WechatBindLoginRequest request) {
         if (request == null) throw new BusinessException("微信绑定参数不能为空");
         SysUser user = authService.authenticateCredentials(request.getUsername(), request.getPassword());
+        if (authService.requiresInitialPasswordSetup(user)) throw BusinessException.forbidden("请先使用账号密码登录并完成首次改密，再绑定微信");
         WechatPlatformClient.WechatIdentity identity = platformClient.login(request.getCode());
         bind(user, identity.appId(), identity.openid(), identity.unionid(), user.getPhone());
         return authorizedResponse(user, new SceneContext(null, null));
@@ -131,6 +132,7 @@ public class WechatAuthService {
 
     @Transactional
     public WechatSessionResponse bindCurrent(String code, SysUser user) {
+        if (authService.requiresInitialPasswordSetup(user)) throw BusinessException.forbidden("请先完成首次改密，再绑定微信");
         WechatPlatformClient.WechatIdentity identity = platformClient.login(code);
         bind(user, identity.appId(), identity.openid(), identity.unionid(), user.getPhone());
         return authorizedResponse(user, new SceneContext(null, null));

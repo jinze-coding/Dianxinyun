@@ -39,21 +39,22 @@ public class CommitteePreviewService {
     @Transactional
     public void retry(Long id,SysUser user) {
         var a=service.requireAttachment(id,user);
-        if(a.getRecordId()==null) throw BusinessException.of(409,"请提交巡检记录后生成预览");
-        if(!permissions.isPlatformAdmin(user.getId())) service.requireRecord(a.getRecordId(),user,true,false);
+        if(a.getRecordId()==null && CommitteeService.rotationVersion(a)==1) throw BusinessException.of(409,"请提交巡检记录后生成预览");
+        if(a.getRecordId()!=null && !permissions.isPlatformAdmin(user.getId())) service.requireRecord(a.getRecordId(),user,true,false);
         service.lockProject(a.getProjectId()); a=attachments.lock(id);
-        if(a==null || !CommitteeService.conversion(a.getPreviewKind()) || !Set.of("FAILED","READY").contains(a.getPreviewStatus()))
+        if(a==null || !(CommitteeService.conversion(a.getPreviewKind()) || CommitteeService.rotation(a)!=0) || !Set.of("FAILED","READY").contains(a.getPreviewStatus()))
             throw BusinessException.of(409,"预览正在生成或无需转换");
         if(a.getPreviewFileId()!=null) service.retire(service.file(a.getPreviewFileId()));
         CommitteeService.one(attachments.update(null,new LambdaUpdateWrapper<CommitteeAttachment>().eq(CommitteeAttachment::getId,id)
                 .set(CommitteeAttachment::getPreviewStatus,"QUEUED").set(CommitteeAttachment::getPreviewFileId,null)
                 .set(CommitteeAttachment::getAttempts,0).set(CommitteeAttachment::getWorkerId,null)
                 .set(CommitteeAttachment::getLeaseUntil,null).set(CommitteeAttachment::getFailureMessage,null).set(CommitteeAttachment::getUpdateTime,CommitteeService.now())));
-        service.log(records.selectById(a.getRecordId()),user,"PREVIEW_RETRY",null,"重新生成附件 #"+id+" 预览");
+        if(a.getRecordId()!=null) service.log(records.selectById(a.getRecordId()),user,"PREVIEW_RETRY",null,"重新生成附件 #"+id+" 预览");
     }
     @Scheduled(fixedDelay=3000,initialDelay=20000,scheduler="committeePreviewScheduler")
     public void runNext() {
-        var list=attachments.selectList(new LambdaQueryWrapper<CommitteeAttachment>().isNotNull(CommitteeAttachment::getRecordId)
+        var list=attachments.selectList(new LambdaQueryWrapper<CommitteeAttachment>()
+                .and(q->q.isNotNull(CommitteeAttachment::getRecordId).or(r->r.eq(CommitteeAttachment::getStatus,"PENDING").gt(CommitteeAttachment::getExpiresAt,CommitteeService.now())))
                 .inSql(CommitteeAttachment::getProjectId, com.example.siteplatform.project.service.ProjectBusinessModuleService.enabledProjectSql("SAFETY_COMMITTEE"))
                 .and(q->q.eq(CommitteeAttachment::getPreviewStatus,"QUEUED")
                         .or(r->r.eq(CommitteeAttachment::getPreviewStatus,"PROCESSING").lt(CommitteeAttachment::getLeaseUntil,CommitteeService.now())))
@@ -62,7 +63,7 @@ public class CommitteePreviewService {
         var candidate=list.get(0);
         CommitteeAttachment task=transaction.execute(tx->{
             service.lockProject(candidate.getProjectId()); var a=attachments.lock(candidate.getId());
-            if(a==null || records.selectById(a.getRecordId())==null || !("QUEUED".equals(a.getPreviewStatus())
+            if(a==null || !available(a) || !("QUEUED".equals(a.getPreviewStatus())
                     || ("PROCESSING".equals(a.getPreviewStatus()) && a.getLeaseUntil()!=null && a.getLeaseUntil().isBefore(CommitteeService.now())))) return null;
             if(permissions.isBusinessModuleDisabled(a.getProjectId(), "SAFETY_COMMITTEE")) return null;
             if(a.getAttempts()>=3) {
@@ -78,15 +79,17 @@ public class CommitteePreviewService {
             if(Files.getFileStore(work).getUsableSpace()<original.getFileSize()+1024L*1024*1024) throw new IOException("insufficient workspace");
             Path input=work.resolve("input."+original.getFileExtension());
             try(InputStream in=storage.load(original).getInputStream()){Files.copy(in,input,StandardCopyOption.REPLACE_EXISTING);}
-            process=new ProcessBuilder("bash",converter,work.toString(),task.getPreviewKind(),original.getFileExtension())
+            process=new ProcessBuilder("bash",converter,work.toString(),task.getPreviewKind(),original.getFileExtension(),Integer.toString(CommitteeService.rotation(task)))
                     .redirectErrorStream(true).redirectOutput(work.resolve("conversion.log").toFile()).start();
             long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(30);
             while (!process.waitFor(2,TimeUnit.SECONDS)) {
                 permissions.requireBusinessModule(task.getProjectId(), "SAFETY_COMMITTEE");
+                var latest=attachments.selectById(task.getId());
+                if(latest==null || !Objects.equals(latest.getWorkerId(),task.getWorkerId())) throw new IOException("superseded preview");
                 if (System.nanoTime() > deadline) throw new IOException("converter timeout");
             }
             if(process.exitValue()!=0) throw new IOException("converter failed");
-            String ext=switch(task.getPreviewKind()){case "OFFICE"->"pdf";case "VIDEO"->"mp4";default->"jpg";};
+            String ext=switch(task.getPreviewKind()){case "OFFICE"->"pdf";case "VIDEO"->"mp4";case "IMAGE"->"gif".equals(original.getFileExtension())?"gif":"png";default->"jpg";};
             Path output=work.resolve("output."+ext);
             if(!Files.isRegularFile(output) || Files.size(output)<=0 || Files.size(output)>1024L*1024*1024) throw new IOException("invalid preview");
             var file=new PathMultipartFile("file","预览."+ext,"application/octet-stream",output);
@@ -94,7 +97,7 @@ public class CommitteePreviewService {
             transaction.executeWithoutResult(tx->{
                 service.lockProject(task.getProjectId()); var a=attachments.lock(task.getId());
                 if(a==null || !Objects.equals(a.getWorkerId(),task.getWorkerId()) || !"PROCESSING".equals(a.getPreviewStatus())
-                        || records.selectById(a.getRecordId())==null) return;
+                        || !available(a)) return;
                 permissions.requireBusinessModule(a.getProjectId(), "SAFETY_COMMITTEE");
                 var preview=service.store(file,a.getProjectId(),a.getRecordId(),CommitteeService.PREVIEW,a.getUploaderId());
                 if(a.getPreviewFileId()!=null) service.retire(service.file(a.getPreviewFileId()));
@@ -115,6 +118,10 @@ public class CommitteePreviewService {
             CommitteeUploadService.cleanup(work);
         }
     }
+    private boolean available(CommitteeAttachment a) {
+        return a.getRecordId()!=null ? records.selectById(a.getRecordId())!=null
+                : "PENDING".equals(a.getStatus()) && a.getExpiresAt()!=null && a.getExpiresAt().isAfter(CommitteeService.now());
+    }
     @Scheduled(fixedDelay=3600000,initialDelay=65000)
     public void cleanStaging() {
         var expired=attachments.selectList(new LambdaQueryWrapper<CommitteeAttachment>().eq(CommitteeAttachment::getStatus,"PENDING")
@@ -122,7 +129,7 @@ public class CommitteePreviewService {
         for(var candidate:expired) transaction.executeWithoutResult(tx->{
             service.lockProject(candidate.getProjectId());var a=attachments.lock(candidate.getId());
             if(a!=null && a.getRecordId()==null && "PENDING".equals(a.getStatus()) && a.getExpiresAt().isBefore(CommitteeService.now())) {
-                service.retire(service.file(a.getFileId()));CommitteeService.one(attachments.deleteById(a.getId()));
+                service.retire(service.file(a.getFileId()));if(a.getPreviewFileId()!=null)service.retire(service.file(a.getPreviewFileId()));CommitteeService.one(attachments.deleteById(a.getId()));
             }
         });
         if(!Files.isDirectory(root))return;

@@ -106,6 +106,7 @@ public class FileResourceService {
         if (file == null) {
             throw BusinessException.notFound("文件不存在");
         }
+        if (normalizeBusinessType(file.getBusinessType()).startsWith("DATA_CORRECTION_")) throw BusinessException.forbidden("纠错附件请通过管理员纠错专属接口访问");
         if (normalizeBusinessType(file.getBusinessType()).startsWith("COMMITTEE_INSPECTION_")) {
             throw BusinessException.forbidden("安委会附件请通过巡检专属接口访问");
         }
@@ -272,6 +273,7 @@ public class FileResourceService {
         }
         permissionService.checkProjectPermission(currentUser.getId(), projectId);
         String normalized = normalizeBusinessType(businessType);
+        if(normalized.startsWith("DATA_CORRECTION_")) throw BusinessException.forbidden("纠错附件请通过管理员纠错专属接口上传");
         permissionService.requireBusinessModule(projectId, com.example.siteplatform.system.constant.BusinessModuleCodes.fromBusinessType(normalized));
         if (normalized.startsWith("COMMITTEE_INSPECTION_")) throw BusinessException.forbidden("安委会附件请通过巡检专属接口上传");
         if (normalized.startsWith("MEETING_MATERIAL")) throw BusinessException.forbidden("会议资料请通过会议资料专属接口上传");

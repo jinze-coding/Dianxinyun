@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CorrectionNotice from '@/components/CorrectionNotice.vue';
 import { computed, ref } from 'vue';
 import { onShow } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
@@ -56,6 +57,7 @@ function preview(index: number) { if (photos.value.length) uni.previewImage({ cu
   <view class="flow-page detail-page">
     <AppNavBar title="巡检详情" @back="goBack" />
     <scroll-view class="flow-scroll" scroll-y enable-flex :style="scrollStyle">
+    <CorrectionNotice :record="record" />
       <view v-if="loading" class="flow-content"><view class="flow-card loading-card"><view class="flow-skeleton line"></view><view class="flow-skeleton block"></view></view></view>
       <view v-else-if="loadError" class="flow-content error-content">
         <view class="flow-card error-card">

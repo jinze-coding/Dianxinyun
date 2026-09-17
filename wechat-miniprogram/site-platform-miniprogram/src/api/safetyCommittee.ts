@@ -2,11 +2,11 @@ import { moduleRequest } from '@/utils/moduleNetwork';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
 import { API_BASE_URL, request, getToken, ApiRequestError, handleUnauthorized } from './request';
-export interface CommitteeAttachment { id: number; fileName: string; fileSize: number; extension: string; status: string; previewKind: string; previewStatus: string; failureMessage?: string }
+export interface CommitteeAttachment { rotationDegrees?: number; rotationVersion?: number; canRotate?: boolean; id: number; fileName: string; fileSize: number; extension: string; status: string; previewKind: string; previewStatus: string; failureMessage?: string }
 export interface CommitteeLog { id: number; operatorName: string; action: string; beforeJson: string; afterJson: string; createTime: string }
 export interface CommitteeRecord { id: number; projectId: number; inspectorId: number; inspectorName: string; inspectedAt: string; category: string; conclusion: string; version: number; updatedAt: string; canEdit: boolean; canDelete: boolean; attachments: CommitteeAttachment[]; logs: CommitteeLog[] }
 export interface CommitteePage { records: CommitteeRecord[]; total: number; latestId: number | null }
-export interface SelectedFile { name: string; size: number; path: string; file?: File }
+export interface SelectedFile { name: string; size: number; path: string; file?: File; thumbnailPath?: string; capturedTemporary?: boolean }
 export interface UploadControl { cancelled: boolean; abort?: () => void }
 interface UploadSession { sessionId: string; uploadedChunks: number[]; chunkSize: number; expiresAt: number; completed: boolean }
 const base = '/safety-committee';
@@ -20,12 +20,14 @@ export const committeeApi = {
   detail: (id: number) => request<CommitteeRecord>(`${base}/records/${id}`),
   save: (id: number | undefined, data: unknown) => request<CommitteeRecord>(`${base}/records${id ? `/${id}` : ''}`, { method: id ? 'PUT' : 'POST', data }),
   attachment: (id: number) => request<CommitteeAttachment>(`${base}/attachments/${id}`),
+  rotate: (id: number, rotationDegrees: number, expectedVersion: number) => request<CommitteeAttachment>(`${base}/attachments/${id}/rotation`, { method: 'PUT', data: { rotationDegrees, expectedVersion } }),
   discard: (id: number) => request<void>(`${base}/attachments/${id}`, { method: 'DELETE' }),
   retry: (id: number) => request<void>(`${base}/attachments/${id}/preview-retry`, { method: 'POST' }),
-  read: async (id: number, preview = true) => {
+  thumbnail: (id: number, retry = false) => request<{status:string;message:string}>(`${base}/attachments/${id}/thumbnail?retry=${retry}`, {method:'POST'}),
+  read: async (id: number, preview = true, thumbnail = false) => {
     const grant = await request<{ contentPath: string; expiresAt: number }>(`${base}/attachments/${id}/read-session?nativePlayback=true`, { method: 'POST' });
     // Grant belongs to the original session; no JWT is put in a player URL.
-    return `${API_BASE_URL.replace(/\/api(?:\/v1)?$/, '')}${grant.contentPath}?preview=${preview}`;
+    return `${API_BASE_URL.replace(/\/api(?:\/v1)?$/, '')}${grant.contentPath}?preview=${preview}${thumbnail?'&thumbnail=true':''}`;
   }
 };
 export function committeeAccessLost(e: unknown) {
@@ -103,8 +105,17 @@ export function chooseCommitteeFiles(source: 'album' | 'chat' | 'camera'): Promi
   // #endif
   // #ifdef MP-WEIXIN
   const wxApi = (globalThis as any).wx;
-  if (source === 'chat') return new Promise((resolve,reject) => wxApi.chooseMessageFile({ count:30,type:'all',success:(r:any)=>resolve(r.tempFiles.map((f:any)=>({name:f.name,size:f.size,path:f.path}))),fail:reject }));
-  return new Promise((resolve,reject) => wxApi.chooseMedia({count:9,mediaType:['image','video'],sourceType:source==='camera'?['camera']:['album'],maxDuration:300,
-    success:(r:any)=>resolve(r.tempFiles.map((f:any)=>({name:`现场${Date.now()}-${Math.random().toString(36).slice(2,6)}.${f.tempFilePath.split('.').pop() || (f.fileType==='video'?'mp4':'jpg')}`,size:f.size,path:f.tempFilePath}))), fail:reject }));
+  const mediaError = (error: { errno?: number; errMsg?: string }) => {
+    if (Number(error?.errno) === 112 || /not declared in the privacy agreement/i.test(error?.errMsg || '')) {
+      console.warn('[committee-media] privacy declaration missing', error.errno, error.errMsg);
+      return new Error('附件选择暂不可用：小程序隐私声明未完善，请联系管理员处理。');
+    }
+    return error;
+  };
+  if (source === 'chat') return new Promise((resolve,reject) => wxApi.chooseMessageFile({ count:30,type:'all',success:(r:any)=>resolve(r.tempFiles.map((f:any)=>({name:f.name,size:f.size,path:f.path}))),fail:(e:any)=>reject(mediaError(e)) }));
+  // chooseMedia allows 3–60 seconds for capture; imported videos have no duration limit.
+  // The dedicated CameraContext page independently supports recording for 300 seconds.
+  return new Promise((resolve,reject) => wxApi.chooseMedia({count:9,mediaType:['image','video'],sourceType:source==='camera'?['camera']:['album'],...(source==='camera'?{maxDuration:60}:{}),
+    success:(r:any)=>resolve(r.tempFiles.map((f:any)=>({name:`现场${Date.now()}-${Math.random().toString(36).slice(2,6)}.${f.tempFilePath.split('.').pop() || (f.fileType==='video'?'mp4':'jpg')}`,size:f.size,path:f.tempFilePath,thumbnailPath:f.thumbTempFilePath}))), fail:(e:any)=>reject(mediaError(e)) }));
   // #endif
 }

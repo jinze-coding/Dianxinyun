@@ -572,6 +572,7 @@ test('authorization catalog status covers current system menus and permissions b
     'SYSTEM_MENU',
     'SYSTEM_WECHAT',
     'SYSTEM_AUDIT',
+    'SYSTEM_DATA_CORRECTION',
     'SYSTEM_APPROVAL',
   ]);
   assert.equal(status.missingMenuCodes.includes('SYSTEM_PROJECT'), false);

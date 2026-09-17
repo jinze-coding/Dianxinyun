@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import CorrectionNotice from '@/components/CorrectionNotice.vue';
 import { computed, reactive, ref } from 'vue';
-import { onLoad } from '@dcloudio/uni-app';
+import { onBackPress, onHide, onLoad } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
+import QualityAssigneeSheet from '@/components/QualityAssigneeSheet.vue';
 import WorkspaceStatusPill from '@/components/workspace/WorkspaceStatusPill.vue';
 import {
   assignQualityIssue,
@@ -38,6 +40,7 @@ const errorMessage = ref('');
 const submitting = ref(false);
 const dialogMode = ref<DialogMode>(null);
 const assignees = ref<QualityAssignee[]>([]);
+const assigneeSheetOpen = ref(false);
 const rectificationText = ref('');
 const reviewComment = ref('');
 const voidComment = ref('');
@@ -46,7 +49,15 @@ const reviewPhotoPaths = ref<string[]>([]);
 const evidenceGroups = ref<EvidenceGroup[]>([]);
 const comparisonGroups = ref<EvidenceGroup[]>([]);
 const evidenceLoading = ref(false);
-const assignForm = reactive({ assigneeIndex: -1, deadline: '', comment: '' });
+const assignForm = reactive({ assigneeId: undefined as number | undefined, deadline: '', comment: '' });
+const assignedPerson = computed(() => assignees.value.find((person) => person.userId === assignForm.assigneeId));
+
+onHide(() => { assigneeSheetOpen.value = false; });
+onBackPress(() => {
+  if (!assigneeSheetOpen.value) return false;
+  assigneeSheetOpen.value = false;
+  return true;
+});
 
 const canManage = computed(() => Boolean(issue.value)
   && authStore.hasProjectPermission(issue.value!.projectId, 'quality.manage'));
@@ -149,7 +160,7 @@ async function openAssign() {
     return;
   }
   Object.assign(assignForm, {
-    assigneeIndex: assignees.value.findIndex((item) => item.userId === issue.value?.assigneeId),
+    assigneeId: assignees.value.find((item) => item.userId === issue.value?.assigneeId)?.userId,
     deadline: issue.value.deadline || '',
     comment: ''
   });
@@ -164,7 +175,7 @@ function openVoid() {
 
 async function submitAssign() {
   if (submitting.value || !issue.value) return;
-  const assignee = assignees.value[assignForm.assigneeIndex];
+  const assignee = assignedPerson.value;
   if (!assignee) { showToast('请选择整改负责人'); return; }
   if (!assignForm.deadline) { showToast('请选择闭环期限'); return; }
   submitting.value = true;
@@ -266,8 +277,9 @@ function confirmAction(title: string, content: string): Promise<boolean> {
   return new Promise((resolve) => uni.showModal({ title, content, confirmText: '确认', cancelText: '取消', success: (result) => resolve(Boolean(result.confirm)), fail: () => resolve(false) }));
 }
 
-function setAssignAssignee(event: unknown) {
-  assignForm.assigneeIndex = Number((event as { detail?: { value?: number | string } }).detail?.value || 0);
+function setAssignAssignee(userId: number) {
+  if (submitting.value || dialogMode.value !== 'assign' || !assignees.value.some((person) => person.userId === userId)) return;
+  assignForm.assigneeId = userId;
 }
 
 function setAssignDeadline(event: unknown) {
@@ -310,6 +322,7 @@ function goBack() {
     <view v-if="loading" class="state-card">正在加载质量问题详情...</view>
     <view v-else-if="errorMessage" class="state-card error"><text>{{ errorMessage }}</text><button @tap="loadIssue">重新加载</button></view>
     <scroll-view v-else-if="issue" class="detail-scroll" scroll-y>
+    <CorrectionNotice :record="issue" />
       <view class="detail-content">
         <view class="hero-card">
           <view><WorkspaceStatusPill :label="statusLabel(issue)" :tone="statusTone(issue)" /><text>{{ issue.issueNo }}</text></view>
@@ -382,7 +395,7 @@ function goBack() {
       <view class="form-sheet" @tap.stop>
         <view class="sheet-handle"></view><view class="form-head"><text class="form-title">{{ dialogMode === 'assign' ? '改派与调整期限' : '作废质量问题' }}</text><button class="form-close" :disabled="submitting" @tap="dialogMode = null">×</button></view>
         <template v-if="dialogMode === 'assign'">
-          <view class="form-field"><text class="form-label">整改负责人 *</text><picker :range="assignees" range-key="displayName" :value="Math.max(assignForm.assigneeIndex, 0)" @change="setAssignAssignee"><view class="form-picker">{{ assignees[assignForm.assigneeIndex]?.displayName || '请选择整改负责人' }}</view></picker></view>
+          <view class="form-field"><text class="form-label">整改负责人 *</text><button class="form-picker assignee-trigger" :disabled="submitting" @tap="assigneeSheetOpen = true">{{ assignedPerson?.displayName || '搜索并选择整改负责人' }}<text>⌕</text></button></view>
           <view class="form-field"><text class="form-label">闭环期限 *</text><picker mode="date" :value="assignForm.deadline" @change="setAssignDeadline"><view class="form-picker">{{ assignForm.deadline || '请选择闭环期限' }}</view></picker></view>
           <view class="form-field"><text class="form-label">调整说明</text><textarea v-model="assignForm.comment" class="form-textarea" maxlength="1000" :disabled="submitting" placeholder="填写改派或调整期限原因（可选）" /></view>
           <button class="dialog-submit" :disabled="submitting" @tap="submitAssign">确认调整</button>
@@ -393,12 +406,16 @@ function goBack() {
         </template>
       </view>
     </view>
+    <QualityAssigneeSheet :visible="assigneeSheetOpen && dialogMode === 'assign'" :options="assignees" :selected-id="assignForm.assigneeId"
+      @select="setAssignAssignee" @close="assigneeSheetOpen = false" />
   </view>
 </template>
 
 <style scoped src="../../styles/workspace-page.css"></style>
 <style scoped>
 .detail-page { min-height: 100vh; background: #f4f6f7; color: var(--workspace-text); }
+.assignee-trigger { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; margin: 0; text-align: left; line-height: 1.5; }
+.assignee-trigger::after { border: 0; }
 .detail-page :deep(.app-nav) { background: rgba(255,255,255,.98); box-shadow: 0 1rpx 0 rgba(148,163,184,.18); }
 .detail-scroll { height: calc(100vh - 92px); }
 .detail-content { display: flex; flex-direction: column; gap: 17rpx; padding: 20rpx 24rpx calc(36rpx + env(safe-area-inset-bottom)); }

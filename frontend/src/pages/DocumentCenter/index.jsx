@@ -1,3 +1,4 @@
+import { useNavigationTab } from '../../components/BrowserNavigation';
 import React, { useEffect, useMemo, useState } from 'react';
 import DocumentManagementPage from '../DocumentManagement';
 import SealManagementPage from '../SealManagement';
@@ -19,8 +20,8 @@ const SEAL_TABS = [
 
 export default function DocumentCenterPage(props) {
   const { currentUser, projectId, theme: T, sealApplicationTarget, documentDistributionTarget } = props;
-  const [activeTab, setActiveTab] = useState('library');
-  const [activeSealTab, setActiveSealTab] = useState('applications');
+  const [activeTab, setActiveTab] = useNavigationTab('documentTab', 'library', TABS.map((tab) => tab.id));
+  const [activeSealTab, setActiveSealTab] = useNavigationTab('sealTab', 'applications', SEAL_TABS.map((tab) => tab.id));
   const projectMenuCodes = collectProjectMenuCodes(currentUser, projectId);
   const canViewLibrary = isPlatformAdmin(currentUser)
     || pageMenuAllowed(projectMenuCodes, ['DOCUMENT_LIBRARY'], ['WEB_DOCUMENT', 'DOCUMENT_MANAGEMENT']);

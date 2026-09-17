@@ -1,5 +1,7 @@
 .system-management {
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   background: #f0f4f9;
@@ -20,6 +22,7 @@
   flex-direction: column;
   gap: 4px;
   overflow: auto;
+  min-height: 0;
 }
 
 .system-sidebar nav button {
@@ -52,17 +55,65 @@
 
 .system-back-button {
   margin-top: auto;
-  padding: 10px;
+  flex-shrink: 0;
+  padding: 12px 10px;
   border-radius: 6px;
-  color: #3a5070;
-  border: 1px solid #dce5f0;
-  background: #f8fafd;
+  color: #fff;
+  border: 1px solid #1677ff;
+  background: #1677ff;
+  font-weight: 600;
+  box-shadow: 0 3px 8px rgba(22, 119, 255, 0.18);
+}
+
+.system-back-button:hover {
+  border-color: #095dcc;
+  background: #095dcc;
+}
+
+.system-back-button:focus-visible {
+  outline: 3px solid #91bdff;
+  outline-offset: 3px;
 }
 
 .system-content {
   min-width: 0;
+  min-height: 0;
   overflow: auto;
   padding: 18px;
+}
+
+.system-users-content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.system-users-content > .system-page-bar,
+.system-users-content > .system-batch-toolbar,
+.system-users-content > .system-form-error,
+.system-users-content > .system-pagination {
+  flex-shrink: 0;
+}
+
+.system-users-content > .system-users-table {
+  flex: 1;
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+
+.system-users-content > .system-pagination {
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 12px 16px;
+  border: 1px solid #dce5f0;
+  border-radius: 8px;
+  background: #fff;
+  color: #4a607d;
+  font-size: 12px;
+}
+
+.system-users-table .system-table-state td {
+  border-bottom: 0;
 }
 
 .system-page-bar {
@@ -1291,6 +1342,21 @@ button.danger {
 
 .system-pagination button {
   padding: 6px 10px;
+  border: 1px solid #dce5f0;
+  border-radius: 5px;
+  color: #3a5070;
+  background: #fff;
+}
+
+.system-pagination .system-page-size {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: 10px;
+}
+
+.system-page-size select {
+  padding: 6px 8px;
   border: 1px solid #dce5f0;
   border-radius: 5px;
   color: #3a5070;

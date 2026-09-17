@@ -66,6 +66,18 @@ public interface QualityWeeklyInspectionMapper extends BaseMapper<QualityWeeklyI
                @Param("submittedByName") String submittedByName,
                @Param("submittedTime") LocalDateTime submittedTime);
 
+    @Update("""
+            UPDATE quality_weekly_inspection
+            SET status = 'DRAFT', inspection_no = NULL, submitted_issue_count = 0,
+                submitted_by_id = NULL, submitted_by_name = NULL, submitted_time = NULL,
+                last_edited_by_id = #{editorId}, last_edited_by_name = #{editorName},
+                version = version + 1, update_time = #{updateTime}
+            WHERE id = #{id} AND status = 'SUBMITTED' AND version = #{expectedVersion}
+            """)
+    int returnToDraft(@Param("id") Long id, @Param("expectedVersion") Integer expectedVersion,
+                      @Param("editorId") Long editorId, @Param("editorName") String editorName,
+                      @Param("updateTime") LocalDateTime updateTime);
+
     @Delete("""
             DELETE FROM quality_weekly_inspection
             WHERE id = #{id} AND status = 'DRAFT' AND version = #{expectedVersion}

@@ -240,6 +240,23 @@ public class ResponsibilityReleaseService {
         return false;
     }
 
+    /** 仅解除已预览、且本次角色变更实际失去处理能力的责任类别。 */
+    public void releasePreviewedImpact(ResponsibilityImpactVO impact) {
+        Long projectId = impact.getProjectId();
+        Long userId = impact.getUserId();
+        if (impact.getResponsibleElectricBoxCount() > 0) clearElectrician(projectId, userId);
+        if (impact.getSafetyManagedElectricBoxCount() > 0) clearSafetyManager(projectId, userId);
+        if (impact.getPendingInspectionReviewCount() > 0) clearInspectionReviewer(projectId, userId);
+        if (impact.getOpenRectificationCount() > 0) clearRectification(projectId, userId);
+        if (impact.getPendingGeneralInspectionTaskCount() > 0) clearGeneralInspectionTask(projectId, userId);
+        if (impact.getOpenGeneralRectificationCount() > 0) clearGeneralRectificationAssignee(projectId, userId);
+        if (impact.getPendingGeneralReviewCount() > 0) clearGeneralRectificationReviewer(projectId, userId);
+        if (impact.getOpenQualityIssueCount() > 0) clearQuality(projectId, userId);
+        if (impact.getQualityWeeklyReminderSettingCount() > 0) clearQualityWeeklyReminderOwner(projectId, userId);
+        if (impact.getSealApprovalConfigCount() > 0) removeSealApprovalConfiguration(projectId, userId);
+        if (impact.getPendingSealApprovalCount() > 0) cancelSealApprovalTasksAndNotify(projectId, userId);
+    }
+
     private void clearElectrician(Long projectId, Long userId) {
         jdbc.update("""
                 UPDATE electric_box SET responsible_electrician_id = NULL,

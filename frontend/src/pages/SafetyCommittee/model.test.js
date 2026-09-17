@@ -16,6 +16,15 @@ test('new submissions do not shift an older page; returning to page one releases
   assert.equal(mergeCommitteePage(current,incoming,1,40).data,incoming);
   assert.equal(mergeCommitteePage(current,incoming,2,null).hasNew,false);
 });
+test('category order comes from the server and the newest marker may belong to a later category', () => {
+  const incoming={records:[{id:8,category:'施工安全管理'},{id:91,category:'其他'}],total:23,latestId:91};
+  const current={records:[{id:90,category:'其他'}],total:22};
+  const older=mergeCommitteePage(current,incoming,2,90);
+  assert.equal(older.hasNew,true);assert.equal(older.data,current);
+  const refreshed=mergeCommitteePage(current,incoming,1,null);
+  assert.deepEqual(refreshed.data.records.map(row=>row.id),[8,91]);assert.equal(refreshed.latestId,91);
+  assert.equal(mergeCommitteePage(current,{...incoming,latestId:90},2,90).hasNew,false);
+});
 test('committee menu assignment selects both clients and its record page without quality grants', () => {
   const menus=[['WEB_SAFETY_COMMITTEE',1,null],['MINI_SAFETY_COMMITTEE',2,null],['SAFETY_COMMITTEE_RECORDS',3,1]].map(([menuCode,id,parentId])=>({menuCode,id,parentId,enabled:1,visible:1}));
   const tree=buildRoleMenuTree(menus,{scopeType:'PROJECT'});const node=tree.find(n=>n.moduleCode==='SAFETY_COMMITTEE');assert.ok(node);

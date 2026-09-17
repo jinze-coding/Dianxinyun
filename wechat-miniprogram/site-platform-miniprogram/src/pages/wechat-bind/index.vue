@@ -5,6 +5,8 @@ import AppNavBar from '@/components/AppNavBar.vue';
 import { bindWechatAccount, requestWechatProjectAccess } from '@/api/auth';
 import { useAuthStore } from '@/stores/auth';
 import { showToast } from '@/utils/navigation';
+import AgreementConsent from '@/components/AgreementConsent.vue';
+import { requireAgreement, requestPrivacyAuthorization } from '@/utils/agreementConsent';
 import { getFreshWechatCode } from '@/utils/wechat';
 
 const auth = useAuthStore();
@@ -13,6 +15,7 @@ const scene = ref('');
 const returnUrl = ref('');
 const username = ref('');
 const password = ref('');
+const agreementsAccepted = ref(false);
 const submitting = ref(false);
 
 onLoad((options) => {
@@ -26,12 +29,14 @@ function goBack() {
 }
 
 async function bindExistingAccount() {
+  if (submitting.value || !requireAgreement(agreementsAccepted.value)) return;
   if (!username.value.trim() || !password.value) {
     showToast('请输入已有系统账号和密码');
     return;
   }
   submitting.value = true;
   try {
+    await requestPrivacyAuthorization();
     const response = await bindWechatAccount({
       username: username.value.trim(),
       password: password.value,
@@ -92,6 +97,7 @@ function applyForAccount() {
         <text class="section-hint">为防止手机号误绑定，必须验证一次系统账号密码。</text>
         <input v-model="username" class="input" placeholder="系统账号" />
         <input v-model="password" class="input" password placeholder="系统密码" confirm-type="done" @confirm="bindExistingAccount" />
+        <AgreementConsent v-model="agreementsAccepted" :disabled="submitting" />
         <button class="primary" :disabled="submitting" @tap="bindExistingAccount">{{ submitting ? '正在验证并绑定…' : '验证并绑定' }}</button>
       </view>
 

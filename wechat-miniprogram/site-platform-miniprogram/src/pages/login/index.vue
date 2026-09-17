@@ -5,11 +5,14 @@ import { useAuthStore } from '@/stores/auth';
 import { miniWechatLogin } from '@/api/auth';
 import { getToken } from '@/api/request';
 import { showToast } from '@/utils/navigation';
+import AgreementConsent from '@/components/AgreementConsent.vue';
+import { requireAgreement, requestPrivacyAuthorization } from '@/utils/agreementConsent';
 import { getFreshWechatCode } from '@/utils/wechat';
 
 const auth = useAuthStore();
 const username = ref('');
 const password = ref('');
+const agreementsAccepted = ref(false);
 const loading = ref(false);
 const wechatLoading = ref(false);
 const restoringSession = ref(false);
@@ -29,12 +32,14 @@ onShow(async () => {
 });
 
 async function submit() {
+  if (loading.value || wechatLoading.value || !requireAgreement(agreementsAccepted.value)) return;
   if (!username.value.trim() || !password.value) {
     showToast('请输入账号和密码');
     return;
   }
   loading.value = true;
   try {
+    await requestPrivacyAuthorization();
     await auth.login(username.value.trim(), password.value);
     showToast('登录成功');
     auth.navigateAfterLogin();
@@ -46,9 +51,10 @@ async function submit() {
 }
 
 async function wechatLogin() {
-  if (wechatLoading.value) return;
+  if (loading.value || wechatLoading.value || !requireAgreement(agreementsAccepted.value)) return;
   wechatLoading.value = true;
   try {
+    await requestPrivacyAuthorization();
     const response = await miniWechatLogin(await getFreshWechatCode());
     if (response.token) {
       await auth.completeLogin(response.token);
@@ -100,6 +106,7 @@ function openRegistrationStatus() {
       <text class="card-title">账号登录</text>
       <view class="field"><input v-model="username" placeholder="请输入账号" /></view>
       <view class="field"><input v-model="password" password placeholder="请输入密码" confirm-type="done" @confirm="submit" /></view>
+      <AgreementConsent v-model="agreementsAccepted" :disabled="loading || wechatLoading" />
       <button class="primary" :disabled="loading" @tap="submit">{{ loading ? '登录中…' : '登录' }}</button>
 
       <view class="divider"><text></text><label>其他登录方式</label><text></text></view>
@@ -115,7 +122,6 @@ function openRegistrationStatus() {
       </view>
     </view>
 
-    <text class="privacy">登录或注册即表示同意平台用户协议与隐私政策</text>
   </view>
 </template>
 

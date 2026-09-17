@@ -33,6 +33,7 @@ class ProjectBusinessModuleIntegrationTest {
         registry.add("spring.data.redis.port", () -> 6380); registry.add("spring.data.redis.database", () -> 15);
         registry.add("file.upload.path", ROOT::toString);
     }
+    @Autowired com.example.siteplatform.project.mapper.ProjectInfoMapper projectInfoMapper;
     @Autowired MockMvc mvc; @Autowired JdbcTemplate jdbc; @Autowired ObjectMapper json;
     @Autowired AuthService auth; @Autowired SysUserMapper users; @Autowired ProjectBusinessModuleService modules;
     @Autowired UserNotificationService notifications;
@@ -63,7 +64,7 @@ class ProjectBusinessModuleIntegrationTest {
         }
         member=token(memberId); outsider=token(outsiderId);
     }
-    @BeforeEach void reset() { for(long id:List.of(projectA,projectB)) set(id,BusinessModuleCodes.ALL); }
+    @BeforeEach void reset() { for(long id:List.of(projectA,projectB)) modules.update(id,BusinessModuleCodes.ALL,modules.state(id).moduleConfigVersion(),true,users.selectById(adminId)); }
     @AfterAll void cleanup() { for(long id:List.of(projectA,projectB)) if(id>0)set(id,BusinessModuleCodes.ALL); tokens.forEach(auth::logoutSession); }
     String token(long id) { String value=auth.issueToken(users.selectById(id)); tokens.add(value); return value; }
     long createUser() {
@@ -86,6 +87,46 @@ class ProjectBusinessModuleIntegrationTest {
     int status(String method,String path,Object body,String token) throws Exception { return raw(method,path,body,token).getResponse().getStatus(); }
     JsonNode context(JsonNode user,long project) { for(var value:user.path("projectContexts"))if(value.path("projectId").asLong()==project)return value;throw new AssertionError("Missing project context"); }
     List<Long> grantCounts() { return List.of("sys_role_business_module","sys_role_menu","sys_role_permission").stream().map(table->jdbc.queryForObject("SELECT COUNT(*) FROM "+table,Long.class)).toList(); }
+
+    @Test void inboxDisplayIsIndependentPersistentAndCompatible() throws Exception {
+        var before = modules.state(projectA);
+        assertThat(before.inboxEntryVisible()).isTrue();
+        var grants = grantCounts();
+        var moduleRows = jdbc.queryForList("SELECT module_code,enabled,activated_at FROM project_business_module WHERE project_id=? ORDER BY module_code", projectA);
+        var notificationsBefore = jdbc.queryForList("SELECT * FROM user_notification ORDER BY id");
+        var hide = Map.of("moduleCodes", before.enabledBusinessModules(), "expectedVersion", before.moduleConfigVersion(), "inboxEntryVisible", false);
+        assertThat(status("PUT", "/system/project-modules/"+projectA, hide, member)).isEqualTo(403);
+        var hidden = call("PUT", "/system/project-modules/"+projectA, hide, admin);
+        assertThat(hidden.path("inboxEntryVisible").asBoolean(true)).isFalse();
+        assertThat(hidden.path("moduleConfigVersion").asLong()).isEqualTo(before.moduleConfigVersion()+1);
+        for (String token : List.of(admin, member)) {
+            var user = call("GET", "/auth/user-info", null, token);
+            assertThat(context(user, projectA).path("inboxEntryVisible").asBoolean(true)).isFalse();
+            assertThat(context(user, projectB).path("inboxEntryVisible").asBoolean()).isTrue();
+            call("GET", "/me/work-summary?projectId="+projectA, null, token);
+            call("GET", "/safety-committee/records?projectId="+projectA, null, token);
+        }
+        assertThat(status("PUT", "/system/project-modules/"+projectA, hide, admin)).isEqualTo(409);
+        var legacy = call("PUT", "/system/project-modules/"+projectA, Map.of("moduleCodes",before.enabledBusinessModules(),"expectedVersion",before.moduleConfigVersion()+1), admin);
+        assertThat(legacy.path("inboxEntryVisible").asBoolean(true)).isFalse();
+        assertThat(legacy.path("moduleConfigVersion")).isEqualTo(hidden.path("moduleConfigVersion"));
+        assertThat(grantCounts()).isEqualTo(grants);
+        assertThat(jdbc.queryForList("SELECT module_code,enabled,activated_at FROM project_business_module WHERE project_id=? ORDER BY module_code", projectA)).isEqualTo(moduleRows);
+        assertThat(jdbc.queryForList("SELECT * FROM user_notification ORDER BY id")).isEqualTo(notificationsBefore);
+        var staleProject = new com.example.siteplatform.project.entity.ProjectInfo();
+        staleProject.setId(projectA); staleProject.setInboxEntryVisible(true); staleProject.setDescription("Display setting is not a general project field");
+        projectInfoMapper.updateById(staleProject);
+        assertThat(modules.state(projectA).inboxEntryVisible()).isFalse();
+    }
+
+    @Test void inboxAuditFailureRollsBackDisplayAndSharedVersion() {
+        var before = modules.state(projectA);
+        jdbc.execute("CREATE TRIGGER inbox_test_audit_failure BEFORE INSERT ON sys_operation_log FOR EACH ROW BEGIN IF NEW.operation_type='UPDATE_PROJECT_MODULES' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Intentional isolated inbox audit failure'; END IF; END");
+        try {
+            assertThatThrownBy(() -> modules.update(projectA,before.enabledBusinessModules(),before.moduleConfigVersion(),false,users.selectById(adminId))).isInstanceOf(RuntimeException.class);
+            assertThat(modules.state(projectA)).isEqualTo(before);
+        } finally { jdbc.execute("DROP TRIGGER inbox_test_audit_failure"); }
+    }
 
     @Test void newProjectsAndSharedRoleRespectIndependentProjectCaps() throws Exception {
         assertThat(modules.state(projectA).enabledBusinessModules()).containsExactlyElementsOf(BusinessModuleCodes.ALL);

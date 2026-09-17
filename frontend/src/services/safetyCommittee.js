@@ -12,11 +12,13 @@ export const committee = {
   create: async (data) => unwrap(await api.post(`${base}/records`, data)),
   edit: async (id, data) => unwrap(await api.put(`${base}/records/${id}`, data)),
   attachment: async (id) => unwrap(await api.get(`${base}/attachments/${id}`)),
+  rotate: async (id, rotationDegrees, expectedVersion) => unwrap(await api.put(`${base}/attachments/${id}/rotation`, { rotationDegrees, expectedVersion })),
   discard: async (id) => unwrap(await api.delete(`${base}/attachments/${id}`)),
   retry: async (id) => unwrap(await api.post(`${base}/attachments/${id}/preview-retry`)),
   read: async (id) => unwrap(await api.post(`${base}/attachments/${id}/read-session`)),
+  thumbnail: async (id, retry = false, signal) => unwrap(await api.post(`${base}/attachments/${id}/thumbnail`, {}, {params:{retry}, signal})),
 };
-export const committeeContent = (id, preview = true) => canonicalMaterialContentPath(api.getUri({ url: `${base}/attachments/${id}/content`, params: { preview } }));
+export const committeeContent = (id, preview = true, thumbnail = false) => canonicalMaterialContentPath(api.getUri({ url: `${base}/attachments/${id}/content`, params: { preview, ...(thumbnail?{thumbnail:true}:{}) } }));
 export { materialSize as committeeSize };
 export const committeeDate = (value) => String(value || '').replace('T', ' ').replace(/\.\d+$/, '');
 export const committeeKey = () => crypto.randomUUID().replaceAll('-', '');

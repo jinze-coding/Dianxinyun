@@ -101,7 +101,7 @@ export const PAGE_IDS = {
   PROJECT_INFORMATION: 'project_information',
 };
 
-// 账号密码、微信扫码登录以及已登录会话恢复后的统一首页。
+// 新登录的统一首页；Web 刷新已有会话时恢复通过权限检查的当前项目和页面。
 export const AUTHENTICATED_LANDING_PAGE = PAGE_IDS.PERSONAL_INBOX;
 
 // 导航菜单

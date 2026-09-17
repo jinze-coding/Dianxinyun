@@ -8,6 +8,7 @@ public class UserProjectRoleVO {
     private Long projectId;
     private java.util.List<String> enabledBusinessModules;
     private Long moduleConfigVersion;
+    private Boolean inboxEntryVisible;
     private String projectName;
     private String shortName;
     private String projectRoleCode;

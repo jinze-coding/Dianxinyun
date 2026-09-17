@@ -30,6 +30,10 @@ export function discardWeeklyInspectionDraft(id, expectedVersion) {
   return post(`${WEEKLY_INSPECTIONS_PATH}/${id}/discard`, { expectedVersion });
 }
 
+export function returnWeeklyInspectionToDraft(id, expectedVersion, reason) {
+  return post(`${WEEKLY_INSPECTIONS_PATH}/${id}/return-to-draft`, { expectedVersion, reason });
+}
+
 export function getWeeklyInspectionReminderSetting(projectId) {
   return get(`${WEEKLY_INSPECTIONS_PATH}/reminder-setting/${projectId}`);
 }

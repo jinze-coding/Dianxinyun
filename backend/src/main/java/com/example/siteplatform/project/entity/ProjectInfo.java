@@ -15,6 +15,10 @@ public class ProjectInfo {
 
     private String projectName;
     private String shortName;
+    // Only the platform-admin project-module endpoint may write this display setting.
+    @JsonIgnore
+    @TableField(insertStrategy = FieldStrategy.NEVER, updateStrategy = FieldStrategy.NEVER)
+    private Boolean inboxEntryVisible;
     private String area;
     private String period;
     private String phase;

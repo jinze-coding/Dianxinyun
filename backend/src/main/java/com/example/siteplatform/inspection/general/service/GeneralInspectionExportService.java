@@ -51,6 +51,10 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class GeneralInspectionExportService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.example.siteplatform.system.correction.CorrectionNoticeService correctionNotices;
+    private String corrected(String text,String type,Long id) { return correctionNotices==null?(text==null?"":text):correctionNotices.append(text,type,id); }
+
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final String EXPORT_TYPE = "EDGE";
     private static final String EXPORT_BUSINESS_TYPE = "EDGE_INSPECTION_EXPORT";
@@ -372,7 +376,7 @@ public class GeneralInspectionExportService {
             rowValues.add(text(task.getSubmittedByName()));
             rowValues.add(displayStatus(task));
             rowValues.add(text(task.getAbnormalCount() == null ? 0 : task.getAbnormalCount()));
-            rowValues.add(isCancelled(task) ? text(task.getCancelReason()) : text(task.getRemark()));
+            rowValues.add(corrected(isCancelled(task) ? text(task.getCancelReason()) : text(task.getRemark()),"EDGE_TASK",task.getId()));
             rowValues.add("");
             Row row = sheet.createRow(rowIndex);
             values(row, rowValues, bodyStyle);

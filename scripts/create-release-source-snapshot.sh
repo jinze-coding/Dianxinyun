@@ -50,7 +50,7 @@ before_status_state="$(git status --porcelain=v1 -z --untracked-files=all | shas
 git ls-files --cached --others --exclude-standard -z > "$candidate_file_list"
 while IFS= read -r -d '' source_path; do
   case "$source_path" in
-    backups/*|需求方预览.zip)
+    backups/*|需求方预览.zip|scripts/document-circulation-demo-data.sh|*/__pycache__/*|*.pyc)
       continue
       ;;
   esac
@@ -117,7 +117,7 @@ fi
   printf 'SOURCE_TREE_SHA256=%s\n' "$after_source_state"
   printf 'WORKTREE_CHANGE_COUNT=%s\n' "$change_count"
   printf 'SOURCE_FILE_COUNT=%s\n' "$file_count"
-  printf 'SOURCE_SCOPE=tracked-and-non-ignored-untracked-files-excluding-backups-and-legacy-preview-zip\n'
+  printf 'SOURCE_SCOPE=tracked-and-non-ignored-untracked-files-excluding-backups-legacy-preview-zip-and-local-demo-data\n'
   printf 'MINI_PROGRAM_VERSION=%s\n' "$mini_program_version"
   printf 'MINI_PROGRAM_BUILD_ID=%s\n' "$mini_program_build_id"
   printf 'MINI_PROGRAM_LOCK_SHA256=%s\n' "$mini_program_lock_sha256"

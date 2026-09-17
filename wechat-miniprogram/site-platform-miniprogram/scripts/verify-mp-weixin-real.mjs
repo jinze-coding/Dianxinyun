@@ -4,15 +4,25 @@ import path from 'node:path';
 
 const expectedApiBase = 'https://zhihuiyz.xyz/api/v1';
 const expectedAppId = 'wxc2c8114ac4b5679a';
-const expectedVersion = '0.1.8';
-const expectedVersionCode = '108';
-const expectedBuildId = '0.1.8-20260901-prod-compat';
-const expectedPageCount = 43;
+const expectedVersion = '0.1.13';
+const expectedVersionCode = '113';
+const expectedBuildId = '0.1.13-20260917-quality-correction';
+const expectedPageCount = 49;
 const sourceRoot = path.resolve('src');
 const buildRoot = path.resolve('dist/build/mp-weixin');
 
 const criticalPages = [
+  'pages/legal/index',
+  'pages/login/index',
+  'pages/register/index',
+  'pages/wechat-bind/index',
   'pages/todo/index',
+  'pages/initial-password/index',
+  'pages/safety-committee/index',
+  'pages/safety-committee/edit',
+  'pages/safety-committee/detail',
+  'pages/safety-committee/capture',
+  'pages/public/meeting-check-in',
   'pages/documents/index',
   'pages/document-distribution/detail',
   'pages/inspection/index',
@@ -38,6 +48,11 @@ const criticalPages = [
 ];
 
 const requiredBusinessStrings = [
+  '/safety-committee',
+  'thumbnailPath',
+  'tempThumbPath',
+  'inboxEntryVisible',
+  '/auth/initial-password',
   '/quality/weekly-inspections',
   '/me/document-distributions/',
   '/edge-inspections',

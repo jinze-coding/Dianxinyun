@@ -1,3 +1,4 @@
+import CorrectionNotice from '../../components/CorrectionNotice';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   approveSealApplication,
@@ -856,7 +857,7 @@ export default function SealManagementPage({
 
       {(detail || detailLoading) && <div className="seal-drawer-mask" onMouseDown={() => !busy && setDetail(null)}>
         <aside className="seal-drawer" onMouseDown={(event) => event.stopPropagation()}>
-          {detailLoading && !detail ? <div className="seal-drawer-loading">申请详情加载中…</div> : detail && <>
+          {detailLoading && !detail ? <div className="seal-drawer-loading">申请详情加载中…</div> : detail && <><CorrectionNotice record={detail} />
             <header><div><span>{detail.applicationNo || `#${detail.id}`}</span><h2>{detail.purpose || '用印申请'}</h2></div><button className="icon" onClick={() => setDetail(null)}>×</button></header>
             <div className="seal-drawer-actions">
               {detail.canEdit && <button onClick={() => openEditor({ ...detail, projectName: detail.projectName || projectName, ccUserIds: detail.ccUserIds || (detail.ccRecipients || detail.ccUsers || []).map((user) => user.userId ?? user.id).filter(Boolean) })}>编辑</button>}

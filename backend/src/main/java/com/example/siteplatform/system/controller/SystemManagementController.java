@@ -99,11 +99,14 @@ public class SystemManagementController {
     public Result<PageResult<Map<String, Object>>> users(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) Integer status,
+            @RequestParam(required = false) Long projectId,
+            @RequestParam(required = false) Long roleId,
+            @RequestParam(required = false) String accessStatus,
             @RequestParam(defaultValue = "1") Integer pageNo,
             @RequestParam(defaultValue = "20") Integer pageSize,
             HttpServletRequest request) {
         permissionService.requirePlatformPermission(current(request), SystemPermissionCodes.USER_VIEW);
-        return Result.success(administrationService.users(keyword, status, pageNo, pageSize));
+        return Result.success(administrationService.users(keyword, status, pageNo, pageSize, projectId, roleId, accessStatus));
     }
 
     @GetMapping("/users/{userId}")

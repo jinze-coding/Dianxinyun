@@ -662,6 +662,10 @@ public class ProjectMemberService {
     private ResponsibilityImpactVO responsibilityImpactForChange(PreparedChange change) {
         ResponsibilityImpactVO impact = responsibilityReleaseService.impact(change.projectId(), change.userId());
         if ("REMOVE".equals(change.operation())) return impact;
+        // 用印审批按具体用户指派，保留项目成员资格的角色调整不撤销这些指派。
+        // 与 releaseForCapabilityLoss 的实际保存行为保持一致。
+        impact.setPendingSealApprovalCount(0);
+        impact.setSealApprovalConfigCount(0);
         if (projectPermissionService.isPlatformAdmin(change.userId())) {
             clearResponsibilityCounts(impact);
             return impact;
@@ -678,6 +682,15 @@ public class ProjectMemberService {
         }
         if (codes.contains(SystemPermissionCodes.INSPECTION_RECTIFY)) {
             impact.setOpenRectificationCount(0);
+        }
+        if (codes.contains(InspectionPermissionCodes.EDGE_INSPECTION_SUBMIT)) {
+            impact.setPendingGeneralInspectionTaskCount(0);
+        }
+        if (codes.contains(InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY)) {
+            impact.setOpenGeneralRectificationCount(0);
+        }
+        if (codes.contains(InspectionPermissionCodes.EDGE_INSPECTION_REVIEW)) {
+            impact.setPendingGeneralReviewCount(0);
         }
         if (codes.contains(SystemPermissionCodes.QUALITY_RECTIFY)) {
             impact.setOpenQualityIssueCount(0);
@@ -711,8 +724,13 @@ public class ProjectMemberService {
         impact.setSafetyManagedElectricBoxCount(0);
         impact.setPendingInspectionReviewCount(0);
         impact.setOpenRectificationCount(0);
+        impact.setPendingGeneralInspectionTaskCount(0);
+        impact.setOpenGeneralRectificationCount(0);
+        impact.setPendingGeneralReviewCount(0);
         impact.setOpenQualityIssueCount(0);
         impact.setQualityWeeklyReminderSettingCount(0);
+        impact.setPendingSealApprovalCount(0);
+        impact.setSealApprovalConfigCount(0);
     }
 
     private void applyPreparedChanges(List<PreparedChange> changes, SysUser currentUser) {
@@ -748,8 +766,29 @@ public class ProjectMemberService {
         return assignments;
     }
 
-    private void invalidateUsers(Set<Long> userIds) {
+    void invalidateUsers(Set<Long> userIds) {
         for (Long userId : userIds) invalidateUserAccess(userId);
+    }
+
+    /** 已经由批量预览/确认服务在同一事务中锁定并校验的成员变更。 */
+    void applyValidatedBatchChange(Long projectId, Long userId, List<SystemRole> roles,
+                                   SysUserProject existing, boolean remove, String initialStatus,
+                                   SysUser operator) {
+        SysUserProject relation = existing;
+        if (!remove && relation == null) {
+            relation = new SysUserProject();
+            relation.setProjectId(projectId);
+            relation.setUserId(userId);
+            relation.setStatus(initialStatus);
+            relation.setCreateTime(LocalDateTime.now());
+            if ("DISABLED".equals(initialStatus)) {
+                relation.setStatusReason("复制来源项目的暂停访问状态");
+                relation.setStatusChangedBy(operator.getId());
+                relation.setStatusChangedTime(LocalDateTime.now());
+            }
+        }
+        applyPreparedChanges(List.of(new PreparedChange(projectId, userId,
+                remove ? "REMOVE" : "UPSERT", roles, relation, null)), operator);
     }
 
     private void requireProjectExistsForUpdate(Long projectId) {

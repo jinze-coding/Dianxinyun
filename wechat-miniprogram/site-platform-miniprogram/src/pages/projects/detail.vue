@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CorrectionNotice from '@/components/CorrectionNotice.vue';
 import { computed, ref } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
 import { getProjectProfile } from '@/api/project';
@@ -96,6 +97,7 @@ function preview(index: number) {
 
 <template>
   <view class="project-detail-page">
+    <CorrectionNotice :record="profile" />
     <view v-if="loading" class="state-card"><text>正在加载项目信息…</text></view>
     <view v-else-if="errorMessage" class="state-card error">
       <text>{{ errorMessage }}</text><button @tap="load">重新加载</button>

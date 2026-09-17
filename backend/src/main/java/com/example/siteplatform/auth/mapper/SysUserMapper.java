@@ -12,6 +12,13 @@ import java.util.List;
 
 @Mapper
 public interface SysUserMapper extends BaseMapper<SysUser> {
+    // Includes retired/disabled identities; imports never resurrect a historical account.
+    @Select("SELECT * FROM sys_user WHERE username=#{phone} OR phone=#{phone} ORDER BY id LIMIT 1")
+    SysUser selectOccupiedIdentity(String phone);
+    @Select("SELECT * FROM sys_user WHERE username=#{phone} OR phone=#{phone} ORDER BY id LIMIT 1 FOR UPDATE")
+    SysUser selectOccupiedIdentityForUpdate(String phone);
+    @org.apache.ibatis.annotations.Update("UPDATE sys_user SET temporary_password_expires_at=NULL WHERE id=#{id}")
+    int clearTemporaryPasswordExpiry(Long id);
     @Select("SELECT * FROM sys_user WHERE id = #{userId} FOR UPDATE")
     SysUser selectByIdForUpdate(@Param("userId") Long userId);
 

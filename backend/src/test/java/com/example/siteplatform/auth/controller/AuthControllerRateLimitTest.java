@@ -1,6 +1,7 @@
 package com.example.siteplatform.auth.controller;
 
 import com.example.siteplatform.auth.dto.LoginRequest;
+import com.example.siteplatform.auth.dto.InitialPasswordRequest;
 import com.example.siteplatform.auth.dto.WechatBindLoginRequest;
 import com.example.siteplatform.auth.dto.WechatCurrentBindRequest;
 import com.example.siteplatform.auth.dto.WechatProjectAccessRequest;
@@ -105,6 +106,21 @@ class AuthControllerRateLimitTest {
         verify(rateLimitService).check(
                 "wechat-self-unbind-account", "user@example.com", 5, Duration.ofMinutes(10));
         verify(wechatAuthService).unbindCurrent(user, "Password123");
+    }
+
+    @Test
+    void initialPasswordUsesRestrictedSessionAndAccountLimit() {
+        SysUser user = currentUser();
+        InitialPasswordRequest request = new InitialPasswordRequest();
+        request.setNewPassword("PersonalPassword7");
+        when(httpRequest.getHeader("Authorization")).thenReturn("Bearer restricted-session");
+        when(authService.getCurrentUserAllowInitialPasswordSetup("restricted-session")).thenReturn(user);
+
+        controller.setupInitialPassword(request, httpRequest);
+
+        verify(rateLimitService).check("initial-password", "203.0.113.9", 10, Duration.ofMinutes(10));
+        verify(rateLimitService).check("initial-password-account", "user@example.com", 10, Duration.ofMinutes(10));
+        verify(authService).setupInitialPassword("restricted-session", "PersonalPassword7");
     }
 
     @Test

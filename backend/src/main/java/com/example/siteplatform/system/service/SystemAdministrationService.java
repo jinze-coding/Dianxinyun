@@ -108,8 +108,29 @@ public class SystemAdministrationService {
     }
 
     public PageResult<Map<String, Object>> users(String keyword, Integer status, Integer pageNo, Integer pageSize) {
+        return users(keyword, status, pageNo, pageSize, null, null, null);
+    }
+
+    public PageResult<Map<String, Object>> users(String keyword, Integer status, Integer pageNo, Integer pageSize,
+                                               Long projectId, Long roleId, String accessStatus) {
+        if (projectId == null && (roleId != null || StringUtils.hasText(accessStatus))) {
+            throw new BusinessException("请先选择项目，再筛选该项目的角色或访问状态");
+        }
+        if (projectId != null && projectId <= 0 || roleId != null && roleId <= 0) throw new BusinessException("项目或角色无效");
+        if (StringUtils.hasText(accessStatus) && !Set.of("ACTIVE", "DISABLED").contains(accessStatus)) throw new BusinessException("项目访问状态无效");
         LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<SysUser>()
                 .orderByAsc(SysUser::getStatus).orderByDesc(SysUser::getCreateTime);
+        if (projectId != null) {
+            String sql = "SELECT 1 FROM sys_user_project selected_project JOIN project_info selected_info ON selected_info.id=selected_project.project_id AND selected_info.deleted=0"
+                    + " WHERE selected_project.user_id=sys_user.id AND selected_project.project_id={0}";
+            List<Object> values = new ArrayList<>(); values.add(projectId);
+            if (roleId != null) {
+                sql += " AND EXISTS (SELECT 1 FROM sys_user_project_role selected_role WHERE selected_role.user_id=selected_project.user_id AND selected_role.project_id=selected_project.project_id AND selected_role.role_id={" + values.size() + "})";
+                values.add(roleId);
+            }
+            if (StringUtils.hasText(accessStatus)) { sql += " AND selected_project.status={" + values.size() + "}"; values.add(accessStatus); }
+            wrapper.exists(sql, values.toArray());
+        }
         if (status != null) wrapper.eq(SysUser::getStatus, status);
         if (StringUtils.hasText(keyword)) {
             String value = keyword.trim();
@@ -182,7 +203,8 @@ public class SystemAdministrationService {
 
     @Transactional
     public void resetPassword(Long userId, String newPassword, SysUser operator) {
-        SysUser user = requireUser(userId);
+        SysUser user = requireUserForUpdate(userId);
+        if (Integer.valueOf(1).equals(user.getMustChangePassword())) throw new BusinessException("该账号尚未首次改密，请使用重新生成临时密码");
         authService.changePassword(user, newPassword);
         authService.repeatLogoutAfterCommit(userId);
         record(operator, "RESET_PASSWORD", "SYS_USER", userId, "管理员重置账号密码");
@@ -650,6 +672,8 @@ public class SystemAdministrationService {
         result.put("status", user.getStatus());
         result.put("passwordLoginEnabled", user.getPasswordLoginEnabled());
         result.put("passwordResetRequired", user.getPasswordResetRequired());
+        result.put("mustChangePassword", Integer.valueOf(1).equals(user.getMustChangePassword()));
+        result.put("temporaryPasswordExpiresAt", user.getTemporaryPasswordExpiresAt());
         result.put("roles", userMapper.selectRoleCodesByUserId(user.getId()));
         result.put("projectRoles", managementProjectRoles(user.getId()));
         result.put("createTime", user.getCreateTime());

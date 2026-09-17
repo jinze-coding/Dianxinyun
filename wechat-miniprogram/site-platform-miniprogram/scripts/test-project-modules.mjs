@@ -54,6 +54,23 @@ for (const roles of [['PROJECT_MANAGER'], ['PLATFORM_ADMIN']]) {
   assert.equal(store.canAccessRoot('/pages/profile/index'), true);
   assert.equal(store.firstAuthorizedPage(), '/pages/todo/index');
 }
+for (const roles of [['PROJECT_MANAGER'], ['PLATFORM_ADMIN']]) {
+  store.state.user = { roles, projectContexts: [
+    { projectId: 1, inboxEntryVisible: false, enabledBusinessModules: ['DOCUMENT', 'SAFETY_COMMITTEE'], menuCodes: ['MINI_DOCUMENT', 'MINI_SAFETY_COMMITTEE'] },
+    { projectId: 2, inboxEntryVisible: true, enabledBusinessModules: [], menuCodes: [] },
+    { projectId: 3, inboxEntryVisible: false, enabledBusinessModules: [], menuCodes: [] }
+  ] };
+  project.state.currentProjectId = 1;
+  assert.equal(store.canAccessRoot('/pages/todo/index'), false);
+  assert.equal(store.firstAuthorizedPage(), '/pages/safety-committee/index');
+  store.state.user.projectContexts[0].enabledBusinessModules = ['DOCUMENT'];
+  assert.equal(store.firstAuthorizedPage(), '/pages/documents/index');
+  project.state.currentProjectId = 2;
+  assert.equal(store.canAccessRoot('/pages/todo/index'), true);
+  assert.equal(store.firstAuthorizedPage(), '/pages/todo/index');
+  project.state.currentProjectId = 3;
+  assert.equal(store.firstAuthorizedPage(), '/pages/profile/index');
+}
 const firstRefresh = store.loadUser(), latestRefresh = store.loadUser();
 pendingUsers[1]({ id: 2, projectContexts: [] }); await latestRefresh;
 pendingUsers[0]({ id: 1, projectContexts: [] }); await firstRefresh;
@@ -65,6 +82,7 @@ assert.equal(store.state.user, null, '退出后迟到响应不能恢复登录');
 const lifecycle = {}, moduleReads = [], availability = [], navigations = [];
 let interval, watcher, online, userLoads = 0;
 const pageAuth = { state: { user: { projectContexts: [{ projectId: 1, moduleConfigVersion: 1 }] } },
+  requiresInitialPasswordSetup() { return Boolean(this.state.user?.initialPasswordSetupRequired); },
   async loadUser() { userLoads++; return this.state.user; }, canAccessRoot: () => false,
   isProjectModuleEnabled: () => false, firstAuthorizedPage: () => '/pages/todo/index' };
 project.state.currentProjectId = 1;
@@ -102,3 +120,29 @@ moduleReads[5].resolve({ projectId: 2, moduleConfigVersion: 3, enabledBusinessMo
 assert.equal(userLoads, 3, '网络恢复立即重试');
 console.log('项目模块专项通过：按当前项目显示、管理员开关、空菜单无回退、基础入口、关闭时取消请求/上传/下载且不影响其他项目。');
 console.log('前台/网络恢复刷新、项目切换迟到响应、后台暂停、用户信息并发和退出保护通过。');
+
+const summaryReads = [];
+let sessionToken = 'session';
+store.state.user = { projectContexts: [{ projectId: 1, inboxEntryVisible: true }, { projectId: 2, inboxEntryVisible: false }] };
+project.state.currentProjectId = 1;
+const todoModule = await load('stores/todo.ts', {
+  vue: { reactive: value => value }, './auth': { useAuthStore: () => store }, './project': { useProjectStore: () => project },
+  '@/api/request': { getToken: () => sessionToken },
+  '@/api/todo': { getTodoSummary: () => new Promise((resolve, reject) => summaryReads.push({ resolve, reject })) },
+}, { uni });
+const todos = todoModule.useTodoStore();
+const oldSummary = todos.loadSummary();
+project.state.currentProjectId = 2;
+await todos.loadSummary();
+assert.equal(summaryReads.length, 1, '隐藏入口不请求角标');
+summaryReads[0].resolve({ pendingCount: 9, ccCount: 0, unreadNotificationCount: 1, badgeCount: 10 });
+await oldSummary;
+assert.equal(todos.state.summary.badgeCount, 0, '切项目后的迟到结果不能恢复角标');
+project.state.currentProjectId = 1;
+const freshSummary = todos.loadSummary();
+summaryReads[1].resolve({ pendingCount: 3, ccCount: 0, unreadNotificationCount: 1, badgeCount: 4 }); await freshSummary;
+assert.equal(todos.state.summary.badgeCount, 4, '切回显示项目重新加载');
+const loggedOut = todos.loadSummary(); sessionToken = '';
+summaryReads[2].resolve({ badgeCount: 99 }); await loggedOut;
+assert.equal(todos.state.summary.badgeCount, 4, '退出后的迟到结果丢弃');
+console.log('待办入口开关、默认落点、权限回退、角标暂停与迟到响应保护通过。');

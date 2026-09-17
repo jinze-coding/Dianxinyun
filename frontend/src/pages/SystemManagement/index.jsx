@@ -1,3 +1,5 @@
+import DataCorrections, { CorrectionLogDialog } from './DataCorrections';
+import { useNavigationTab } from '../../components/BrowserNavigation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   approveSystemRegistrationApplication,
@@ -75,6 +77,9 @@ import ProjectRoleAssignmentTree from './ProjectRoleAssignmentTree';
 import ApprovalManagementPage from '../ApprovalManagement';
 import './index.css';
 import ProjectModuleSettings from './ProjectModuleSettings';
+import UserImportDialog, { TemporaryPasswordDialog } from './UserImportDialog';
+import UserProjectBatchDialog from './UserProjectBatchDialog';
+import { canSelectBatchUser, changeBatchSelection } from './projectAccessBatch';
 
 const STATUS_TEXT = {
   PENDING: '待审核',
@@ -98,6 +103,7 @@ const TABS = [
   { id: 'roles', label: '角色与权限', code: 'SYSTEM_ROLE', permissions: ['system.user.view', 'system.role.manage'] },
   { id: 'menus', label: '菜单与功能', code: 'SYSTEM_MENU', permissions: ['system.user.view', 'system.menu.manage'] },
   { id: 'wechat', label: '微信绑定', code: 'SYSTEM_WECHAT', permissions: ['system.wechat.manage'] },
+  { id: 'dataCorrections', label: '数据纠错', code: 'SYSTEM_DATA_CORRECTION', permissions: ['system.data.correct'] },
   { id: 'audit', label: '操作日志', code: 'SYSTEM_AUDIT', permissions: ['system.audit.view'] },
 ];
 
@@ -285,13 +291,14 @@ function RoleSelector({
   );
 }
 
-function Pagination({ pageNo, pageSize, total, onPageChange }) {
+function Pagination({ pageNo, pageSize, total, onPageChange, onPageSizeChange, currentCount, disabled = false }) {
   const pageCount = Math.max(1, Math.ceil(Number(total || 0) / pageSize));
   return (
     <div className="system-pagination">
       <span>共 {total || 0} 条 · 第 {pageNo}/{pageCount} 页</span>
-      <button disabled={pageNo <= 1} onClick={() => onPageChange(pageNo - 1)}>上一页</button>
-      <button disabled={pageNo >= pageCount} onClick={() => onPageChange(pageNo + 1)}>下一页</button>
+      {onPageSizeChange && <><label className="system-page-size">每页显示<select aria-label="每页显示条数" value={pageSize} disabled={disabled} onChange={(event) => onPageSizeChange(Number(event.target.value))}>{[10, 20, 50, 100].map((size) => <option key={size} value={size}>{size}</option>)}</select>条</label><span>{disabled ? '加载中…' : `本页 ${currentCount} 条`}</span></>}
+      <button disabled={disabled || pageNo <= 1} onClick={() => onPageChange(pageNo - 1)}>上一页</button>
+      <button disabled={disabled || pageNo >= pageCount} onClick={() => onPageChange(pageNo + 1)}>下一页</button>
     </div>
   );
 }
@@ -987,13 +994,14 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
   const availableTabs = useMemo(() => (isPlatformAdmin(currentUser)
     ? TABS
     : TABS.filter((tab) => tab.id === 'approval' && canViewApproval)), [canViewApproval, currentUser]);
-  const [activeTab, setActiveTab] = useState(availableTabs[0]?.id || '');
+  const [activeTab, setActiveTab] = useNavigationTab('systemTab', availableTabs[0]?.id || '', availableTabs.map((tab) => tab.id));
   const [keyword, setKeyword] = useState('');
   const [status, setStatus] = useState('');
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [pageNo, setPageNo] = useState(1);
-  const pageSize = 20;
+  const [userPageSize, setUserPageSize] = useState(20);
+  const pageSize = activeTab === 'users' ? userPageSize : 20;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [roles, setRoles] = useState([]);
@@ -1005,8 +1013,17 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
   const [rolePermissionDialog, setRolePermissionDialog] = useState(null);
   const [reviewing, setReviewing] = useState(null);
   const [passwordResetUser, setPasswordResetUser] = useState(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [temporaryPasswordUser, setTemporaryPasswordUser] = useState(null);
   const [userProjectAccessDialog, setUserProjectAccessDialog] = useState(null);
+  const [selectedUsers, setSelectedUsers] = useState([]);
+  const [batchAccessOpen, setBatchAccessOpen] = useState(false);
+  const [batchSelectionError, setBatchSelectionError] = useState('');
+  const [userFilters, setUserFilters] = useState({ keyword: '', projectId: '', roleId: '', accessStatus: '', status: '' });
+  const selectedUserIds = useMemo(() => new Set(selectedUsers.map((user) => Number(user.id))), [selectedUsers]);
   const requestSequenceRef = useRef(0);
+  const userTableRef = useRef(null);
+  const userRows = loading || error ? [] : rows;
   const projectRoleOptions = useMemo(() => {
     return roles.filter((role) => isProjectRole(role) && isEnabledValue(role.enabled ?? 1));
   }, [roles]);
@@ -1040,7 +1057,7 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
   const loadData = useCallback(async (overrides = {}) => {
     if (!activeTab) return;
     const requestSequence = ++requestSequenceRef.current;
-    if (['approval', 'projectModules'].includes(activeTab)) {
+    if (['approval', 'projectModules', 'dataCorrections'].includes(activeTab)) {
       setRows([]);
       setTotal(0);
       setError('');
@@ -1060,7 +1077,11 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
         pageSize,
       };
       if (activeTab === 'registration') res = await getSystemRegistrationApplications(params);
-      if (activeTab === 'users') res = await getSystemUsers(params);
+      if (activeTab === 'users') res = await getSystemUsers({ ...params,
+        keyword: userFilters.keyword || undefined, projectId: userFilters.projectId || undefined,
+        roleId: userFilters.roleId || undefined, accessStatus: userFilters.accessStatus || undefined,
+        status: userFilters.status === '' ? undefined : userFilters.status,
+      });
       if (activeTab === 'roles') {
         const roleList = await loadRolesAndPermissions();
         res = { code: 200, data: roleList };
@@ -1106,17 +1127,53 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
     } finally {
       if (requestSequence === requestSequenceRef.current) setLoading(false);
     }
-  }, [activeTab, keyword, loadRolesAndPermissions, pageNo, pageSize, status]);
+  }, [activeTab, keyword, loadRolesAndPermissions, pageNo, pageSize, status, userFilters]);
 
   useEffect(() => {
     setKeyword('');
+    setUserFilters((current) => current.keyword ? { ...current, keyword: '' } : current);
     setStatus('');
     setPageNo(1);
+    setSelectedUsers([]);
+    setBatchSelectionError('');
   }, [activeTab]);
 
   useEffect(() => {
+    userTableRef.current?.scrollTo({ top: 0, left: 0 });
     loadData();
-  }, [activeTab, pageNo, pageSize]);
+  }, [activeTab, pageNo, pageSize, userFilters]);
+
+  useEffect(() => {
+    if (activeTab !== 'users') return;
+    let active = true;
+    loadRolesAndPermissions().catch((failure) => { if (active) setBatchSelectionError(failure.message || '项目角色加载失败'); });
+    return () => { active = false; };
+  }, [activeTab, loadRolesAndPermissions]);
+
+  const changeUserFilter = (name, value) => {
+    requestSequenceRef.current += 1;
+    setSelectedUsers([]); setBatchSelectionError(''); setPageNo(1);
+    setUserFilters((current) => ({ ...current, [name]: value, ...(name === 'projectId' ? { roleId: '', accessStatus: '' } : {}) }));
+  };
+
+  const selectBatchUsers = (candidates, checked) => {
+    const next = changeBatchSelection(selectedUsers, candidates, checked);
+    setSelectedUsers(next.users); setBatchSelectionError(next.error);
+  };
+
+  const changeUserPageSize = (size) => {
+    if (![10, 20, 50, 100].includes(size) || size === userPageSize) return;
+    requestSequenceRef.current += 1;
+    setPageNo(1);
+    setUserPageSize(size);
+  };
+
+  const openBatchAccess = async () => {
+    try {
+      await loadRolesAndPermissions();
+      setBatchAccessOpen(true); setBatchSelectionError('');
+    } catch (failure) { setBatchSelectionError(failure.message || '项目角色加载失败'); }
+  };
 
   const selectTab = (tabId) => {
     if (tabId === activeTab) return;
@@ -1373,6 +1430,7 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
   };
 
   const runSearch = () => {
+    if (activeTab === 'users') { changeUserFilter('keyword', keyword.trim()); return; }
     if (pageNo !== 1) setPageNo(1);
     else loadData({ pageNo: 1 });
   };
@@ -1413,23 +1471,33 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
   const renderUsers = () => (
     <>
       <PageBar title="用户管理" description="统一查看用户已加入的项目和项目角色，并可直接分配项目与角色；平台全局身份不在此处配置。">
-        <SearchBar value={keyword} onChange={setKeyword} placeholder="姓名、账号或手机号" onSearch={runSearch} />
+        {isPlatformAdmin(currentUser) && <button className="primary" onClick={() => setImportOpen(true)}>批量导入</button>}
+        <SearchBar value={keyword} onChange={(value) => { setKeyword(value); setSelectedUsers([]); }} placeholder="姓名、账号或手机号" onSearch={runSearch} />
       </PageBar>
-      <div className="system-table-wrap"><table><thead><tr><th>用户</th><th>联系方式</th><th>已分配项目与角色</th><th>登录方式</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead>
-        <tbody>{rows.map((user) => {
+      <div className="system-batch-toolbar">
+        <label>项目<select aria-label="筛选项目" value={userFilters.projectId} onChange={(event) => changeUserFilter('projectId', event.target.value)}><option value="">全部项目</option>{projectList.map((project) => <option key={project.id} value={project.id}>{project.projectName || project.name}</option>)}</select></label>
+        <label>角色<select aria-label="筛选项目角色" disabled={!userFilters.projectId} value={userFilters.roleId} onChange={(event) => changeUserFilter('roleId', event.target.value)}><option value="">全部角色</option>{roles.filter(isProjectRole).map((role) => <option key={role.id} value={role.id}>{role.roleName || role.name}{isEnabledValue(role.enabled ?? 1) ? '' : '（停用）'}</option>)}</select></label>
+        <label>项目访问<select aria-label="筛选项目访问" disabled={!userFilters.projectId} value={userFilters.accessStatus} onChange={(event) => changeUserFilter('accessStatus', event.target.value)}><option value="">全部</option><option value="ACTIVE">启用</option><option value="DISABLED">暂停</option></select></label>
+        <label>账号<select aria-label="筛选账号状态" value={userFilters.status} onChange={(event) => changeUserFilter('status', event.target.value)}><option value="">全部</option><option value="1">启用</option><option value="0">停用</option></select></label>
+        {isPlatformAdmin(currentUser) && <><span className="batch-selection-count">已选 {selectedUsers.length} / 200 人</span><button disabled={!selectedUsers.length} onClick={() => setSelectedUsers([])}>清空选择</button><button className="primary" disabled={!selectedUsers.length} onClick={openBatchAccess}>批量更改项目权限</button></>}
+      </div>
+      {batchSelectionError && <div className="system-form-error" role="alert">{batchSelectionError}</div>}
+      <div className="system-table-wrap system-users-table" ref={userTableRef} aria-label="用户数据列表" aria-busy={loading}><table><thead><tr>{isPlatformAdmin(currentUser) && <th><input className="system-batch-check" type="checkbox" aria-label="选择本页用户" disabled={!userRows.some(canSelectBatchUser)} checked={userRows.some(canSelectBatchUser) && userRows.filter(canSelectBatchUser).every((user) => selectedUserIds.has(Number(user.id)))} ref={(element) => { if (element) element.indeterminate = userRows.filter(canSelectBatchUser).some((user) => selectedUserIds.has(Number(user.id))) && !userRows.filter(canSelectBatchUser).every((user) => selectedUserIds.has(Number(user.id))); }} onChange={(event) => selectBatchUsers(userRows, event.target.checked)} /></th>}<th>用户</th><th>联系方式</th><th>已分配项目与角色</th><th>登录方式</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead>
+        <tbody>{loading || error || !userRows.length ? <tr className="system-table-state"><td colSpan={isPlatformAdmin(currentUser) ? 8 : 7}>{loading ? <Loading /> : error ? <ErrorState text={error} onRetry={loadData} /> : <Empty />}</td></tr> : userRows.map((user) => {
           const assignments = Array.isArray(user.projectRoles) ? user.projectRoles : [];
           const isCurrentAccount = Number(getId(user)) === Number(getId(currentUser));
           return <tr key={getId(user)}>
+            {isPlatformAdmin(currentUser) && <td><input className="system-batch-check" type="checkbox" aria-label={`选择 ${user.realName || user.username}`} title={canSelectBatchUser(user) ? '加入批量操作' : '停用账号及平台管理员不参与批量操作'} disabled={!canSelectBatchUser(user)} checked={selectedUserIds.has(Number(user.id))} onChange={(event) => selectBatchUsers([user], event.target.checked)} /></td>}
             <td><strong>{user.realName || '-'}</strong><small>{user.username}</small></td><td>{user.phone || '-'}<small>{user.email || '-'}</small></td>
             <td className="system-user-project-cell"><div className="system-user-project-summary">
               {assignments.slice(0, 2).map((assignment) => <span key={assignment.projectId} className={assignment.accessStatus === 'DISABLED' ? 'paused' : ''}>{projectAssignmentName(assignment, projectList)} · {projectAssignmentRoleNames(assignment).join('、') || '未分配角色'}{assignment.accessStatus === 'DISABLED' ? '（暂停）' : ''}</span>)}
               {assignments.length > 2 && <span>+{assignments.length - 2}</span>}
               <button type="button" onClick={() => openUserProjectAccess(user)}>{assignments.length ? '查看并调整' : '尚未分配，立即设置'}</button>
             </div></td>
-            <td>{!isEnabledValue(user.passwordLoginEnabled) ? '仅微信' : user.wechatBound ? '密码 + 微信' : '账号密码'}</td><td><StatusTag status={user.status} /></td><td>{formatDate(user.lastLoginAt || user.createTime)}</td>
+            <td>{!isEnabledValue(user.passwordLoginEnabled) ? '仅微信' : user.wechatBound ? '密码 + 微信' : '账号密码'}{user.mustChangePassword && <small>待首次改密 · {formatDate(user.temporaryPasswordExpiresAt)} 到期</small>}</td><td><StatusTag status={user.status} /></td><td>{formatDate(user.lastLoginAt || user.createTime)}</td>
             <td><div className="system-row-actions">
               {hasPermission(currentUser, 'system.user.manage') && <button className="primary" onClick={() => openUserProjectAccess(user)}>分配项目与角色</button>}
-              {hasPermission(currentUser, 'system.user.reset_password') && <button onClick={() => setPasswordResetUser(user)}>重置密码</button>}
+              {user.mustChangePassword ? isPlatformAdmin(currentUser) && <button disabled={!isEnabledValue(user.status)} onClick={() => setTemporaryPasswordUser(user)}>临时密码</button> : hasPermission(currentUser, 'system.user.reset_password') && <button onClick={() => setPasswordResetUser(user)}>重置密码</button>}
               {hasPermission(currentUser, 'system.user.status') && <button className={isEnabledValue(user.status) ? 'danger' : ''} onClick={() => toggleUserStatus(user)}>{isEnabledValue(user.status) ? '停用' : '启用'}</button>}
               {isPlatformAdmin(currentUser) && <button className="danger" disabled={isCurrentAccount} title={isCurrentAccount ? '不能删除当前登录账号' : '永久删除用户'} onClick={() => removeUser(user)}>删除</button>}
               {!hasPermission(currentUser, 'system.user.manage', 'system.user.reset_password', 'system.user.status') && <span className="system-hint">只读</span>}
@@ -1511,22 +1579,24 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
     </>
   );
 
+  const [correctionLogId, setCorrectionLogId] = useState(null);
   const renderAudit = () => (
     <>
       <PageBar title="操作日志" description="查看账号、权限、项目授权及微信绑定等关键管理操作。"><SearchBar value={keyword} onChange={setKeyword} placeholder="操作人、对象或动作" onSearch={runSearch} /></PageBar>
       <div className="system-table-wrap"><table><thead><tr><th>时间</th><th>操作人</th><th>模块</th><th>动作</th><th>对象</th><th>结果</th><th>说明</th></tr></thead>
-        <tbody>{rows.map((log, index) => <tr key={getId(log) || index}><td>{formatDate(log.createdAt || log.operationTime || log.createTime)}</td><td>{log.operatorName || log.operatorUsername || log.username || '-'}</td><td>{log.moduleName || log.module || log.businessType || '-'}</td><td>{log.actionName || log.action || log.operationType || '-'}</td><td>{log.targetName || log.targetType || (log.businessId ? `#${log.businessId}` : '-')}</td><td><StatusTag status={log.result || log.status || 'SUCCESS'} /></td><td>{log.description || log.detail || log.operationDesc || '-'}</td></tr>)}</tbody></table></div>
+        <tbody>{rows.map((log, index) => <tr key={getId(log) || index}><td>{formatDate(log.createdAt || log.operationTime || log.createTime)}</td><td>{log.operatorName || log.operatorUsername || log.username || '-'}</td><td>{log.moduleName || log.module || log.businessType || '-'}</td><td>{log.actionName || log.action || log.operationType || '-'}</td><td>{log.targetName || log.targetType || (log.businessId ? `#${log.businessId}` : '-')}</td><td><StatusTag status={log.result || log.status || 'SUCCESS'} /></td><td>{log.description || log.detail || log.operationDesc || '-'}{log.operationType === 'DATA_CORRECTION' && <button onClick={() => setCorrectionLogId(log.businessId)}>纠错详情</button>}</td></tr>)}</tbody></table></div>
     </>
   );
 
   const renderContent = () => {
+    if (activeTab === 'dataCorrections') return <DataCorrections currentUser={currentUser} projectList={projectList} initialProjectId={currentProject} ModalFrame={ModalFrame} Pagination={Pagination} />;
     if (activeTab === 'projectModules') return <ProjectModuleSettings ModalFrame={ModalFrame} PageBar={PageBar} Pagination={Pagination} />;
     if (activeTab === 'approval') return <ApprovalManagementPage currentUser={currentUser} initialProjectId={currentProject} projectList={projectList} />;
+    if (activeTab === 'users') return <>{renderUsers()}<Pagination pageNo={pageNo} pageSize={pageSize} total={total} currentCount={userRows.length} disabled={loading} onPageChange={setPageNo} onPageSizeChange={changeUserPageSize} /></>;
     if (loading) return <Loading />;
     if (error) return <ErrorState text={error} onRetry={loadData} />;
     let content;
     if (activeTab === 'registration') content = renderRegistration();
-    else if (activeTab === 'users') content = renderUsers();
     else if (activeTab === 'roles') content = renderRoles();
     else if (activeTab === 'menus') content = renderMenus();
     else if (activeTab === 'wechat') content = renderWechat();
@@ -1537,12 +1607,18 @@ export default function SystemManagementPage({ currentUser, currentProject, proj
 
   return (
     <div className="system-management">
+      {correctionLogId && <CorrectionLogDialog id={correctionLogId} ModalFrame={ModalFrame} onClose={() => setCorrectionLogId(null)} />}
       <aside className="system-sidebar">
         <nav>{availableTabs.map((tab) => <button key={tab.id} className={activeTab === tab.id ? 'active' : ''} onClick={() => selectTab(tab.id)}><span>{tab.label}</span><small>{tab.code}</small></button>)}</nav>
         <button className="system-back-button" onClick={onBack}>← 返回业务工作台</button>
       </aside>
-      <section className="system-content">{availableTabs.length ? renderContent() : <ErrorState text="当前账号没有系统管理权限" onRetry={onBack} />}</section>
+      <section className={`system-content${activeTab === 'users' ? ' system-users-content' : ''}`}>{availableTabs.length ? renderContent() : <ErrorState text="当前账号没有系统管理权限" onRetry={onBack} />}</section>
       {reviewing && <ReviewDialog application={reviewing} roles={roles} permissions={permissions} projectList={projectList} onClose={() => setReviewing(null)} onApproved={async () => { setReviewing(null); await loadData(); }} />}
+      {importOpen && isPlatformAdmin(currentUser) && <UserImportDialog ModalFrame={ModalFrame} Pagination={Pagination} onClose={() => { setImportOpen(false); void loadData(); }} />}
+      {batchAccessOpen && isPlatformAdmin(currentUser) && <UserProjectBatchDialog users={selectedUsers} roles={projectRoleOptions} projects={projectList} initialProjectId={userFilters.projectId} ModalFrame={ModalFrame}
+        onClose={() => setBatchAccessOpen(false)} onRemoveUser={(id) => setSelectedUsers((current) => current.filter((user) => Number(user.id) !== Number(id)))}
+        onSaved={async () => { setSelectedUsers([]); await loadData(); }} />}
+      {temporaryPasswordUser && isPlatformAdmin(currentUser) && <TemporaryPasswordDialog user={temporaryPasswordUser} ModalFrame={ModalFrame} onClose={() => { setTemporaryPasswordUser(null); void loadData(); }} />}
       {passwordResetUser && <PasswordResetDialog user={passwordResetUser} onClose={() => setPasswordResetUser(null)} onSubmit={(newPassword) => resetPassword(passwordResetUser, newPassword)} />}
       {roleDefinitionDialog !== undefined && <RoleDefinitionDialog role={roleDefinitionDialog} roles={roles} onClose={() => setRoleDefinitionDialog(undefined)} onSave={saveRoleDefinition} />}
       {roleMenuDialog && <MenuAssignmentDialog role={roleMenuDialog} menus={menus} permissions={roleAssignablePermissions(roleMenuDialog, permissions)} selectedMenuIds={(roleMenuDialog.menuIds || []).filter((id) => id !== undefined)} businessModuleCodes={deriveRoleBusinessModuleCodes(roleMenuDialog, menus)} selectedPermissionIds={rolePermissionIdsFor(roleMenuDialog)} onClose={() => setRoleMenuDialog(null)} onSave={(values) => saveRoleMenus(roleMenuDialog, values)} />}

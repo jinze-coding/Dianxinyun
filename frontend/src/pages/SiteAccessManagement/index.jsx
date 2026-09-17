@@ -1,3 +1,5 @@
+import CorrectionNotice from '../../components/CorrectionNotice';
+import { useNavigationTab } from '../../components/BrowserNavigation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createSiteVisitInvitation,
@@ -281,7 +283,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
   const restoreQueryRef = useRef(null);
   const restoreScrollRef = useRef(restoredState?.scrollTop || 0);
   const pageRef = useRef(null);
-  const [activeSection, setActiveSection] = useState('INVITATION');
+  const [activeSection, setActiveSection] = useNavigationTab('siteSection', 'INVITATION', ['INVITATION', 'GUARD']);
   const today = useMemo(() => formatLocalDate(new Date()), []);
   const [periodMode, setPeriodMode] = useState(restoredState?.periodMode || 'DAY');
   const [anchorDate, setAnchorDate] = useState(restoredState?.anchorDate || today);
@@ -302,7 +304,9 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [detail, setDetail] = useState(null);
-  const [meetingTab, setMeetingTab] = useState(restoredState?.detailTab || 'checkin');
+  const [meetingId, setMeetingId] = useNavigationTab('meetingId', '', (value) => value === '' || /^[1-9]\d{0,14}$/.test(value));
+  const [restoredMeetingId] = useState(meetingId);
+  const [meetingTab, setMeetingTab] = useNavigationTab('meetingTab', restoredState?.detailTab || 'checkin', ['registrations', 'checkin', 'materials', 'activity']);
   const listScrollRef = useRef(restoredState?.scrollTop || 0);
   const [qrCode, setQrCode] = useState(null);
   const [exporting, setExporting] = useState(false);
@@ -476,8 +480,10 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
         pageRef.current?.scrollTo({ top: 0 });
       }
       setDetail(value);
+      setMeetingId(value.inviteType === 'MEETING' ? String(value.id) : '');
     } catch (detailError) {
       if (invitationDetailRequestGuardRef.current.isCurrent(requestTicket, activeProjectIdRef.current)) {
+        if (restoring) setMeetingId('');
         setError(detailError.message || '外访详情加载失败');
       }
     }
@@ -486,6 +492,8 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
   useEffect(() => {
     if (initialState?.projectId === Number(projectId) && initialState?.filters?.detailId) {
       void openDetail(initialState.filters.detailId, initialState.filters.detailTab || 'checkin', true);
+    } else if (restoredMeetingId) {
+      void openDetail(Number(restoredMeetingId), meetingTab, true);
     }
   }, [initialState, projectId]);
 
@@ -628,7 +636,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
       await voidSiteVisitInvitation(item.id, reason.trim());
       setNotice('邀请已作废');
       await load(pageNo);
-      if (detail?.id === item.id) setDetail(null);
+      if (detail?.id === item.id) { setDetail(null); setMeetingId(''); }
     } catch (voidError) {
       setError(voidError.message || '作废失败');
     }
@@ -639,7 +647,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
     try {
       const deleted = await confirmAdministrativeDeletion('SITE_ACCESS_INVITATION', item.id);
       if (!deleted) return;
-      if (detail?.id === item.id) setDetail(null);
+      if (detail?.id === item.id) { setDetail(null); setMeetingId(''); }
       setNotice('外访邀请及关联人员信息已永久删除');
       const targetPage = records.length === 1 && pageNo > 1 ? pageNo - 1 : pageNo;
       await load(targetPage);
@@ -824,10 +832,10 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
 
       <nav className="site-access-section-tabs" aria-label="场内管理分类">
         <button type="button" className={activeSection === 'INVITATION' ? 'active' : ''} onClick={() => {
-          setActiveSection('INVITATION'); setDetail(null); setEditing(null); setQrCode(null); setExportFilters(null);
+          setActiveSection('INVITATION'); setDetail(null); setMeetingId(''); setEditing(null); setQrCode(null); setExportFilters(null);
         }}>预约邀请</button>
         <button type="button" className={activeSection === 'GUARD' ? 'active' : ''} onClick={() => {
-          setActiveSection('GUARD'); setDetail(null); setEditing(null); setQrCode(null); setExportFilters(null);
+          setActiveSection('GUARD'); setDetail(null); setMeetingId(''); setEditing(null); setQrCode(null); setExportFilters(null);
         }}>门卫登记</button>
       </nav>
 
@@ -922,7 +930,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
       {detail?.inviteType === 'MEETING' && <MeetingDetailPage invitation={detail} projectId={projectId} currentUser={currentUser}
         canManage={canManage} canExport={canExport} canDelete={isPlatformAdmin(currentUser)} active={isInvitationActive(detail, clockNow)}
         statusLabel={STATUS_LABELS[effectiveInvitationStatus(detail, clockNow)]} tab={meetingTab} onTabChange={setMeetingTab}
-        onBack={() => { setDetail(null); window.requestAnimationFrame(() => pageRef.current?.scrollTo({ top: listScrollRef.current })); }}
+        onBack={() => { setDetail(null); setMeetingId(''); window.requestAnimationFrame(() => pageRef.current?.scrollTo({ top: listScrollRef.current })); }}
         onQr={(checkin) => showQr(detail.id, checkin)} onEdit={() => openEdit(detail.id)} onScreen={() => openMeetingScreen(detail.id)}
         onChanged={async () => { await load(pageNo); await openDetail(detail.id, meetingTab); }} />}
       {detail?.inviteType === 'MEETING' && error && <div className="site-access-error" role="alert">{error}</div>}
@@ -1043,7 +1051,7 @@ export default function SiteAccessManagementPage({ projectId, theme: T, currentU
       </Modal>}
 
       {detail && detail.inviteType !== 'MEETING' && <div className="site-access-drawer-mask" onMouseDown={() => setDetail(null)}><aside className="site-access-drawer site-access-visitor-drawer" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="site-access-modal-head"><div><strong>{detail.inviteNo}</strong><span className={`site-access-invite-type ${String(detail.inviteType || 'SINGLE').toLowerCase()}`}>{detail.inviteType === 'MEETING' ? '会议邀请' : '单次预约'}</span><span className={`site-access-status ${String(effectiveInvitationStatus(detail, clockNow) || '').toLowerCase()}`}>{STATUS_LABELS[effectiveInvitationStatus(detail, clockNow)] || effectiveInvitationStatus(detail, clockNow)}</span></div><button type="button" onClick={() => setDetail(null)}>×</button></div>
+        <div className="site-access-modal-head"><div><CorrectionNotice record={detail} /><strong>{detail.inviteNo}</strong><span className={`site-access-invite-type ${String(detail.inviteType || 'SINGLE').toLowerCase()}`}>{detail.inviteType === 'MEETING' ? '会议邀请' : '单次预约'}</span><span className={`site-access-status ${String(effectiveInvitationStatus(detail, clockNow) || '').toLowerCase()}`}>{STATUS_LABELS[effectiveInvitationStatus(detail, clockNow)] || effectiveInvitationStatus(detail, clockNow)}</span></div><button type="button" onClick={() => setDetail(null)}>×</button></div>
         <div className="site-access-detail-grid">
           {(detail.inviteType === 'MEETING' ? [
             ['项目', detail.projectName], ['会议时间', `${formatDateTime(detail.visitStartTime)} 至 ${formatDateTime(detail.visitEndTime)}`],

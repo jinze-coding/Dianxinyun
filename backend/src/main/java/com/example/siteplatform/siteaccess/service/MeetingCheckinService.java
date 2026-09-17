@@ -82,6 +82,10 @@ import java.util.stream.Collectors;
 
 @Service
 public class MeetingCheckinService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.example.siteplatform.system.correction.CorrectionNoticeService correctionNotices;
+    private String corrected(String text,String type,Long id) { return correctionNotices==null?(text==null?"":text):correctionNotices.append(text,type,id); }
+
     public static final String QR_ENABLED = "ENABLED";
     public static final String QR_DISABLED = "DISABLED";
     public static final String QR_ROTATED = "ROTATED";
@@ -1208,7 +1212,7 @@ public class MeetingCheckinService {
 
             String[] headers = {"项目", "会议邀请编号", "会议主题", "登记来源", "登记编号", "单位", "人员类型",
                     "姓名", "手机号码", "预约时间", "签到状态", "签到时间", "签到方式", "定位结果", "距离(米)",
-                    "精度(米)", "出行方式", "车牌号", "登记状态"};
+                    "精度(米)", "出行方式", "车牌号", "登记状态", "管理员纠错"};
             Sheet detail = workbook.createSheet("参会人员明细");
             detail.createFreezePane(0, 1);
             detail.setAutoFilter(new org.apache.poi.ss.util.CellRangeAddress(0, 0, 0, headers.length - 1));
@@ -1231,7 +1235,7 @@ public class MeetingCheckinService {
                         attendee.getDistanceMeters() == null ? "" : attendee.getDistanceMeters().toString(),
                         attendee.getAccuracyMeters() == null ? "" : attendee.getAccuracyMeters().toString(),
                         VisitorSubmissionNormalizer.TRAVEL_DRIVING.equals(attendee.getTravelMode()) ? "驾车" : "非驾车",
-                        text(attendee.getVehiclePlate()), MeetingVisitService.STATUS_REGISTERED.equals(attendee.getRegistrationStatus()) ? "有效" : "已作废");
+                        text(attendee.getVehiclePlate()), MeetingVisitService.STATUS_REGISTERED.equals(attendee.getRegistrationStatus()) ? "有效" : "已作废",corrected(corrected("","MEETING",invitation.getId()),"MEETING_REGISTRATION",attendee.getRegistrationId()));
                 for (int i = 0; i < cells.size(); i++) row.createCell(i).setCellValue(safeExcelText(cells.get(i)));
             }
             int[] widths = {24, 22, 28, 12, 22, 24, 12, 14, 18, 18, 12, 18, 14, 14, 12, 12, 12, 16, 12};

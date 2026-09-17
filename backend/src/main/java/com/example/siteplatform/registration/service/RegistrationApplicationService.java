@@ -168,6 +168,9 @@ public class RegistrationApplicationService {
         // 新账号的唯一登录账号固定为手机号码。即使旧客户端省略 username，
         // 审批通过后创建的 sys_user 也始终使用同一手机号作为登录名。
         String username = phone;
+        // Serialize registration and administrator import identity claims on the protected role row.
+        roleMapper.selectPlatformAdministratorForUpdate();
+        if (userMapper.selectOccupiedIdentityForUpdate(phone) != null) throw conflict("账号或手机号已被占用，请直接登录或联系管理员");
         if (userMapper.selectCount(new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username)) > 0) {
             throw conflict("账号已存在，请直接登录");
         }
@@ -270,6 +273,7 @@ public class RegistrationApplicationService {
 
     @Transactional
     public RegistrationApplicationVO approve(Long id, RegistrationReviewRequest request, SysUser reviewer) {
+        roleMapper.selectPlatformAdministratorForUpdate();
         RegistrationApplication application = requirePending(id);
         if (request == null || !StringUtils.hasText(request.getReviewComment())) {
             throw new BusinessException("审批意见不能为空");

@@ -35,7 +35,7 @@ const canManage = computed(() => projectId.value > 0
   && authStore.hasProjectPermission(projectId.value, 'quality.manage'));
 const filters = computed(() => [
   { value: 'ALL', label: '全部' },
-  ...(canManage.value ? [{ value: 'DRAFT', label: '共享草稿' }] : []),
+  ...(canManage.value ? [{ value: 'DRAFT', label: '质量问题上传' }] : []),
   { value: 'SUBMITTED', label: '已提交' }
 ]);
 const hasMore = computed(() => records.value.length < total.value);
@@ -122,7 +122,7 @@ function openRecord(item: QualityWeeklyInspection) {
 }
 
 function statusLabel(item: QualityWeeklyInspection) {
-  return item.status === 'DRAFT' ? '共享草稿' : item.lateSubmission ? '已提交 · 补录' : '已提交';
+  return item.status === 'DRAFT' ? '整理中' : item.lateSubmission ? '已提交 · 补录' : '已提交';
 }
 
 function formatTime(value?: string) {
@@ -140,16 +140,17 @@ function goBack() {
     <AppNavBar title="周检记录" @back="goBack" />
     <scroll-view class="workspace-scroll" scroll-y enable-flex lower-threshold="80" :style="scrollStyle" @scrolltolower="loadMore">
       <view class="child-content">
-        <view class="context-card"><text>{{ currentProject?.projectName || currentProject?.shortName || '当前施工区域' }}</text><text>周检共享草稿与已提交记录</text></view>
+        <view class="context-card"><text>{{ currentProject?.projectName || currentProject?.shortName || '当前施工区域' }}</text><text>选择周次上传质量问题，或查看已结束记录</text></view>
         <WorkspaceSegmentControl :model-value="activeFilter" :options="filters" :accent="WORKSPACE_THEME.accent" :tint="WORKSPACE_THEME.tint" @update:model-value="setFilter" />
         <view class="search-box"><text class="search-icon"></text><input v-model="keyword" class="search-input" confirm-type="search" placeholder="搜索周检编号、结论或编辑人" placeholder-class="search-placeholder" @confirm="applySearch" /><button @tap="applySearch">搜索</button></view>
         <view v-if="loading && !records.length" class="state-panel"><text class="state-title">正在加载周检记录</text></view>
         <view v-else-if="errorMessage" class="state-panel"><text class="state-title">周检记录加载失败</text><text class="state-desc">{{ errorMessage }}</text><button class="retry-button" @tap="refresh">重新加载</button></view>
         <view v-else class="record-card">
-          <button v-for="item in records" :key="item.id" class="record-row" @tap="openRecord(item)">
-            <view><text>{{ item.weekStart }} 至 {{ item.weekEnd }}</text><text>{{ item.status === 'DRAFT' ? `共享整理中 · ${item.lastEditedByName || item.createdByName || '项目成员'}` : `${item.submittedIssueCount} 个问题 · ${item.submittedByName || '已提交'}` }}</text><text>{{ item.status === 'DRAFT' ? `最近保存 ${formatTime(item.updateTime)}` : `提交时间 ${formatTime(item.submittedTime)}` }}</text></view>
-            <WorkspaceStatusPill :label="statusLabel(item)" :tone="item.status === 'DRAFT' ? 'amber' : 'green'" /><text class="row-arrow"></text>
-          </button>
+          <view v-for="item in records" :key="item.id" class="record-row">
+            <button class="weekly-record-link" @tap="openRecord(item)"><view class="record-copy"><text>{{ item.weekStart }} 至 {{ item.weekEnd }}</text><text>{{ item.status === 'DRAFT' ? `问题整理中 · ${item.lastEditedByName || item.createdByName || '项目成员'}` : `${item.submittedIssueCount} 个问题 · ${item.submittedByName || '已提交'}` }}</text><text>{{ item.status === 'DRAFT' ? `最近保存 ${formatTime(item.updateTime)}` : `提交时间 ${formatTime(item.submittedTime)}` }}</text></view></button>
+            <button v-if="item.status === 'DRAFT' && canManage" class="weekly-upload-action" :aria-label="`${item.weekStart} 至 ${item.weekEnd} 质量问题上传`" @tap="openRecord(item)"><text class="weekly-upload-plus" aria-hidden="true">＋</text><text>质量问题上传</text></button>
+            <template v-else><WorkspaceStatusPill :label="statusLabel(item)" :tone="item.status === 'DRAFT' ? 'amber' : 'green'" /><button class="weekly-view-action" aria-label="查看周检详情" @tap="openRecord(item)"><text class="row-arrow"></text></button></template>
+          </view>
           <view v-if="!records.length" class="empty-line">{{ submittedKeyword ? '没有匹配的周检记录' : '当前施工区域暂无周检记录' }}</view>
           <view v-else class="page-tail">{{ loadingMore ? '正在加载更多' : hasMore ? '继续上拉加载更多' : `共 ${total} 条周检记录` }}</view>
         </view>
@@ -159,6 +160,7 @@ function goBack() {
 </template>
 
 <style scoped src="../../styles/workspace-page.css"></style>
+<style scoped src="./weekly-record-actions.css"></style>
 <style scoped>
 .child-content { display: flex; min-height: 100%; flex-direction: column; gap: 16rpx; padding: 20rpx 24rpx calc(34rpx + env(safe-area-inset-bottom)); }
 .context-card { padding: 17rpx 20rpx; border-radius: 14rpx; background: var(--page-tint); }
@@ -170,10 +172,10 @@ function goBack() {
 .search-box button::after,.record-row::after { border: 0; }
 .record-card { overflow: hidden; border-radius: 16rpx; background: #fff; box-shadow: var(--workspace-shadow); }
 .record-row { box-sizing: border-box; display: flex; width: 100%; min-height: 120rpx; align-items: center; gap: 13rpx; padding: 18rpx 20rpx; border-bottom: 1rpx solid var(--workspace-divider); background: #fff; text-align: left; }
-.record-row > view { min-width: 0; flex: 1; }
-.record-row > view text { display: block; color: var(--workspace-text-muted); font-size: 18rpx; line-height: 1.4; }
-.record-row > view text:first-child { color: var(--workspace-text); font-size: 24rpx; font-weight: 760; }
-.record-row > view text + text { margin-top: 5rpx; }
+.record-copy { min-width: 0; flex: 1; }
+.record-copy text { display: block; color: var(--workspace-text-muted); font-size: 18rpx; line-height: 1.4; }
+.record-copy text:first-child { color: var(--workspace-text); font-size: 24rpx; font-weight: 760; }
+.record-copy text + text { margin-top: 5rpx; }
 .record-row :deep(.status-pill) { flex-shrink: 0; }
 .empty-line,.page-tail { padding: 42rpx 20rpx; color: var(--workspace-text-muted); font-size: 20rpx; text-align: center; }
 .page-tail { padding: 22rpx 20rpx; }

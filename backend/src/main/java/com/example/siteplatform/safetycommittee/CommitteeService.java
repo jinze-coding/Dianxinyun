@@ -1,6 +1,7 @@
 package com.example.siteplatform.safetycommittee;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.siteplatform.auth.entity.SysUser;
@@ -33,6 +34,10 @@ public class CommitteeService {
     public static final String PREVIEW = "COMMITTEE_INSPECTION_PREVIEW";
     public static final List<String> CATEGORIES = List.of("施工安全管理", "基坑工程", "模版工程及支持体系", "脚手架工程",
             "起重机械及吊装工程", "高处作业", "施工临时用电", "有限空间作业", "拆除工程", "消防管理", "其他");
+    // Only the server's fixed category directory contributes SQL; unknown historical values sort last.
+    private static final String CATEGORY_ORDER = "CASE category " + java.util.stream.IntStream.range(0,CATEGORIES.size())
+            .mapToObj(i->"WHEN '"+CATEGORIES.get(i).replace("'","''")+"' THEN "+i)
+            .collect(java.util.stream.Collectors.joining(" ")) + " ELSE " + CATEGORIES.size() + " END";
     private final CommitteeRecordMapper records;
     private final CommitteeAttachmentMapper attachments;
     private final CommitteeLogMapper logs;
@@ -66,8 +71,12 @@ public class CommitteeService {
         access(projectId, user, VIEW);
         if (category != null && !category.isBlank()) validateMetadata(category, null);
         validateDateRange(startDate, endDate);
-        var page = records.selectPage(new Page<>(Math.max(1, pageNo), 20), recordQuery(projectId, category, startDate, endDate));
-        var newest = records.selectList(recordQuery(projectId, category, startDate, endDate).last("LIMIT 1"));
+        var listQuery=recordQuery(projectId,category,startDate,endDate);
+        if(category==null || category.isBlank()) listQuery.orderByAsc(CATEGORY_ORDER);
+        var page = records.selectPage(new Page<>(Math.max(1, pageNo), 20), listQuery.orderByDesc("inspected_at","id"));
+        // A new record in a later category must still change the pagination refresh marker.
+        var newest = records.selectList(recordQuery(projectId, category, startDate, endDate)
+                .orderByDesc("inspected_at","id").last("LIMIT 1"));
         return Map.of("records", page.getRecords().stream().map(r -> view(r, user, false)).toList(),
                 "total", page.getTotal(), "latestId", newest.isEmpty() ? 0L : newest.get(0).getId(), "serverTime", now());
     }
@@ -78,17 +87,18 @@ public class CommitteeService {
         if (startDate.getYear() < 1000 || endDate.getYear() > 9999)
             throw BusinessException.of(400, "日期须在 1000-01-01 至 9999-12-31 之间");
     }
-    private LambdaQueryWrapper<CommitteeRecord> recordQuery(Long projectId, String category, LocalDate startDate, LocalDate endDate) {
-        var query = new LambdaQueryWrapper<CommitteeRecord>().eq(CommitteeRecord::getProjectId, projectId)
+    private QueryWrapper<CommitteeRecord> recordQuery(Long projectId, String category, LocalDate startDate, LocalDate endDate) {
+        var query = new QueryWrapper<CommitteeRecord>();
+        var filters = query.lambda().eq(CommitteeRecord::getProjectId, projectId)
                 .eq(category != null && !category.isBlank(), CommitteeRecord::getCategory, category);
         if (startDate != null) {
             // inspected_at stores Beijing wall time. An exclusive next-day bound includes every microsecond of the end day.
-            query.ge(CommitteeRecord::getInspectedAt, startDate.atStartOfDay());
+            filters.ge(CommitteeRecord::getInspectedAt, startDate.atStartOfDay());
             if (endDate.equals(LocalDate.of(9999, 12, 31)))
-                query.le(CommitteeRecord::getInspectedAt, endDate.atTime(23, 59, 59, 999999000));
-            else query.lt(CommitteeRecord::getInspectedAt, endDate.plusDays(1).atStartOfDay());
+                filters.le(CommitteeRecord::getInspectedAt, endDate.atTime(23, 59, 59, 999999000));
+            else filters.lt(CommitteeRecord::getInspectedAt, endDate.plusDays(1).atStartOfDay());
         }
-        return query.orderByDesc(CommitteeRecord::getInspectedAt).orderByDesc(CommitteeRecord::getId);
+        return query;
     }
     public RecordView detail(Long id, SysUser user) { return view(requireRecord(id,user,false,false),user,true); }
 
@@ -133,7 +143,7 @@ public class CommitteeService {
         }
         for (int i=0;i<ids.size();i++) {
             var a = attachments.lock(ids.get(i));
-            if (a == null || !Objects.equals(a.getProjectId(),record.getProjectId()) || !Objects.equals(a.getUploaderId(),user.getId()))
+            if (a == null || !Objects.equals(a.getProjectId(),record.getProjectId()) || (a.getRecordId()==null && !Objects.equals(a.getUploaderId(),user.getId())))
                 throw BusinessException.forbidden("附件不属于本人或当前项目");
             if (a.getRecordId() != null) {
                 if (creating || !Objects.equals(a.getRecordId(),record.getId()) || !"ACTIVE".equals(a.getStatus()))
@@ -148,7 +158,9 @@ public class CommitteeService {
                 one(files.update(null,new LambdaUpdateWrapper<FileResource>().eq(FileResource::getId,f.getId())
                         .set(FileResource::getBusinessType,ATTACHMENT).set(FileResource::getBusinessId,record.getId())));
                 a.setRecordId(record.getId()); a.setStatus("ACTIVE");
-                if (conversion(a.getPreviewKind())) a.setPreviewStatus("QUEUED");
+                if ("WAITING".equals(a.getPreviewStatus()) && conversion(a.getPreviewKind())) a.setPreviewStatus("QUEUED");
+                if (a.getPreviewFileId()!=null) one(files.update(null,new LambdaUpdateWrapper<FileResource>()
+                        .eq(FileResource::getId,a.getPreviewFileId()).set(FileResource::getBusinessId,record.getId())));
             }
             a.setSortOrder(i); a.setUpdateTime(now()); one(attachments.updateById(a));
         }
@@ -167,7 +179,7 @@ public class CommitteeService {
     @Transactional
     public AttachmentView complete(CommitteeRequests.Upload request, MultipartFile file, String key, SysUser user) {
         lockProject(request.projectId()); validateUpload(request,user);
-        var prior = completed(key); if (prior != null) return attachmentView(requireAttachment(prior.getId(),user));
+        var prior = completed(key); if (prior != null) return attachmentView(requireAttachment(prior.getId(),user),user);
         FileUploadPolicy.validateCommitteeAttachment(file);
         var f = store(file,request.projectId(),null,PENDING,user.getId());
         if (f.getFileSize() != request.totalSize() || !f.getSha256().equalsIgnoreCase(request.sha256()))
@@ -176,8 +188,9 @@ public class CommitteeService {
         a.setDraftKey(request.draftKey()); a.setUploaderId(user.getId()); a.setFileId(f.getId()); a.setUploadKey(key);
         a.setStatus("PENDING"); a.setSortOrder(0); a.setPreviewKind(previewKind(f.getFileExtension()));
         a.setPreviewStatus(conversion(a.getPreviewKind()) ? "WAITING" : "READY"); a.setAttempts(0);
+        a.setRotationDegrees(0); a.setRotationVersion(1);
         a.setExpiresAt(now().plusHours(24)); a.setCreateTime(now()); a.setUpdateTime(a.getCreateTime());
-        one(attachments.insert(a)); return attachmentView(a);
+        one(attachments.insert(a)); return attachmentView(a,user);
     }
     public CommitteeAttachment requireAttachment(Long id, SysUser user) {
         var a = attachments.selectById(id); if (a == null) throw BusinessException.notFound("附件不存在");
@@ -191,11 +204,58 @@ public class CommitteeService {
         return a;
     }
     @Transactional
+    public AttachmentView rotate(Long id, CommitteeRequests.Rotation request, SysUser user) {
+        if(request.rotationDegrees()==null || !Set.of(0,90,180,270).contains(request.rotationDegrees())
+                || request.expectedVersion()==null || request.expectedVersion()<1)
+            throw BusinessException.of(400,"角度只能为 0、90、180 或 270 度，请重新核对附件版本");
+        var found=requireAttachment(id,user); lockProject(found.getProjectId());
+        var a=attachments.lock(id);
+        if(a==null) throw BusinessException.notFound("附件不存在");
+        // Recheck after locking: removal, revocation and a late upload binding must not grant editing rights.
+        requireAttachment(id,user);
+        if(!rotatable(a) || !Set.of("PENDING","ACTIVE").contains(a.getStatus()))
+            throw BusinessException.of(409,"仅当前图片或视频可调整角度，历史附件保持原样");
+        CommitteeRecord record=null;
+        // Administrators may correct shared media orientation without acquiring record-content editing rights.
+        boolean administrator=a.getRecordId()!=null && permissions.isPlatformAdmin(user.getId());
+        if(a.getRecordId()!=null) record=requireRecord(a.getRecordId(),user,!administrator,false);
+        if(a.getRecordId()==null && !Objects.equals(a.getUploaderId(),user.getId())) throw BusinessException.forbidden("只能调整本人上传的附件");
+        if(rotationVersion(a)!=request.expectedVersion()) throw BusinessException.of(409,"附件角度已被修改，请重新核对后再旋转");
+        if(rotation(a)==request.rotationDegrees()) return attachmentView(a,user);
+        String before=jsonValue(Map.of("attachmentId",id,"rotationDegrees",rotation(a),"rotationVersion",rotationVersion(a)));
+        if(a.getPreviewFileId()!=null) retire(file(a.getPreviewFileId()));
+        boolean originalImage="IMAGE".equals(a.getPreviewKind()) && request.rotationDegrees()==0;
+        one(attachments.update(null,new LambdaUpdateWrapper<CommitteeAttachment>().eq(CommitteeAttachment::getId,id)
+                .eq(CommitteeAttachment::getRotationVersion,request.expectedVersion())
+                .set(CommitteeAttachment::getRotationDegrees,request.rotationDegrees())
+                .set(CommitteeAttachment::getRotationVersion,rotationVersion(a)+1)
+                .set(CommitteeAttachment::getPreviewStatus,originalImage?"READY":"QUEUED")
+                .set(CommitteeAttachment::getPreviewFileId,null).set(CommitteeAttachment::getAttempts,0)
+                .set(CommitteeAttachment::getWorkerId,null).set(CommitteeAttachment::getLeaseUntil,null)
+                .set(CommitteeAttachment::getFailureMessage,null).set(CommitteeAttachment::getUpdateTime,now())));
+        var updated=attachments.selectById(id);
+        if(record!=null) log(record,user,"ATTACHMENT_ROTATE",before,
+                jsonValue(Map.of("attachmentId",id,"rotationDegrees",rotation(updated),"rotationVersion",rotationVersion(updated))));
+        return attachmentView(updated,user);
+    }
+    public static int rotation(CommitteeAttachment a) { return a.getRotationDegrees()==null?0:a.getRotationDegrees(); }
+    public static int rotationVersion(CommitteeAttachment a) { return a.getRotationVersion()==null?1:a.getRotationVersion(); }
+    public static boolean rotatable(CommitteeAttachment a) { return a.getPreviewKind()!=null && Set.of("IMAGE","HEIF","VIDEO").contains(a.getPreviewKind()); }
+    public boolean canRotate(CommitteeAttachment a,SysUser user) {
+        if(user==null || !rotatable(a)) return false;
+        if(a.getRecordId()==null) return Objects.equals(a.getUploaderId(),user.getId()) && "PENDING".equals(a.getStatus())
+                && a.getExpiresAt()!=null && a.getExpiresAt().isAfter(now());
+        var record=records.selectById(a.getRecordId());
+        return "ACTIVE".equals(a.getStatus()) && record!=null && (permissions.isPlatformAdmin(user.getId())
+                || (Objects.equals(record.getInspectorId(),user.getId())
+                    && permissions.hasSystemPermission(user.getId(),a.getProjectId(),EDIT)));
+    }
+    @Transactional
     public void discard(Long id, SysUser user) {
         var found = requireAttachment(id,user); lockProject(found.getProjectId());
         var a = attachments.lock(id);
         if (a == null || a.getRecordId()!=null || !"PENDING".equals(a.getStatus())) throw BusinessException.of(409,"只能清理本人暂存附件");
-        retire(file(a.getFileId())); one(attachments.deleteById(id));
+        retire(file(a.getFileId())); if(a.getPreviewFileId()!=null) retire(file(a.getPreviewFileId())); one(attachments.deleteById(id));
     }
     public FileResource store(MultipartFile file, Long projectId, Long businessId, String type, Long uploader) {
         String key = "committee/"+projectId+"/"+UUID.randomUUID()+"."+FileUploadPolicy.extensionOf(file.getOriginalFilename());
@@ -224,9 +284,12 @@ public class CommitteeService {
         return file(a.getPreviewFileId()==null ? a.getFileId() : a.getPreviewFileId());
     }
     public AttachmentView attachmentView(CommitteeAttachment a) {
+        return attachmentView(a,null);
+    }
+    public AttachmentView attachmentView(CommitteeAttachment a,SysUser user) {
         var f=file(a.getFileId());
         return new AttachmentView(a.getId(),f.getOriginalFileName(),f.getFileSize(),f.getFileExtension(),a.getStatus(),
-                a.getPreviewKind(),a.getPreviewStatus(),a.getFailureMessage());
+                a.getPreviewKind(),a.getPreviewStatus(),a.getFailureMessage(),rotation(a),rotationVersion(a),canRotate(a,user));
     }
     private RecordView view(CommitteeRecord r, SysUser user, boolean detailed) {
         var list=attachments.selectList(new LambdaQueryWrapper<CommitteeAttachment>().eq(CommitteeAttachment::getRecordId,r.getId())
@@ -235,7 +298,7 @@ public class CommitteeService {
         boolean canEdit=Objects.equals(r.getInspectorId(),user.getId()) && permissions.hasSystemPermission(user.getId(),r.getProjectId(),EDIT);
         return new RecordView(r.getId(),r.getProjectId(),r.getInspectorId(),r.getInspectorName(),r.getInspectedAt(),r.getCategory(),
                 r.getConclusion(),r.getVersion(),r.getUpdateTime(),canEdit,permissions.isPlatformAdmin(user.getId()),
-                list.stream().map(this::attachmentView).toList(),history);
+                list.stream().map(a->attachmentView(a,user)).toList(),history);
     }
     private String snapshot(CommitteeRecord r) {
         return jsonValue(Map.of("category",r.getCategory(),"conclusion",r.getConclusion(),"version",r.getVersion(),
@@ -274,7 +337,8 @@ public class CommitteeService {
         try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));}
         catch(Exception e){throw new IllegalStateException(e);}
     }
-    public record AttachmentView(Long id,String fileName,Long fileSize,String extension,String status,String previewKind,String previewStatus,String failureMessage) {}
+    public record AttachmentView(Long id,String fileName,Long fileSize,String extension,String status,String previewKind,String previewStatus,String failureMessage,
+            int rotationDegrees,int rotationVersion,boolean canRotate) {}
     public record RecordView(Long id,Long projectId,Long inspectorId,String inspectorName,LocalDateTime inspectedAt,String category,
             String conclusion,Integer version,LocalDateTime updatedAt,boolean canEdit,boolean canDelete,List<AttachmentView> attachments,List<CommitteeLog> logs) {}
 }

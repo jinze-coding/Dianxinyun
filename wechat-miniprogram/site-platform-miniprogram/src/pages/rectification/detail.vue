@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CorrectionNotice from '@/components/CorrectionNotice.vue';
 import { computed, ref } from 'vue';
 import { onShow } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
@@ -222,6 +223,7 @@ function promptReason(title: string, placeholder: string) {
     <AppNavBar title="整改详情" @back="goBack" />
 
     <scroll-view class="rect-scroll" scroll-y enable-flex :style="scrollStyle">
+    <CorrectionNotice :record="task" />
       <view v-if="task" class="rect-content">
         <view class="detail-card">
           <view class="info-row first-row">

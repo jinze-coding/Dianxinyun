@@ -1,3 +1,4 @@
+import CorrectionNotice from '../../components/CorrectionNotice';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getProjectMapDetail, getProjectProfile, updateProjectProfile } from '../../services/project';
 import { deleteFile, previewFile, uploadFile } from '../../services/file';
@@ -396,7 +397,7 @@ export default function ProjectInformationPage({ projectId, onBack, onSaved }) {
             <span className="project-profile-eyebrow">PROJECT PROFILE</span>
             <h1>{title}</h1>
             <p>集中查看项目基础资料、参建单位、规模指标和建设目标{updatedText && ` · 更新于 ${updatedText}`}</p>
-            {!loading && profile && <div className="project-profile-summary">
+            {!loading && profile && <div className="project-profile-summary"><CorrectionNotice record={profile} />
               <span className="phase">{profile.phase || '工程状态未填写'}</span>
               <span>简称：{profile.shortName || '未填写'}</span>
               <span>项目经理：{profile.manager || '未填写'}</span>

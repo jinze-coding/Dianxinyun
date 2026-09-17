@@ -76,6 +76,12 @@
 .committee-file { display: flex; align-items: center; gap: 18rpx; padding: 22rpx 0; border-bottom: 1rpx solid var(--workspace-divider); }
 .committee-file:last-child { border-bottom: 0; padding-bottom: 0; }
 .committee-file-copy { min-width: 0; flex: 1; }
+.committee-attachment-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16rpx; margin-top: 20rpx; }
+.committee-attachment-card { min-width: 0; overflow: hidden; border: 1rpx solid var(--workspace-divider); border-radius: 14rpx; background: #fff; }
+.committee-attachment-copy { padding: 14rpx; }
+.committee-attachment-copy .committee-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 21rpx; }
+.committee-attachment-copy .committee-actions { gap: 8rpx; margin-top: 12rpx; }
+.committee-attachment-copy .committee-action-button { min-height: 56rpx; padding: 8rpx 10rpx; font-size: 20rpx; }
 .committee-file-name { display: block; margin-bottom: 6rpx; font-size: 23rpx; line-height: 1.5; overflow-wrap: anywhere; }
 .committee-log { margin-top: 24rpx; padding: 0 0 22rpx 20rpx; border-left: 4rpx solid var(--workspace-tint-strong); }
 .committee-log:last-child { padding-bottom: 0; }
@@ -83,11 +89,14 @@
 .committee-log-button { display: inline-flex; min-height: 58rpx; margin-top: 14rpx; padding: 10rpx 16rpx; font-size: 21rpx; }
 .committee-history-part { margin-top: 18rpx; }
 
-.committee-preview { box-sizing: border-box; position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; gap: 18rpx; padding: calc(env(safe-area-inset-top) + 30rpx) 24rpx calc(env(safe-area-inset-bottom) + 30rpx); background: #122139f5; color: #fff; }
-.committee-preview-button { background: rgba(255,255,255,.14); color: #fff; }
+.committee-preview { box-sizing: border-box; position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 100; display: flex; flex-direction: column; background: var(--workspace-page,#f3f6f8); color: var(--workspace-text,#24364b); }
+.committee-preview-body { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 18rpx; padding: 20rpx 24rpx calc(env(safe-area-inset-bottom) + 24rpx); overflow-y: auto; }
+.committee-preview-body > .committee-row, .committee-preview-body > .committee-actions, .committee-preview-title, .committee-preview-body > .committee-error { flex-shrink: 0; }
+.committee-preview-button { background: var(--workspace-tint,#eaf2f6); color: var(--workspace-accent-deep,#315f86); }
 .committee-preview-title { font-size: 24rpx; line-height: 1.5; overflow-wrap: anywhere; }
-.committee-preview-image, .committee-preview-video { width: 100%; min-height: 0; flex: 1; }
-.committee-preview-message { display: flex; flex: 1; align-items: center; justify-content: center; flex-direction: column; gap: 24rpx; font-size: 25rpx; text-align: center; }
+.committee-preview-media { position: relative; flex: 1; min-height: 280rpx; overflow: hidden; border: 1rpx solid var(--workspace-divider,#e4edf4); border-radius: 14rpx; background: var(--workspace-surface,#fff); }
+.committee-preview-image, .committee-preview-video { position: absolute; top: 0; left: 0; display: block; width: 100%; height: 100%; }
+.committee-preview-message { box-sizing: border-box; display: flex; height: 100%; min-height: 280rpx; padding: 24rpx; align-items: center; justify-content: center; flex-direction: column; gap: 24rpx; font-size: 25rpx; text-align: center; color: var(--workspace-text-secondary,#526579); }
 
 @media (max-width: 360px) {
   .committee-content { padding-right: 18rpx; padding-left: 18rpx; }
@@ -99,3 +108,4 @@
 @media (prefers-reduced-motion: reduce) {
   .committee-button, .committee-report { transition-duration: 1ms; }
 }
+.committee-preview-poster { width:100%; flex:1; min-height:200rpx; max-height:60vh; }

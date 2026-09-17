@@ -133,12 +133,15 @@ public class AuthController {
         return Result.success(authService.getCurrentUserInfo(token));
     }
 
-    @Operation(summary = "微信快捷注册账号设置初始密码")
+    @Operation(summary = "首次登录设置个人密码")
     @PostMapping("/initial-password")
     public Result<LoginResponse> setupInitialPassword(@Valid @RequestBody InitialPasswordRequest request,
                                                        HttpServletRequest httpRequest) {
         rateLimitService.check("initial-password", httpRequest.getRemoteAddr(), 10, Duration.ofMinutes(10));
-        return Result.success(authService.setupInitialPassword(extractToken(httpRequest), request.getNewPassword()));
+        String token = extractToken(httpRequest);
+        SysUser currentUser = authService.getCurrentUserAllowInitialPasswordSetup(token);
+        rateLimitService.check("initial-password-account", normalizeAccount(currentUser.getUsername()), 10, Duration.ofMinutes(10));
+        return Result.success(authService.setupInitialPassword(token, request.getNewPassword()));
     }
 
     @Operation(summary = "用户登出")

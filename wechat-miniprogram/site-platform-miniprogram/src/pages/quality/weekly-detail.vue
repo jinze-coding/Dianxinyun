@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CorrectionNotice from '@/components/CorrectionNotice.vue';
 import { computed, ref } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
@@ -125,6 +126,7 @@ function formatTime(value?: string) {
     <view v-if="loading" class="state-card">正在加载周检详情...</view>
     <view v-else-if="errorMessage" class="state-card error"><text>{{ errorMessage }}</text><button @tap="goBack">返回质量周检</button></view>
     <scroll-view v-else-if="inspection" class="detail-scroll" scroll-y>
+    <CorrectionNotice :record="inspection" />
       <view class="detail-content">
         <view class="hero-card">
           <view class="hero-head"><WorkspaceStatusPill :label="inspection.status === 'DRAFT' ? '共享草稿' : '已提交'" :tone="inspection.status === 'DRAFT' ? 'amber' : 'green'" /><text v-if="inspection.lateSubmission" class="late-tag">补录</text></view>
@@ -150,7 +152,7 @@ function formatTime(value?: string) {
         </view>
 
         <template v-if="inspection.status === 'DRAFT'">
-          <view class="section-banner"><text>草稿问题</text><text>正式提交后才会进入整改闭环</text></view>
+          <view class="section-banner"><text>草稿问题</text><text>结束本周巡检后才会进入整改闭环</text></view>
           <view v-for="(item, index) in inspection.draftItems" :key="item.itemKey" class="issue-card draft-item">
             <view class="issue-head"><text>问题 {{ index + 1 }}</text><text>{{ severityLabel(item.severity || 'NORMAL') }}</text></view>
             <text class="issue-title">{{ item.title || '标题待补充' }}</text>

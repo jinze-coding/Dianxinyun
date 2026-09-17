@@ -1,3 +1,4 @@
+import CorrectionNotice from '../../components/CorrectionNotice';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   archiveProjectDocument,
@@ -496,7 +497,7 @@ export default function DocumentManagementPage({ projectId, projectList, theme: 
       {(detail || detailLoading) && (
         <div className="dm-drawer-backdrop" onMouseDown={() => !detailLoading && setDetail(null)}>
           <aside className="dm-drawer" onMouseDown={(event) => event.stopPropagation()}>
-            {detailLoading && !detail ? <div className="dm-drawer-loading">详情加载中...</div> : detail && <>
+            {detailLoading && !detail ? <div className="dm-drawer-loading">详情加载中...</div> : detail && <><CorrectionNotice record={detail} />
               <header className="dm-drawer-header"><div><span>{detail.document.documentNo || '无资料编号'}</span><h2>{detail.document.title}</h2></div><button className="dm-icon-button" onClick={() => setDetail(null)}>×</button></header>
               <div className="dm-drawer-actions">
                 <button onClick={() => openPreview(detail.document)}>预览</button>

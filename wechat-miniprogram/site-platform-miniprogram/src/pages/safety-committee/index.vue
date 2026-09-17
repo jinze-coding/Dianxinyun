@@ -48,7 +48,7 @@ function open(id:number){uni.navigateTo({url:`/pages/safety-committee/detail?id=
         <WorkspaceAreaSwitcher :project="currentProject" :projects="authorizedProjects" :accent="WORKSPACE_THEME.accent" :tint="WORKSPACE_THEME.tint" :open="areaSheetOpen" @open="areaSheetOpen=true" />
         <button v-if="canSubmit" class="committee-report" @tap="runtime.navigateTo({url:`/pages/safety-committee/edit?projectId=${projectId}`})">
           <view class="committee-report-icon"><image class="committee-report-image" src="/static/design-preview-icons/quality-inspect.png" mode="aspectFit" /></view>
-          <view class="committee-report-copy"><text class="committee-report-title">上报巡检</text><text class="committee-report-desc">记录现场检查情况，支持照片、视频和文件</text></view>
+          <view class="committee-report-copy"><text class="committee-report-title">提交巡检</text><text class="committee-report-desc">记录现场检查情况，支持照片、视频和文件</text></view>
           <text class="committee-arrow committee-arrow-light"></text>
         </button>
         <view v-if="error" class="committee-error">{{error}}<text v-if="lastSync"> · 上次更新 {{lastSync}}</text></view>
@@ -61,7 +61,7 @@ function open(id:number){uni.navigateTo({url:`/pages/safety-committee/detail?id=
           </view>
           <text class="committee-sync">{{lastSync?`自动同步 · 最近更新 ${lastSync}`:'正在加载记录…'}}</text>
         </view>
-        <button v-if="hasNew" class="committee-button committee-new" @tap="newest">有新记录，点击查看最新</button>
+        <button v-if="hasNew" class="committee-button committee-new" @tap="newest">有新记录，点击刷新列表</button>
         <view v-for="r in data.records" :key="r.id" class="committee-card committee-record" @tap="open(r.id)">
           <view class="committee-row"><text class="committee-record-name">{{r.inspectorName}}</text><view class="committee-detail-link"><text>查看详情</text><text class="committee-arrow"></text></view></view>
           <text class="committee-record-date">{{committeeDate(r.inspectedAt)}}</text>
@@ -72,7 +72,7 @@ function open(id:number){uni.navigateTo({url:`/pages/safety-committee/detail?id=
         <view v-if="!data.records.length&&!error" class="committee-card committee-empty">
           <view class="committee-empty-mark"><image class="committee-empty-image" src="/static/design-preview-icons/quality-inspect.png" mode="aspectFit" /></view>
           <text class="committee-empty-title">{{lastSync?'暂无巡检记录':'正在加载巡检记录'}}</text>
-          <text v-if="lastSync" class="committee-empty-desc">{{category?'可切换其他隐患分类查看':canSubmit?'点击上方“上报巡检”，记录现场检查情况':'当前施工区域的巡检记录将在这里显示'}}</text>
+          <text v-if="lastSync" class="committee-empty-desc">{{category?'可切换其他隐患分类查看':canSubmit?'点击上方“提交巡检”，记录现场检查情况':'当前施工区域的巡检记录将在这里显示'}}</text>
         </view>
         <view v-if="data.total>20" class="committee-row committee-pagination"><button class="committee-button committee-page-button" :class="{'committee-button-disabled':page<=1}" :disabled="page<=1" @tap="changePage(-1)">上一页</button><text class="committee-muted">{{page}} / {{Math.max(1,Math.ceil(data.total/20))}}</text><button class="committee-button committee-page-button" :class="{'committee-button-disabled':page*20>=data.total}" :disabled="page*20>=data.total" @tap="changePage(1)">下一页</button></view>
       </view>

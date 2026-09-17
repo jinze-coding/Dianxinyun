@@ -1,5 +1,21 @@
 # 电信云平台项目现场综合管理系统 - 后端
 
+## 2026-09-14 安委会缩略图转换依赖
+
+安委会附件支持上传后即时生成照片/视频封面及文档首页缩略图，复用原受限转换脚本。Linux 转换镜像新增 `poppler-utils` 与 `poppler-data`，发布时需重新构建 `scripts/meeting-material-preview/Dockerfile`；本轮未构建或发布生产镜像。macOS 使用本机 Poppler（`brew install poppler`），可通过 `MEETING_PDFTOPPM_BIN` 指向 `pdftoppm`。迁移过的预打包 Poppler 可能保留构建机的字符映射路径，必须实际核验非嵌入字体中文 PDF，不能只检查输出文件存在。Poppler 的编码数据要求见 [官方说明](https://poppler.freedesktop.org/)。
+
+本机已配置 `/opt/homebrew/bin/pdftoppm`，字体继续使用现有沙箱内系统字体配置。缩略图实现不增加数据库结构，不修改原附件；接口与缓存边界见 [安委会巡检](../docs/安委会巡检.md)。
+
+## 2026-09-14 用户批量导入与首次改密
+
+平台管理员专用导入接口位于 `/api/v1/system/user-imports`，支持受限 XLSX、校验/合并/跳过、后台事务建号和短期账号发放。导入用户必须先通过 `/auth/initial-password` 设置个人密码才能访问业务或绑定微信；原注册与重置流程保留。
+
+部署新后端前先备份并执行增量 `src/main/resources/sql/migrations/20260914_user_batch_import.sql`，增加两表和用户两字段；空库模板同步。必须注入独立随机 32 字节 Base64 的 `USER_IMPORT_CREDENTIAL_KEY`，不要与现有密钥共用；缺失时原系统可以运行，但禁止导入及发放凭据。不要将密钥或名单写入仓库。原有数据不可重新初始化，固定旧基线的生产脚本不能直接作为本次发布包。
+
+2026-09-15 改为管理员在确认导入时设置本批统一临时密码，单人重新设置也必须提交 `temporaryPassword`。更新前在原导入迁移基础上执行 `20260915_user_import_admin_password.sql`（批次密文与幂等摘要）；等待旧排队/执行任务完成后再停止服务，不随机恢复缺少密码的旧任务。
+
+本轮本地验证、恢复机制和管理员操作说明见 [用户批量导入](../docs/用户批量导入.md)。真实名单和正式发布另行安排，未经用户明确要求不提交或推送 Git。
+
 ## 2026-09-11 用印台账 Word 导出
 
 `GET /api/v1/seal/ledger/export` 及兼容 `/api/v1/seal/applications/export` 改为返回 DOCX。

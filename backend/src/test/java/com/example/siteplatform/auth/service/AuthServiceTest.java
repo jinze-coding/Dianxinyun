@@ -183,6 +183,7 @@ class AuthServiceTest {
         when(jwtConfig.getCredentialVersionFromToken("quick-token")).thenReturn(1);
         when(valueOperations.get(anyString())).thenReturn(1L);
         when(userMapper.selectById(1L)).thenReturn(user);
+        when(userMapper.selectByIdForUpdate(1L)).thenReturn(user);
         when(userMapper.updateById(user)).thenReturn(1);
         when(jwtConfig.generateToken(1L, "admin", 2)).thenReturn("fresh-token");
 
@@ -208,6 +209,7 @@ class AuthServiceTest {
         when(jwtConfig.getCredentialVersionFromToken("quick-token")).thenReturn(1);
         when(valueOperations.get(anyString())).thenReturn(1L);
         when(userMapper.selectById(1L)).thenReturn(user);
+        when(userMapper.selectByIdForUpdate(1L)).thenReturn(user);
         when(userMapper.updateById(user)).thenReturn(0);
 
         BusinessException exception = assertThrows(BusinessException.class,

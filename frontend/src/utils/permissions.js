@@ -1,4 +1,4 @@
-import { PAGE_IDS } from '../constants/dicts.js';
+import { NAV_ITEMS, PAGE_IDS } from '../constants/dicts.js';
 import { isProjectModuleEnabled, PAGE_MODULES, permissionModule, projectContext } from './projectModules.js';
 
 const PAGE_ACCESS_RULES = {
@@ -109,7 +109,7 @@ export function hasAssignedProjectMenu(user, projectId, ...menuCodes) {
 
 export function canAccessPage(user, pageId, projectId = null) {
   if (!user) return false;
-  if (pageId === PAGE_IDS.PERSONAL_INBOX) return true;
+  if (pageId === PAGE_IDS.PERSONAL_INBOX) return projectContext(user, projectId)?.inboxEntryVisible !== false;
   const rule = PAGE_ACCESS_RULES[pageId];
   if (!rule) return false;
   if (!isProjectModuleEnabled(user, projectId, PAGE_MODULES[pageId])) return false;
@@ -119,4 +119,12 @@ export function canAccessPage(user, pageId, projectId = null) {
     return hasAssignedProjectMenu(user, projectId, pageId, ...rule.menuCodes);
   }
   return hasAssignedMenu(user, pageId, ...rule.menuCodes);
+}
+
+// A hidden inbox must not remain the login, restore or access-loss destination.
+export function projectLandingPage(user, projectId) {
+  if (canAccessPage(user, PAGE_IDS.PERSONAL_INBOX, projectId)) return PAGE_IDS.PERSONAL_INBOX;
+  if (canAccessPage(user, PAGE_IDS.SAFETY_COMMITTEE, projectId)) return PAGE_IDS.SAFETY_COMMITTEE;
+  return NAV_ITEMS.find((item) => canAccessPage(user, item.id, projectId))?.id
+    || (projectId != null ? PAGE_IDS.PROJECT_INFORMATION : PAGE_IDS.PERSONAL_INBOX);
 }

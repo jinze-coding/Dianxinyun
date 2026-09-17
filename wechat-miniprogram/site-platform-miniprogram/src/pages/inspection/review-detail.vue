@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CorrectionNotice from '@/components/CorrectionNotice.vue';
 import { computed, ref } from 'vue';
 import { onShow } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
@@ -223,6 +224,7 @@ function onDeadlineChange(event: unknown) {
     <AppNavBar title="复核详情" @back="goBack" />
 
     <scroll-view class="scroll" scroll-y enable-flex :style="scrollStyle">
+    <CorrectionNotice :record="record" />
       <view v-if="record" class="stack">
         <view class="card">
           <view class="head-row">

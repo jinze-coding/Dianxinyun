@@ -45,6 +45,10 @@ import java.util.regex.Pattern;
 
 @Service
 public class SealPdfService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.example.siteplatform.system.correction.CorrectionNoticeService correctionNotices;
+    private String corrected(String text,String type,Long id) { return correctionNotices==null?(text==null?"":text):correctionNotices.append(text,type,id); }
+
     private static final String TEMPLATE = "templates/seal-application-form.xhtml";
     private static final String REGULAR_FONT = "fonts/ttf/NotoSansSC/NotoSansSC-Regular.ttf";
     private static final String BOLD_FONT = "fonts/ttf/NotoSansSC/NotoSansSC-Bold.ttf";
@@ -215,7 +219,7 @@ public class SealPdfService {
         values.put("APPLICATION_NO", escaped(value(application.getApplicationNo(), "提交后由系统生成")));
         values.put("DEPARTMENT_NAME", escaped(value(application.getDepartmentName(), "-")));
         values.put("SEAL_NAME", escaped(value(application.getSealName(), "-")));
-        values.put("PURPOSE", htmlValue(value(application.getPurpose(), "-")));
+        values.put("PURPOSE", htmlValue(corrected(value(application.getPurpose(), "-"),"SEAL_APPLICATION",application.getId())));
         values.put("ITEM_ROWS", itemRows(application.getItems()));
         values.put("APPLICANT_NAME", escaped(value(application.getApplicantName(), "-")));
         values.put("APPLICANT_DEPARTMENT", escaped(value(application.getApplicantDepartmentName(), "-")));

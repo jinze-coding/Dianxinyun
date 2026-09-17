@@ -2,8 +2,9 @@
   "pages": [
     {
       "path": "pages/login/index",
-      "style": { "navigationStyle": "custom", "disableScroll": true }
+      "style": { "navigationStyle": "custom" }
     },
+    { "path": "pages/legal/index", "style": { "navigationStyle": "custom", "navigationBarTitleText": "用户服务协议" } },
     { "path": "pages/safety-committee/index", "style": { "navigationStyle": "custom", "navigationBarTitleText": "安委会巡检" } },
     { "path": "pages/safety-committee/edit", "style": { "navigationStyle": "custom", "navigationBarTitleText": "安委会巡检" } },
     { "path": "pages/safety-committee/detail", "style": { "navigationStyle": "custom", "navigationBarTitleText": "安委会巡检" } },

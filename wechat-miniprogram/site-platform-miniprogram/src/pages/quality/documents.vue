@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CorrectionNotice from '@/components/CorrectionNotice.vue';
 import { computed, ref } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
@@ -85,7 +86,7 @@ function goBack() {
         <view v-else class="document-list">
           <button v-for="file in documents" :key="file.id" :disabled="openingId !== undefined" @tap="openDocument(file)">
             <view class="document-icon">文</view>
-            <view><text>{{ file.fileName }}</text><text>{{ file.fileType || '质量资料' }} · {{ formatTime(file.createTime) }}</text></view>
+            <view><text>{{ file.fileName }}</text><text>{{ file.fileType || '质量资料' }} · {{ formatTime(file.createTime) }}</text><CorrectionNotice :record="file" /></view>
             <text class="row-arrow"></text>
           </button>
           <view v-if="!documents.length" class="empty-state"><view>文</view><text>当前施工区域暂无有效质量资料</text><text>资料由质量管理员在 Web 端维护</text></view>

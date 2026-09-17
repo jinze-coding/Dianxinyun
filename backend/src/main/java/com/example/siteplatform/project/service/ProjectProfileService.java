@@ -401,7 +401,7 @@ public class ProjectProfileService {
         if (value != null && value < 0) throw new BusinessException(label + "不能为负数");
     }
 
-    private void validateIp(String value) {
+    public void validateIp(String value) {
         String ip = optional(value, 45, "固定IP");
         if (ip == null) return;
         try {

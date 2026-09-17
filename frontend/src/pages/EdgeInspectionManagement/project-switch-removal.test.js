@@ -16,7 +16,7 @@ test('edge inspection has no project pilot switch in the Web client', () => {
 
 test('edge inspection Web workspace defaults to the compact three-page structure', () => {
   assert.doesNotMatch(page, /className="edge-heading edge-card"/);
-  assert.match(page, /useState\('todo'\)/);
+  assert.match(page, /useNavigationTab\('edgeTab', 'todo',/);
   assert.match(page, /\{ id: 'todo', label: '待处理' \}/);
   assert.match(page, /\{ id: 'records', label: '巡检记录' \}/);
   assert.match(page, /\{ id: 'settings', label: '基础设置' \}/);

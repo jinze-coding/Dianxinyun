@@ -57,7 +57,14 @@ try {
   fetchPage=async()=>{throw new Error('网络中断');};await vm.refresh();assert.match(vm.error,/网络/);assert.equal(vm.data.records[0].id,30);assert.equal(vm.category,'其他');
   fetchPage=async()=>response;await vm.refresh();assert.equal(vm.error,'');
   vm.filter({detail:{value:0}});await flush();assert.deepEqual(requests.at(-1),[3,'',1]);assert.equal(vm.hasNew,false);
-  console.log('安委会筛选页通过：分类分页、不带隐藏日期条件、滚动恢复、迟到响应丢弃、前台与断网重试。');
+  response={records:[{id:8,category:'施工安全管理'},{id:90,category:'其他'}],total:22,latestId:90};await vm.refresh();
+  assert.deepEqual(vm.data.records.map(row=>row.id),[8,90],'preserve server category order instead of sorting by id');
+  vm.changePage(1);await flush();
+  response={records:[{id:8,category:'施工安全管理'},{id:91,category:'其他'}],total:23,latestId:91};await vm.refresh();
+  assert.equal(vm.hasNew,true);assert.deepEqual(vm.data.records.map(row=>row.id),[8,90],'hold older page when a later category receives a record');
+  vm.newest();await flush();assert.deepEqual(requests.at(-1),[3,'',1]);assert.equal(vm.hasNew,false);
+  assert.deepEqual(vm.data.records.map(row=>row.id),[8,91]);assert.equal(vm.latest,91);
+  console.log('安委会筛选页通过：分类分页、保留服务端顺序、末尾分类新增提示与回第一页刷新、不带隐藏日期条件、滚动恢复、迟到响应丢弃、前台与断网重试。');
 } finally {
   hooks.onUnload();app.unmount();globalThis.setInterval=realInterval;globalThis.clearInterval=realClear;delete globalThis.uni;
 }

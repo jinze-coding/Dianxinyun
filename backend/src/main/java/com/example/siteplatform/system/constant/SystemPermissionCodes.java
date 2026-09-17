@@ -37,6 +37,7 @@ public final class SystemPermissionCodes {
     public static final String MENU_MANAGE = "system.menu.manage";
     public static final String PROJECT_MEMBER_MANAGE = "project.member.manage";
     public static final String WECHAT_MANAGE = "system.wechat.manage";
+    public static final String DATA_CORRECT = "system.data.correct";
     public static final String AUDIT_VIEW = "system.audit.view";
     public static final String APPROVAL_MANAGE = "system.approval.manage";
     public static final String APPROVAL_VIEW = "system.approval.view";

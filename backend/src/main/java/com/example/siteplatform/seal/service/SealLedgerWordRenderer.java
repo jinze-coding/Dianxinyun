@@ -34,6 +34,10 @@ import java.util.zip.ZipOutputStream;
 /** Fills the retained attachment-8 DOCX; every other package part stays byte-for-byte intact. */
 @Component
 public class SealLedgerWordRenderer {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.example.siteplatform.system.correction.CorrectionNoticeService correctionNotices;
+    private String corrected(String text,String type,Long id) { return correctionNotices==null?(text==null?"":text):correctionNotices.append(text,type,id); }
+
     public static final String CONTENT_TYPE =
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     private static final String WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -103,6 +107,16 @@ public class SealLedgerWordRenderer {
         for (int i = 1; i < rows.size(); i++) table.removeChild(rows.get(i));
         table.appendChild(document.createProcessingInstruction(ROWS_MARKER, ""));
 
+        if(correctionNotices!=null) {
+            var correctedNumbers=new java.util.ArrayList<String>();
+            for(var application:applications)if(!correctionNotices.text("SEAL_APPLICATION",application.getId()).isEmpty())correctedNumbers.add(application.getApplicationNo());
+            if(!correctedNumbers.isEmpty()) {
+                Element body=(Element)document.getElementsByTagNameNS(WORD_NS,"body").item(0);
+                Element paragraph=document.createElementNS(WORD_NS,"w:p"),run=document.createElementNS(WORD_NS,"w:r"),text=document.createElementNS(WORD_NS,"w:t");
+                text.setTextContent("管理员纠错记录："+String.join("、",correctedNumbers)+"。本表使用当前内容，原审批事件保留。");run.appendChild(text);paragraph.appendChild(run);
+                var sections=body.getElementsByTagNameNS(WORD_NS,"sectPr");body.insertBefore(paragraph,sections.getLength()==0?null:sections.item(0));
+            }
+        }
         TransformerFactory transformers = TransformerFactory.newInstance();
         transformers.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
         transformers.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");

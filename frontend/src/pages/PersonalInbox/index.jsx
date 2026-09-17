@@ -1,3 +1,4 @@
+import { useNavigationTab } from '../../components/BrowserNavigation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getPersonalNotifications,
@@ -72,7 +73,7 @@ function Pagination({ page, pageCount, loading, onChange }) {
 }
 
 export default function PersonalInboxPage({ projectId, projectList = [], theme: T, onOpenBusiness, onCountsChange }) {
-  const [activeTab, setActiveTab] = useState('todos');
+  const [activeTab, setActiveTab] = useNavigationTab('inboxTab', 'todos', ['todos', 'cc', 'notifications']);
   const [todoType, setTodoType] = useState('');
   const [notificationReadStatus, setNotificationReadStatus] = useState('');
   const [businessType, setBusinessType] = useState('');

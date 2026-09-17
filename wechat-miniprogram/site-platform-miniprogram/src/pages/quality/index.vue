@@ -57,10 +57,10 @@ const weeklyActionTitle = computed(() => {
 });
 const weeklyActionSubtitle = computed(() => {
   const value = weeklySummary.value;
-  if (!value?.hasInspection) return canManage.value ? '建立共享草稿，整理完成后整批提交' : '当前账号可在提交后查看本周周检';
+  if (!value?.hasInspection) return canManage.value ? '建立共享草稿，整理完成后结束本周巡检' : '当前账号可在本周巡检结束后查看记录';
   if (value.status === 'DRAFT') {
     const editor = currentInspection.value?.lastEditedByName || currentInspection.value?.createdByName;
-    return `共享草稿 · 已录入 ${value.draftItemCount || 0} 个问题${editor ? ` · ${editor} 最近编辑` : ''}`;
+    return `质量问题上传 · 已录入 ${value.draftItemCount || 0} 个问题${editor ? ` · ${editor} 最近编辑` : ''}`;
   }
   return `${value.submittedIssueCount || 0} 个问题 · ${(value.pendingCount || 0) + (value.recheckCount || 0)} 项未闭环`;
 });
@@ -193,7 +193,7 @@ function openDocuments() {
 }
 
 function weeklyStatusLabel(item: QualityWeeklyInspection) {
-  return item.status === 'DRAFT' ? '共享草稿' : item.lateSubmission ? '已提交 · 补录' : '已提交';
+  return item.status === 'DRAFT' ? '整理中' : item.lateSubmission ? '已提交 · 补录' : '已提交';
 }
 </script>
 
@@ -225,13 +225,14 @@ function weeklyStatusLabel(item: QualityWeeklyInspection) {
           </view>
 
           <view class="section-block recent-section">
-            <view class="compact-head"><view><text>最近周检</text><text>共享草稿与已提交记录</text></view><button @tap="openWeeklyList">查看全部 <text class="row-arrow"></text></button></view>
+            <view class="compact-head"><view><text>最近周检</text><text>选择周次上传质量问题，或查看已结束记录</text></view><button @tap="openWeeklyList">查看全部 <text class="row-arrow"></text></button></view>
             <view v-if="recentError" class="section-error"><text>{{ recentError }}</text><button @tap="refresh">重新加载</button></view>
             <view v-else class="plain-list">
-              <button v-for="item in recentInspections" :key="item.id" class="plain-row" @tap="openWeeklyInspection(item)">
-                <view class="plain-copy"><text class="plain-title">{{ item.weekStart }} 至 {{ item.weekEnd }}</text><text class="plain-meta">{{ item.status === 'DRAFT' ? `共享整理中 · ${item.lastEditedByName || item.createdByName || '项目成员'}` : `${item.submittedIssueCount} 个问题 · ${item.submittedByName || '已提交'}` }}</text></view>
-                <WorkspaceStatusPill :label="weeklyStatusLabel(item)" :tone="item.status === 'DRAFT' ? 'amber' : 'green'" /><text class="row-arrow"></text>
-              </button>
+              <view v-for="item in recentInspections" :key="item.id" class="plain-row">
+                <button class="weekly-record-link" @tap="openWeeklyInspection(item)"><view class="plain-copy"><text class="plain-title">{{ item.weekStart }} 至 {{ item.weekEnd }}</text><text class="plain-meta">{{ item.status === 'DRAFT' ? `问题整理中 · ${item.lastEditedByName || item.createdByName || '项目成员'}` : `${item.submittedIssueCount} 个问题 · ${item.submittedByName || '已提交'}` }}</text></view></button>
+                <button v-if="item.status === 'DRAFT' && canManage" class="weekly-upload-action" :aria-label="`${item.weekStart} 至 ${item.weekEnd} 质量问题上传`" @tap="openWeeklyInspection(item)"><text class="weekly-upload-plus" aria-hidden="true">＋</text><text>质量问题上传</text></button>
+                <template v-else><WorkspaceStatusPill :label="weeklyStatusLabel(item)" :tone="item.status === 'DRAFT' ? 'amber' : 'green'" /><button class="weekly-view-action" aria-label="查看周检详情" @tap="openWeeklyInspection(item)"><text class="row-arrow"></text></button></template>
+              </view>
               <view v-if="!recentInspections.length" class="empty-line">暂无周检记录</view>
             </view>
           </view>
@@ -246,6 +247,7 @@ function weeklyStatusLabel(item: QualityWeeklyInspection) {
 </template>
 
 <style scoped src="../../styles/workspace-page.css"></style>
+<style scoped src="./weekly-record-actions.css"></style>
 <style scoped>
 .weekly-action { box-sizing: border-box; display: flex; width: 100%; min-height: 112rpx; align-items: center; gap: 16rpx; margin: 0; padding: 20rpx 22rpx; border: 0; border-radius: 18rpx; background: var(--page-accent-deep); box-shadow: 0 12rpx 28rpx rgba(49,95,134,.2); text-align: left; }
 .weekly-action::after,.compact-head button::after,.todo-entry::after,.inline-error::after,.document-entry::after { border: 0; }

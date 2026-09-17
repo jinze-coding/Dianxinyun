@@ -15,6 +15,8 @@ public class SysUser {
     private Integer passwordLoginEnabled;
     private Integer credentialVersion;
     private Integer passwordResetRequired;
+    private Integer mustChangePassword;
+    private LocalDateTime temporaryPasswordExpiresAt;
     private String realName;
     private String phone;
     private String email;

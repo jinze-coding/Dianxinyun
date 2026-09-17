@@ -21,6 +21,7 @@ onLoad(async () => {
 });
 
 async function submit() {
+  if (submitting.value) return;
   if (password.value.length < 8 || password.value.length > 72
     || !/[A-Za-z]/.test(password.value) || !/\d/.test(password.value)) {
     showToast('密码需为 8–72 位，且同时包含字母和数字');
@@ -32,12 +33,17 @@ async function submit() {
   }
   submitting.value = true;
   try {
+    const imported = auth.state.user?.initialPasswordSetupReason === 'ADMIN_IMPORT';
     const result = await setupInitialPassword(password.value);
     await auth.completeLogin(result.token);
     password.value = '';
     confirmPassword.value = '';
-    showToast('密码设置成功');
-    auth.navigateAfterLogin();
+    if (imported) {
+      uni.showModal({ title: '密码设置成功', content: '接下来可在“我的”绑定微信。绑定后即可使用微信快捷登录。', showCancel: false, complete: () => auth.navigateAfterLogin() });
+    } else {
+      showToast('密码设置成功');
+      auth.navigateAfterLogin();
+    }
   } catch (error) {
     showToast(error instanceof Error ? error.message : '密码设置失败');
   } finally {
@@ -57,13 +63,13 @@ async function logout() {
     <view class="content">
       <view class="notice">
         <text>请先设置登录密码</text>
-        <text>这是首次微信登录的必要步骤。设置完成后，手机号可用于小程序和 Web 账号密码登录。</text>
+        <text>{{ auth.state.user?.initialPasswordSetupReason === 'ADMIN_IMPORT' ? '请将管理员发放的临时密码更换为个人密码，不能与临时密码相同。完成后可在“我的”绑定微信。' : '这是首次微信登录的必要步骤。设置完成后，手机号可用于小程序和 Web 账号密码登录。' }}</text>
       </view>
 
       <view class="form-card">
         <label><text>登录账号</text><view class="readonly">{{ auth.state.user?.username || auth.state.user?.phone || '微信手机号' }}</view></label>
-        <label><text>设置密码 *</text><input v-model="password" password placeholder="8–72 位，包含字母和数字" /></label>
-        <label><text>确认密码 *</text><input v-model="confirmPassword" password placeholder="再次输入密码" /></label>
+        <label><text>设置密码 *</text><input v-model="password" password :maxlength="72" placeholder="8–72 位，包含字母和数字" /></label>
+        <label><text>确认密码 *</text><input v-model="confirmPassword" password :maxlength="72" placeholder="再次输入密码" /></label>
       </view>
 
       <button class="submit" :disabled="submitting" @tap="submit">{{ submitting ? '正在设置…' : '确认并进入系统' }}</button>

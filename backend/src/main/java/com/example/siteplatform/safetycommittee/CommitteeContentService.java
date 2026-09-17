@@ -24,15 +24,16 @@ public class CommitteeContentService {
     private final StringRedisTemplate redis;
     private final ObjectMapper json;
     private final FileStorageManager storage;
+    private final CommitteeThumbnailService thumbnails;
 
     public Map<String,Object> issue(Long id,String authorization,boolean nativePlayback,HttpServletRequest request,HttpServletResponse response) {
-        service.requireAttachment(id,auth.getCurrentUser(authorization));
+        var attachment=service.requireAttachment(id,auth.getCurrentUser(authorization));
         String value=UUID.randomUUID().toString().replace("-","")+UUID.randomUUID().toString().replace("-","");
         var session=auth.snapshotReadSession(authorization);
         long expires=Math.min(session.expiresAt(),System.currentTimeMillis()+Duration.ofMinutes(15).toMillis());
         long remaining=expires-System.currentTimeMillis();
         if(remaining<=0) throw BusinessException.of(401,"登录已过期，请重新登录");
-        try { redis.opsForValue().set(key(value),json.writeValueAsString(new Grant(id,session,expires)),Duration.ofMillis(remaining)); }
+        try { redis.opsForValue().set(key(value),json.writeValueAsString(new Grant(id,session,expires,CommitteeService.rotationVersion(attachment))),Duration.ofMillis(remaining)); }
         catch(com.fasterxml.jackson.core.JsonProcessingException e) { throw new BusinessException("附件读取会话创建失败"); }
         response.setHeader(HttpHeaders.CACHE_CONTROL,"no-store");
         if (nativePlayback) return Map.of("contentPath","/api/v1/safety-committee/media/"+value,"expiresAt",expires);
@@ -51,19 +52,35 @@ public class CommitteeContentService {
         } catch(com.fasterxml.jackson.core.JsonProcessingException e) { throw BusinessException.of(401,"附件读取凭证无效"); }
     }
     public ResponseEntity<Resource> nativeContent(String code,boolean preview) {
+        return nativeContent(code,preview,false);
+    }
+    public ResponseEntity<Resource> nativeContent(String code,boolean preview,boolean thumbnail) {
         var grant=grant(code); SysUser user=auth.validateReadSession(grant.session());
-        return response(service.requireAttachment(grant.attachmentId(),user),preview);
+        var attachment=service.requireAttachment(grant.attachmentId(),user);
+        if(preview || thumbnail) checkRotation(grant,attachment);
+        return thumbnail ? thumbnailResponse(attachment) : response(attachment,preview);
     }
     public ResponseEntity<Resource> content(Long id,boolean preview,HttpServletRequest request) {
-        SysUser user=null;
+        return content(id,preview,false,request);
+    }
+    public ResponseEntity<Resource> content(Long id,boolean preview,boolean thumbnail,HttpServletRequest request) {
+        SysUser user=null; Grant readGrant=null;
         if(request.getHeader("Authorization")!=null) user=auth.getCurrentUser(request.getHeader("Authorization"));
         else if(request.getCookies()!=null) for(Cookie cookie:request.getCookies()) {
             if(!"committee_read".equals(cookie.getName())) continue;
             var grant=grant(cookie.getValue());
-            if(Objects.equals(grant.attachmentId(),id)) { user=auth.validateReadSession(grant.session()); break; }
+            if(Objects.equals(grant.attachmentId(),id)) { user=auth.validateReadSession(grant.session()); readGrant=grant; break; }
         }
         if(user==null) throw BusinessException.of(401,"请重新打开附件预览");
-        return response(service.requireAttachment(id,user),preview);
+        var attachment=service.requireAttachment(id,user);
+        if(readGrant!=null && (preview || thumbnail)) checkRotation(readGrant,attachment);
+        return thumbnail ? thumbnailResponse(attachment) : response(attachment,preview);
+    }
+    private ResponseEntity<Resource> thumbnailResponse(CommitteeAttachment attachment) {
+        byte[] bytes=thumbnails.content(attachment);
+        return ResponseEntity.ok().contentType(MediaType.IMAGE_JPEG).contentLength(bytes.length)
+                .header(HttpHeaders.CACHE_CONTROL,"private, no-store").header("X-Content-Type-Options","nosniff")
+                .header("Referrer-Policy","no-referrer").body(new ByteArrayResource(bytes));
     }
     private ResponseEntity<Resource> response(CommitteeAttachment attachment,boolean preview) {
         var f=service.content(attachment,preview);
@@ -80,7 +97,11 @@ public class CommitteeContentService {
                     @Override public java.io.InputStream getInputStream() throws java.io.IOException{return storage.load(f).getInputStream();}
                 });
     }
+    private void checkRotation(Grant grant,CommitteeAttachment attachment) {
+        if(grant.rotationVersion()!=null && grant.rotationVersion()!=CommitteeService.rotationVersion(attachment))
+            throw BusinessException.of(409,"附件角度已更新，请重新打开预览");
+    }
     private static String key(String value){return "committee:read:"+CommitteeService.hash(value);}
     public static String path(Long id){return "/api/v1/safety-committee/attachments/"+id+"/content";}
-    public record Grant(Long attachmentId,AuthService.ReadSessionSnapshot session,long expiresAt) {}
+    public record Grant(Long attachmentId,AuthService.ReadSessionSnapshot session,long expiresAt,Integer rotationVersion) {}
 }

@@ -28,6 +28,8 @@ export interface User {
   projectContexts?: ProjectPermissionContext[];
   passwordLoginEnabled?: boolean | number | string;
   initialPasswordSetupRequired?: boolean;
+  initialPasswordSetupReason?: 'ADMIN_IMPORT' | 'WECHAT_QUICK';
+  temporaryPasswordExpiresAt?: string;
   wechatBindingStatus?: 'BOUND' | 'ACTIVE' | 'UNBOUND' | 'DISABLED';
   wechatBound?: boolean;
 }
@@ -49,6 +51,7 @@ export interface UserMenu {
 export interface ProjectPermissionContext {
   enabledBusinessModules?: string[];
   moduleConfigVersion?: number;
+  inboxEntryVisible?: boolean;
   projectId: number;
   projectName?: string;
   projectRoles?: ProjectRole[];
@@ -61,6 +64,7 @@ export interface ProjectPermissionContext {
 export interface UserProjectRole {
   enabledBusinessModules?: string[];
   moduleConfigVersion?: number;
+  inboxEntryVisible?: boolean;
   projectId: number;
   projectName?: string;
   shortName?: string;

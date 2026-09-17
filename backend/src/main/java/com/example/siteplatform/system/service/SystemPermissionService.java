@@ -209,6 +209,7 @@ public class SystemPermissionService {
         var state = projectModules.state(context.getProjectId());
         context.setEnabledBusinessModules(state.enabledBusinessModules());
         context.setModuleConfigVersion(state.moduleConfigVersion());
+        context.setInboxEntryVisible(state.inboxEntryVisible());
     }
 
     public void initializeProjectModules(Long projectId, Long actorId) { projectModules.initialize(projectId, actorId); }

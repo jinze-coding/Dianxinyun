@@ -140,6 +140,26 @@ public class QualityWeeklyFileService {
         return files.stream().map(FileResource::getId).toList();
     }
 
+    /** Called only after the administrator has locked and validated an untouched submission. */
+    public List<Long> returnFinalFilesToDraft(Long projectId, String finalType, Long finalBusinessId,
+                                              String draftType, Long draftBusinessId) {
+        String source = requireType(finalType, ALLOWED_FINAL_TYPES, "不支持的周检正式附件类型");
+        String target = requireType(draftType, ALLOWED_DRAFT_TYPES, "不支持的周检草稿附件类型");
+        requireMatchingTarget(target, source);
+        if (projectId == null || finalBusinessId == null || draftBusinessId == null) {
+            throw new BusinessException("周检附件退回参数不完整");
+        }
+        List<FileResource> files = fileMapper.selectWeeklyDraftFilesForUpdate(projectId, source, finalBusinessId);
+        for (FileResource file : files) {
+            validateProjectAndStatus(file, projectId);
+            if (fileMapper.transferWeeklyDraftFile(file.getId(), projectId, source,
+                    finalBusinessId, target, draftBusinessId) != 1) {
+                throw BusinessException.of(409, "周检附件状态已变化，请刷新后重试");
+            }
+        }
+        return files.stream().map(FileResource::getId).toList();
+    }
+
     public List<Long> listFileIds(String businessType, Long businessId) {
         if (!StringUtils.hasText(businessType) || businessId == null) return List.of();
         return fileMapper.selectList(new LambdaQueryWrapper<FileResource>()

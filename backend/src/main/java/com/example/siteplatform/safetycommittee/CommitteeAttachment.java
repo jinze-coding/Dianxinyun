@@ -19,6 +19,8 @@ public class CommitteeAttachment {
     private Integer sortOrder;
     private String previewKind;
     private String previewStatus;
+    private Integer rotationDegrees;
+    private Integer rotationVersion;
     private Long previewFileId;
     private Integer attempts;
     private String workerId;

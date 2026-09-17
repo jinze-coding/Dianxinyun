@@ -1,3 +1,4 @@
+import CorrectionNotice from '../../components/CorrectionNotice';
 import React, { useEffect, useRef, useState } from "react";
 
 import { deleteFile, downloadFile, uploadFile } from "../../services/file";
@@ -11,6 +12,7 @@ import {
   getWeeklyInspectionReminderSetting,
   getWeeklyInspectionSummary,
   saveWeeklyInspectionDraft,
+  returnWeeklyInspectionToDraft,
   submitWeeklyInspection,
   updateWeeklyInspectionReminderSetting,
 } from "../../services/quality";
@@ -27,7 +29,7 @@ import {
 
 const PAGE_SIZE = 20;
 const statusText = (status) =>
-  ({ DRAFT: "共享草稿", SUBMITTED: "已提交" })[status] || status || "-";
+  ({ DRAFT: "质量问题上传", SUBMITTED: "已提交" })[status] || status || "-";
 const issueStatusText = (status) =>
   ({ PENDING: "待整改", RECHECK: "待复查", CLOSED: "已关闭", VOIDED: "已作废" })[status]
   || status
@@ -43,6 +45,7 @@ export default function WeeklyInspectionPanel({
   projectId,
   T,
   canManage,
+  canReturnToDraft = false,
   buttonStyle,
   fieldStyle,
   pill,
@@ -65,6 +68,9 @@ export default function WeeklyInspectionPanel({
   const [members, setMembers] = useState([]);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState("");
+  const [returnTarget, setReturnTarget] = useState(null);
+  const [returnReason, setReturnReason] = useState("");
+  const [returnError, setReturnError] = useState("");
   const [reminderOpen, setReminderOpen] = useState(false);
   const [reminderLoading, setReminderLoading] = useState(false);
   const [reminderSaving, setReminderSaving] = useState(false);
@@ -135,6 +141,9 @@ export default function WeeklyInspectionPanel({
     setSelectedWeek(mondayOfWeek());
     setWeekPickerOpen(false);
     setDetail(null);
+    setReturnTarget(null);
+    setReturnReason("");
+    setReturnError("");
     setEditor(null);
     setDirty(false);
     setMembers([]);
@@ -245,6 +254,42 @@ export default function WeeklyInspectionPanel({
       await openWeekInspection(weekStart, true);
     } catch (error) {
       alert(error.message || "草稿创建失败");
+    }
+  };
+
+  const openReturnToDraft = (inspection) => {
+    if (!canReturnToDraft || busyRef.current || inspection.status !== "SUBMITTED") return;
+    setReturnTarget(inspection);
+    setReturnReason("");
+    setReturnError("");
+  };
+
+  const confirmReturnToDraft = async () => {
+    const reason = returnReason.trim();
+    if (!returnTarget || !canReturnToDraft) return;
+    if (!reason) { setReturnError("请填写退回原因"); return; }
+    if (!beginBusy("return")) return;
+    const requestId = ++openRequestRef.current;
+    setReturnError("");
+    try {
+      const candidates = await getQualityAssignees(projectId);
+      if (requestId !== openRequestRef.current) return;
+      if (candidates.code !== 200) throw new Error(candidates.message || "整改负责人加载失败");
+      const res = await returnWeeklyInspectionToDraft(returnTarget.id, returnTarget.version, reason);
+      if (requestId !== openRequestRef.current) return;
+      if (res.code !== 200) throw new Error(res.message || "退回草稿失败");
+      setMembers(candidates.data || []);
+      setReturnTarget(null);
+      setDetail(null);
+      setEditor(inspectionToEditor(res.data));
+      setDirty(false);
+      setStatus("ALL");
+      setPageNo(1);
+      await loadPage({ pageNo: 1, status: "ALL" });
+    } catch (error) {
+      if (requestId === openRequestRef.current) setReturnError(error.message || "退回草稿失败，请刷新核对状态");
+    } finally {
+      if (requestId === openRequestRef.current) endBusy();
     }
   };
 
@@ -425,24 +470,24 @@ export default function WeeklyInspectionPanel({
   const submitDraft = async () => {
     const validation = validateWeeklySubmission(editor);
     if (validation.length) return alert(validation.slice(0, 8).join("\n"));
-    if (!window.confirm(`确认整批提交本周检${editor.items.length ? `及 ${editor.items.length} 个质量问题` : "（无问题）"}？提交后周检内容不可修改。`)) return;
+    if (!window.confirm(`确认结束本周巡检${editor.items.length ? `（${editor.items.length} 个问题）` : "（无问题）"}？结束后周检内容不可修改，各问题将独立进入整改闭环。`)) return;
     if (!beginBusy("submit")) return;
     try {
       const saved = await persistDraft();
       const res = await submitWeeklyInspection(saved.id, saved.version);
-      if (res.code !== 200) throw new Error(res.message || "周检提交失败");
+      if (res.code !== 200) throw new Error(res.message || "结束本周巡检失败");
       setEditor(null);
       setDirty(false);
       await loadPage({ pageNo: 1 });
       setPageNo(1);
-      alert("质量周检已整批提交");
+      alert("本周巡检已结束");
     } catch (error) {
       if (error?.response?.status === 409) {
         if (!error.weeklyConflictNotified) {
-          alert("提交前共享草稿已发生变化，系统未重复创建问题；请重新加载后核对最新内容。");
+          alert("结束前共享草稿已发生变化，系统未重复创建问题；请重新加载后核对最新内容。");
         }
       } else {
-        alert(error.message || "周检提交失败");
+        alert(error.message || "结束本周巡检失败");
       }
     } finally {
       endBusy();
@@ -458,7 +503,7 @@ export default function WeeklyInspectionPanel({
         setEditor(null);
         setDetail(data);
         setDirty(false);
-        alert("该周检已由其他成员提交，现已切换为只读详情。");
+        alert("该周检已由其他成员结束，现已切换为只读详情。");
         return;
       }
       setEditor(inspectionToEditor(data));
@@ -545,13 +590,13 @@ export default function WeeklyInspectionPanel({
             {summary?.status === "DRAFT" && pill(`${summary.draftItemCount || 0} 个草稿问题`, "warning")}
             {summary?.lateSubmission && pill("往期补录", "warning")}
           </div>
-          <p style={{ color: T.textMuted }}>每个项目每周一份记录，共享草稿可跨 Web 与小程序继续编辑。</p>
+          <p style={{ color: T.textMuted }}>选择周次，点击“质量问题上传”添加或补充问题，Web 与小程序同步。</p>
         </div>
         <div className="quality-panel-actions">
             {canManage && <button type="button" disabled={!projectId || reminderLoading} onClick={openReminderSetting} style={buttonStyle("secondary")}>提醒设置</button>}
             <select aria-label="周检状态" value={status} onChange={(event) => { setPageNo(1); setStatus(event.target.value); }} style={{ ...fieldStyle, width: 110 }}>
               <option value="ALL">全部状态</option>
-              {canManage && <option value="DRAFT">共享草稿</option>}
+              {canManage && <option value="DRAFT">质量问题上传</option>}
               <option value="SUBMITTED">已提交</option>
             </select>
             <input aria-label="搜索周检记录" value={keyword} onChange={(event) => setKeyword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { setPageNo(1); setAppliedKeyword(keyword.trim()); } }} placeholder="搜索周检编号或结论" style={{ ...fieldStyle, width: 210 }} />
@@ -569,16 +614,21 @@ export default function WeeklyInspectionPanel({
           <>
             <HeaderRow T={T} />
             {inspections.map((inspection) => (
-              <div className="quality-table-row" key={inspection.id} style={{ display: "grid", gridTemplateColumns: "150px 170px 105px 100px 1fr 100px", minWidth: 920, alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: `1px solid ${T.borderColor}`, color: T.textSecondary, fontSize: 12 }}>
+              <div className="quality-table-row" key={inspection.id} style={{ display: "grid", gridTemplateColumns: "150px 170px 105px 100px 1fr 190px", minWidth: 920, alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: `1px solid ${T.borderColor}`, color: T.textSecondary, fontSize: 12 }}>
                 <span title={inspection.inspectionNo}>{inspection.inspectionNo || `草稿 #${inspection.id}`}</span>
                 <span>{inspection.weekStart} 至 {inspection.weekEnd || addLocalDays(inspection.weekStart, 6)}</span>
                 <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                  {pill(statusText(inspection.status), inspection.status === "DRAFT" ? "warning" : "success")}
+                  {inspection.status === "DRAFT" && canManage ? (
+                    <button type="button" aria-label={`${inspection.weekStart} 至 ${inspection.weekEnd || addLocalDays(inspection.weekStart, 6)} 质量问题上传`} disabled={Boolean(busy)} onClick={() => openInspection(inspection)} style={{ ...buttonStyle(), display: "inline-flex", alignItems: "center", gap: 3, minHeight: 30, padding: "5px 8px", borderRadius: 6, fontSize: 11, whiteSpace: "nowrap" }}><span aria-hidden="true">＋</span>质量问题上传</button>
+                  ) : pill(inspection.status === "DRAFT" ? "整理中" : statusText(inspection.status), inspection.status === "DRAFT" ? "warning" : "success")}
                   {inspection.lateSubmission && pill("补录", "warning")}
                 </span>
                 <span>{inspection.status === "DRAFT" ? "编辑中" : `${inspection.submittedIssueCount || 0} 个问题`}</span>
                 <span>{inspection.lastEditedByName || inspection.submittedByName || inspection.createdByName || "-"} · {formatTime(inspection.updateTime || inspection.submittedTime)}</span>
-                <button type="button" disabled={Boolean(busy)} onClick={() => openInspection(inspection)} style={buttonStyle("secondary")}>{inspection.status === "DRAFT" && canManage ? "继续编辑" : "查看"}</button>
+                <span style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+                  {!(inspection.status === "DRAFT" && canManage) && <button type="button" disabled={Boolean(busy)} onClick={() => openInspection(inspection)} style={buttonStyle("secondary")}>查看</button>}
+                  {canReturnToDraft && inspection.status === "SUBMITTED" && <button type="button" disabled={Boolean(busy)} onClick={() => openReturnToDraft(inspection)} style={buttonStyle("secondary")}>退回草稿</button>}
+                </span>
               </div>
             ))}
             {!inspections.length && <StateText T={T}>当前筛选下暂无质量周检</StateText>}
@@ -681,8 +731,8 @@ export default function WeeklyInspectionPanel({
             <button type="button" disabled={Boolean(busy)} onClick={discardDraft} style={buttonStyle("danger")}>{busy === "discard" ? "放弃中..." : "放弃草稿"}</button>
             <div style={{ display: "flex", gap: 8 }}>
               <button type="button" disabled={Boolean(busy)} onClick={reloadDraft} style={buttonStyle("secondary")}>重新加载</button>
-              <button type="button" disabled={Boolean(busy)} onClick={saveDraft} style={buttonStyle("secondary")}>{busy === "save" ? "保存中..." : "保存草稿"}</button>
-              <button type="button" disabled={Boolean(busy)} onClick={submitDraft} style={buttonStyle()}>{busy === "submit" ? "提交中..." : `整批提交${editor.items.length ? `（${editor.items.length} 个问题）` : "（无问题）"}`}</button>
+              <button type="button" disabled={Boolean(busy)} onClick={saveDraft} style={buttonStyle("secondary")}>{busy === "save" ? "正在提交..." : "提交巡检问题"}</button>
+              <button type="button" disabled={Boolean(busy)} onClick={submitDraft} style={buttonStyle()}>{busy === "submit" ? "正在结束..." : `结束本周巡检${editor.items.length ? `（${editor.items.length} 个问题）` : "（无问题）"}`}</button>
             </div>
           </div>
         </Overlay>
@@ -690,6 +740,8 @@ export default function WeeklyInspectionPanel({
 
       {detail && (
         <Overlay T={T} title={`质量周检详情 · ${detail.inspectionNo || detail.id}`} onClose={closeOverlay} width={980}>
+          <CorrectionNotice record={detail} />
+          {canReturnToDraft && detail.status === "SUBMITTED" && <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}><button type="button" disabled={Boolean(busy)} style={buttonStyle("secondary")} onClick={() => openReturnToDraft(detail)}>退回草稿</button></div>}
           <InspectionDetail
             T={T}
             detail={detail}
@@ -702,12 +754,27 @@ export default function WeeklyInspectionPanel({
           />
         </Overlay>
       )}
+      {returnTarget && (
+        <Overlay T={T} title="将周检退回草稿" width={560} onClose={() => { if (!busyRef.current) setReturnTarget(null); }}>
+          <div style={{ color: T.textSecondary, fontSize: 13, lineHeight: 1.8 }}>
+            <strong>{returnTarget.weekStart} 至 {returnTarget.weekEnd || addLocalDays(returnTarget.weekStart, 6)}</strong>
+            <p>本次周检原提交 {returnTarget.submittedIssueCount || 0} 个问题。退回后保留检查日期、结论和现存周检现场照片，仍存在的问题恢复为共享草稿并退出整改闭环，对应待办撤下。</p>
+            <p>已删除的问题和附件不会恢复；问题全部删除时也可退回，继续添加新问题。现存问题须尚未整改、复查或作废。退回原因、恢复数量及未恢复的已删除问题数量会留存记录。</p>
+            <p>修改完成后需再次点击“结束本周巡检”。</p>
+          </div>
+          <label style={labelStyle(T)}>退回原因 *
+            <textarea aria-label="退回原因" maxLength={200} rows={3} value={returnReason} disabled={Boolean(busy)} onChange={(event) => { setReturnReason(event.target.value); setReturnError(""); }} placeholder="例如：误点提交，问题尚未整理完成" style={{ ...fieldStyle, width: "100%", resize: "vertical" }} />
+          </label>
+          {returnError && <div role="alert" style={{ color: "#c0392b", fontSize: 12, marginTop: 8 }}>{returnError}</div>}
+          <Actions buttonStyle={buttonStyle} busy={Boolean(busy)} onCancel={() => setReturnTarget(null)} onConfirm={confirmReturnToDraft} confirmText={busy === "return" ? "正在退回…" : "确认退回草稿"} />
+        </Overlay>
+      )}
     </div>
   );
 }
 
 function HeaderRow({ T }) {
-  return <div className="quality-table-head" style={{ display: "grid", gridTemplateColumns: "150px 170px 105px 100px 1fr 100px", minWidth: 920, gap: 10, padding: "10px 14px", position: "sticky", top: 0, zIndex: 1, background: T.surface2, borderBottom: `1px solid ${T.borderColor}`, color: T.textMuted, fontSize: 11 }}><span>周检编号</span><span>周次</span><span>状态</span><span>问题数</span><span>最近操作</span><span>操作</span></div>;
+  return <div className="quality-table-head" style={{ display: "grid", gridTemplateColumns: "150px 170px 105px 100px 1fr 190px", minWidth: 920, gap: 10, padding: "10px 14px", position: "sticky", top: 0, zIndex: 1, background: T.surface2, borderBottom: `1px solid ${T.borderColor}`, color: T.textMuted, fontSize: 11 }}><span>周检编号</span><span>周次</span><span>状态</span><span>问题数</span><span>最近操作</span><span>操作</span></div>;
 }
 
 function IssueEditor({ T, index, item, members, fieldStyle, buttonStyle, onChange, onCopy, onRemove, onSelectFiles }) {
@@ -782,15 +849,17 @@ function PhotoEditor({ T, title, existingIds, newFiles, fieldStyle, onRemoveExis
 
 function InspectionDetail({ T, detail, pill, buttonStyle, onOpenIssue }) {
   const issues = detail.issues || [];
+  const deletedIssueCount = Math.max(0, (detail.submittedIssueCount ?? issues.length) - issues.length);
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5,minmax(0,1fr))", gap: 8 }}>
-        {[["周次", `${detail.weekStart} 至 ${detail.weekEnd}`], ["检查日期", detail.inspectionDate], ["提交人", detail.submittedByName], ["提交时间", formatTime(detail.submittedTime)], ["问题总数", detail.submittedIssueCount ?? issues.length], ["待整改", detail.pendingCount || 0], ["待复查", detail.recheckCount || 0], ["已关闭", detail.closedCount || 0], ["已作废", detail.voidedCount || 0]].map(([label, value]) => <div key={label} style={{ padding: 10, borderRadius: 7, background: T.surface2, color: T.textSecondary, fontSize: 11 }}><span style={{ color: T.textMuted }}>{label}</span><strong style={{ display: "block", marginTop: 4, color: T.textPrimary }}>{value ?? "-"}</strong></div>)}
+        {[["周次", `${detail.weekStart} 至 ${detail.weekEnd}`], ["检查日期", detail.inspectionDate], ["提交人", detail.submittedByName], ["提交时间", formatTime(detail.submittedTime)], ["提交时问题数", detail.submittedIssueCount ?? issues.length], ["待整改", detail.pendingCount || 0], ["待复查", detail.recheckCount || 0], ["已关闭", detail.closedCount || 0], ["已作废", detail.voidedCount || 0], ["已删除", deletedIssueCount]].map(([label, value]) => <div key={label} style={{ padding: 10, borderRadius: 7, background: T.surface2, color: T.textSecondary, fontSize: 11 }}><span style={{ color: T.textMuted }}>{label}</span><strong style={{ display: "block", marginTop: 4, color: T.textPrimary }}>{value ?? "-"}</strong></div>)}
       </div>
+      {deletedIssueCount > 0 && <p style={{ color: T.textSecondary, fontSize: 12, lineHeight: 1.6 }}>原提交 {detail.submittedIssueCount} 个问题，当前保留 {issues.length} 个，已删除 {deletedIssueCount} 个。退回草稿不会恢复已删除的问题或附件。</p>}
       {detail.lateSubmission && <div style={{ marginTop: 10 }}>{pill("往期补录", "warning")}</div>}
       <section style={{ marginTop: 14 }}><strong style={{ color: T.textPrimary }}>检查结论</strong><div style={{ marginTop: 7, padding: 10, borderRadius: 7, background: T.surface2, color: T.textSecondary, whiteSpace: "pre-wrap", fontSize: 12 }}>{detail.conclusion || "未填写"}</div></section>
       <section style={{ marginTop: 14 }}><strong style={{ color: T.textPrimary }}>周检现场照片</strong><RemotePhotoGrid T={T} fileIds={detail.overviewPhotoFileIds || []} /></section>
-      <section style={{ marginTop: 16 }}><strong style={{ color: T.textPrimary }}>本次问题（{issues.length}）</strong><div style={{ marginTop: 8, display: "grid", gap: 7 }}>{issues.map((issue, index) => <div key={issue.id} style={{ display: "grid", gridTemplateColumns: "42px 1fr 110px 90px 80px 80px", gap: 8, alignItems: "center", padding: 10, borderRadius: 7, border: `1px solid ${T.borderColor}`, color: T.textSecondary, fontSize: 11 }}><span>#{index + 1}</span><span><strong style={{ display: "block", color: T.textPrimary }}>{issue.title}</strong>{issue.location || "-"}</span><span>{issue.assigneeName || "待重新分配"}</span><span>{issue.deadline || "-"}</span><span>{pill(issueStatusText(issue.status), issueStatusTone(issue.status))}</span><button type="button" onClick={() => onOpenIssue(issue)} style={buttonStyle("secondary")}>问题详情</button></div>)}{!issues.length && <div style={{ padding: 14, color: T.textMuted, fontSize: 11 }}>本周检查无质量问题</div>}</div></section>
+      <section style={{ marginTop: 16 }}><strong style={{ color: T.textPrimary }}>本次问题（{issues.length}）</strong><div style={{ marginTop: 8, display: "grid", gap: 7 }}>{issues.map((issue, index) => <div key={issue.id} style={{ display: "grid", gridTemplateColumns: "42px 1fr 110px 90px 80px 80px", gap: 8, alignItems: "center", padding: 10, borderRadius: 7, border: `1px solid ${T.borderColor}`, color: T.textSecondary, fontSize: 11 }}><span>#{index + 1}</span><span><strong style={{ display: "block", color: T.textPrimary }}>{issue.title}</strong>{issue.location || "-"}</span><span>{issue.assigneeName || "待重新分配"}</span><span>{issue.deadline || "-"}</span><span>{pill(issueStatusText(issue.status), issueStatusTone(issue.status))}</span><button type="button" onClick={() => onOpenIssue(issue)} style={buttonStyle("secondary")}>问题详情</button></div>)}{!issues.length && <div style={{ padding: 14, color: T.textMuted, fontSize: 11 }}>{deletedIssueCount > 0 ? "原提交的问题已全部删除，当前无保留问题；周检结论和现场照片仍保留。" : "本周检查无质量问题"}</div>}</div></section>
     </>
   );
 }

@@ -604,7 +604,7 @@ class SiteAccessServiceTest {
             assertThat(sheet.getRow(1).getCell(8).getStringCellValue()).isEqualTo("'+危险前缀");
             assertThat(sheet.getRow(0).getCell(9).getStringCellValue()).isEqualTo("手机号码");
             assertThat(sheet.getRow(1).getCell(9).getStringCellValue()).isEqualTo(TEST_PHONE);
-            assertThat(sheet.getRow(1).getLastCellNum()).isEqualTo((short) 16);
+            assertThat(sheet.getRow(1).getLastCellNum()).isEqualTo((short) 17);
         }
     }
 

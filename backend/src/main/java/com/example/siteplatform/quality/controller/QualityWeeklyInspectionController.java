@@ -5,6 +5,7 @@ import com.example.siteplatform.auth.service.AuthService;
 import com.example.siteplatform.common.PageResult;
 import com.example.siteplatform.common.Result;
 import com.example.siteplatform.quality.dto.QualityWeeklyActionRequest;
+import com.example.siteplatform.quality.dto.QualityWeeklyReturnRequest;
 import com.example.siteplatform.quality.dto.QualityWeeklyDraftCreateRequest;
 import com.example.siteplatform.quality.dto.QualityWeeklyDraftSaveRequest;
 import com.example.siteplatform.quality.dto.QualityWeeklyReminderSettingRequest;
@@ -131,6 +132,15 @@ public class QualityWeeklyInspectionController {
             @RequestHeader(value = "Authorization", required = false) String token) {
         SysUser currentUser = authService.getCurrentUser(token);
         return Result.success(weeklyInspectionService.submit(id, request, currentUser));
+    }
+
+    @Operation(summary = "系统管理员将尚未整改的已提交周检退回草稿")
+    @PostMapping("/{id}/return-to-draft")
+    public Result<QualityWeeklyInspectionVO> returnToDraft(
+            @PathVariable Long id,
+            @Valid @RequestBody QualityWeeklyReturnRequest request,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        return Result.success(weeklyInspectionService.returnToDraft(id, request, authService.getCurrentUser(token)));
     }
 
     @Operation(summary = "放弃质量周检共享草稿")

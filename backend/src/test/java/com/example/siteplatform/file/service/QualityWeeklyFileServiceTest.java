@@ -14,6 +14,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -31,6 +32,23 @@ class QualityWeeklyFileServiceTest {
         storageManager = mock(FileStorageManager.class);
         permissionService = mock(ProjectPermissionService.class);
         service = new QualityWeeklyFileService(fileMapper, storageManager, permissionService);
+    }
+
+    @Test
+    void returnToDraftKeepsOriginalFileAndOnlyChangesItsBusinessOwner() {
+        FileResource original = file(11L, 8L, "QUALITY_ISSUE", 101L);
+        when(fileMapper.selectWeeklyDraftFilesForUpdate(2L, "QUALITY_ISSUE", 101L)).thenReturn(List.of(original));
+        when(fileMapper.transferWeeklyDraftFile(11L, 2L, "QUALITY_ISSUE", 101L, "QUALITY_WEEKLY_DRAFT_ITEM", 42L)).thenReturn(1);
+        assertEquals(List.of(11L), service.returnFinalFilesToDraft(2L, "QUALITY_ISSUE", 101L, "QUALITY_WEEKLY_DRAFT_ITEM", 42L));
+        verify(storageManager, never()).delete(any());
+    }
+
+    @Test
+    void returnRejectsMismatchedStagesAndChangedFiles() {
+        assertThrows(BusinessException.class, () -> service.returnFinalFilesToDraft(2L, "QUALITY_ISSUE", 101L, "QUALITY_WEEKLY_DRAFT", 42L));
+        when(fileMapper.selectWeeklyDraftFilesForUpdate(2L, "QUALITY_ISSUE", 101L)).thenReturn(List.of(file(11L, 8L, "QUALITY_ISSUE", 101L)));
+        assertEquals(409, assertThrows(BusinessException.class, () -> service.returnFinalFilesToDraft(2L, "QUALITY_ISSUE", 101L, "QUALITY_WEEKLY_DRAFT_ITEM", 42L)).getCode());
+        verify(storageManager, never()).delete(any());
     }
 
     @Test

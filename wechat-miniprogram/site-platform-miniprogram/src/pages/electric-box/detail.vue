@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CorrectionNotice from '@/components/CorrectionNotice.vue';
 import { computed, ref } from 'vue';
 import { onShow } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
@@ -52,6 +53,7 @@ function openPublicMonthly() { if (box.value) navigateTo(`/pages/public/box-mont
   <view class="flow-page detail-page">
     <AppNavBar title="电箱详情" @back="goBack" />
     <scroll-view class="flow-scroll" scroll-y enable-flex :style="scrollStyle">
+    <CorrectionNotice :record="box" />
       <view v-if="loading" class="flow-content skeleton-stack">
         <view class="flow-card skeleton-card"><view class="flow-skeleton code-line"></view><view class="flow-skeleton name-line"></view><view class="flow-skeleton meta-line"></view></view>
         <view class="flow-card skeleton-card qr-skeleton"><view class="flow-skeleton qr-block"></view></view>

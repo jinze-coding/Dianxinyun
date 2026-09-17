@@ -27,6 +27,7 @@ npm run verify:mp-weixin:real
 version="$(node -p "require('./package.json').version")"
 build_id="$(node -e "const fs=require('fs');const s=fs.readFileSync('src/constants/release.ts','utf8');const m=s.match(/MINI_PROGRAM_BUILD_ID\s*=\s*'([^']+)'/);if(!m)process.exit(1);process.stdout.write(m[1])")"
 appid="$(node -p "require('./dist/build/mp-weixin/project.config.json').appid")"
+page_count="$(node -e "const p=require('./src/pages.json');process.stdout.write(String(p.pages.length+(p.subPackages||[]).reduce((n,x)=>n+x.pages.length,0)))")"
 timestamp="$(date '+%Y%m%d-%H%M%S')"
 package_id="Dianxinyun-mini-${version}-prod-${timestamp}"
 archive_path="$output_root/${package_id}.tar.gz"
@@ -68,7 +69,7 @@ esac
   printf 'API_BASE=https://zhihuiyz.xyz/api/v1\n'
   printf 'URL_CHECK=true\n'
   printf 'UNI_STATISTICS_ENABLED=false\n'
-  printf 'PAGE_COUNT=43\n'
+  printf 'PAGE_COUNT=%s\n' "$page_count"
   printf 'FILE_COUNT=%s\n' "$file_count"
   printf 'TOTAL_BYTES=%s\n' "$total_bytes"
   printf 'NODE_VERSION=%s\n' "$(node --version)"
@@ -87,4 +88,4 @@ tar --no-xattrs --uid 0 --gid 0 --uname root --gname root -czf "$archive_path" \
 
 printf '小程序正式候选包：%s\n' "$archive_path"
 printf '外层校验：%s\n' "$checksum_path"
-printf '构建编号：%s；页面：43；文件：%s；字节：%s\n' "$build_id" "$file_count" "$total_bytes"
+printf '构建编号：%s；页面：%s；文件：%s；字节：%s\n' "$build_id" "$page_count" "$file_count" "$total_bytes"

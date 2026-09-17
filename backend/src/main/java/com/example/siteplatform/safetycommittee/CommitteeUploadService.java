@@ -64,7 +64,7 @@ public class CommitteeUploadService {
         Session s=require(projectId,id,user); String owner=lock(id);
         try {
             var done=service.completed(id);
-            if(done!=null) return service.attachmentView(service.requireAttachment(done.getId(),user));
+            if(done!=null) return service.attachmentView(service.requireAttachment(done.getId(),user),user);
             service.validateUpload(s.request,user); space(s.request.totalSize()*2);
             Path assembled=directory(id).resolve("assembled");
             try(OutputStream out=Files.newOutputStream(assembled)) {

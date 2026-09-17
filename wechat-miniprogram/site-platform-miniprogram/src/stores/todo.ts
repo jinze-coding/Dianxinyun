@@ -1,4 +1,7 @@
 import { reactive } from 'vue';
+import { useAuthStore } from './auth';
+import { useProjectStore } from './project';
+import { getToken } from '@/api/request';
 import { getScopedTodoPage, getTodoSummary } from '@/api/todo';
 import type { PageResult, TodoItem, TodoSummary } from '@/types';
 
@@ -26,6 +29,7 @@ const state = reactive<{
 });
 
 let todoRequestSequence = 0;
+let summaryRequestSequence = 0;
 
 export function useTodoStore() {
   async function loadTodos(projectId?: number) {
@@ -46,15 +50,22 @@ export function useTodoStore() {
   }
 
   async function loadSummary() {
+    const auth = useAuthStore();
+    const projectId = useProjectStore().state.currentProjectId;
+    const token = getToken();
+    const sequence = ++summaryRequestSequence;
+    const empty = { pendingCount: 0, ccCount: 0, unreadNotificationCount: 0, badgeCount: 0 };
+    if (!auth.state.user || auth.requiresInitialPasswordSetup() || !auth.canAccessRoot('/pages/todo/index')) {
+      state.summary = empty;
+      return;
+    }
+    const current = () => sequence === summaryRequestSequence && token === getToken()
+      && projectId === useProjectStore().state.currentProjectId && auth.canAccessRoot('/pages/todo/index');
     try {
-      state.summary = await getTodoSummary();
+      const summary = await getTodoSummary();
+      if (current()) state.summary = summary;
     } catch {
-      state.summary = {
-        pendingCount: state.todos.length,
-        ccCount: 0,
-        unreadNotificationCount: 0,
-        badgeCount: state.todos.length
-      };
+      if (current()) state.summary = empty;
     }
   }
 

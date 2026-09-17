@@ -25,6 +25,20 @@ try{
    getFileSystemManager:()=>({readFile:o=>{reads.push([o.position,o.length]);o.success({data:new Uint8Array(o.length).buffer});}}),
    request:o=>{assert.equal(o.method,'PUT');assert.ok(o.data.byteLength<=8*1024**2+1024);assert.equal(o.header.Authorization,'Bearer test-session');sent++;o.success({statusCode:200,data:{code:200}});return {abort:()=>{}};}};
  const api=await import(pathToFileURL(path.join(temporary,'api.mjs')));
+ const mediaCalls=[];let nativeError;
+ globalThis.wx={chooseMedia:o=>{
+   mediaCalls.push(o);
+   if(nativeError){o.fail(nativeError);return;}
+   if(o.maxDuration!==undefined && (o.maxDuration<3 || o.maxDuration>60)){o.fail({errMsg:'chooseMedia:fail error maxDuration'});return;}
+   o.success({tempFiles:[{tempFilePath:'wxfile://long-video.mp4',fileType:'video',duration:300,size:1024}]});
+ },chooseMessageFile:o=>nativeError?o.fail(nativeError):o.success({tempFiles:[{name:'文档.pdf',path:'wxfile://document.pdf',size:100}]})};
+ const album=await api.chooseCommitteeFiles('album');assert.deepEqual(mediaCalls[0].sourceType,['album']);assert.equal(mediaCalls[0].maxDuration,undefined);assert.equal(album[0].path,'wxfile://long-video.mp4');
+ await api.chooseCommitteeFiles('camera');assert.deepEqual(mediaCalls[1].sourceType,['camera']);assert.equal(mediaCalls[1].maxDuration,60);
+ const files=await api.chooseCommitteeFiles('chat');assert.equal(files[0].name,'文档.pdf');
+ nativeError={errMsg:'chooseMedia:fail cancel'};await assert.rejects(api.chooseCommitteeFiles('album'),e=>e===nativeError);
+ nativeError={errno:112,errMsg:'chooseMedia:fail api scope is not declared in the privacy agreement'};
+ for(const source of ['album','chat'])await assert.rejects(api.chooseCommitteeFiles(source),/隐私声明未完善/);
+ nativeError=undefined;
  await api.committeeApi.list(3,'基坑工程',2);
  assert.deepEqual(Object.fromEntries(queries[0]),{projectId:'3',pageNo:'2',category:'基坑工程'});
  await api.committeeApi.list(3,'',1);assert.equal(queries[1].has('startDate'),false);assert.equal(queries[1].has('endDate'),false);
@@ -39,4 +53,4 @@ try{
  await writeFile(path.join(temporary,'nav.mjs'),nav);const navigation=await import(pathToFileURL(path.join(temporary,'nav.mjs')));
  navigation.switchTab('/pages/safety-committee/index');assert.equal(launched,'/pages/safety-committee/index');assert.equal(switched,'');navigation.switchTab('/pages/todo/index');assert.equal(switched,'/pages/todo/index');
  console.log('安委会专项通过：不带日期的分类分页查询、大小边界、500 MiB 按段读取及31片续传、取消、播放凭证和六入口路由（原生五tab）。');
-}finally{await rm(temporary,{recursive:true,force:true});delete globalThis.uni;delete globalThis.committeeRequest;}
+}finally{await rm(temporary,{recursive:true,force:true});delete globalThis.uni;delete globalThis.wx;delete globalThis.committeeRequest;}

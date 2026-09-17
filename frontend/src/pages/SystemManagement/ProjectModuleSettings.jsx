@@ -15,6 +15,7 @@ export default function ProjectModuleSettings({ ModalFrame, PageBar, Pagination 
   const [message, setMessage] = useState('');
   const [editing, setEditing] = useState(null);
   const [selected, setSelected] = useState([]);
+  const [inboxVisible, setInboxVisible] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [conflict, setConflict] = useState(false);
@@ -30,12 +31,12 @@ export default function ProjectModuleSettings({ ModalFrame, PageBar, Pagination 
     } finally { if (request === sequence.current) setLoading(false); }
   }, [query, page]);
   useEffect(() => { void load(); return () => { sequence.current += 1; }; }, [load]);
-  const open = (row) => { setEditing(row); setSelected([...row.enabledBusinessModules]); setFormError(''); setConflict(false); };
+  const open = (row) => { setEditing(row); setSelected([...row.enabledBusinessModules]); setInboxVisible(row.inboxEntryVisible !== false); setFormError(''); setConflict(false); };
   const save = async () => {
     if (saving || conflict) return;
     setSaving(true); setFormError('');
     try {
-      const state = await saveProjectModules(editing.projectId, { moduleCodes: selected, expectedVersion: editing.moduleConfigVersion });
+      const state = await saveProjectModules(editing.projectId, { moduleCodes: selected, inboxEntryVisible: inboxVisible, expectedVersion: editing.moduleConfigVersion });
       setEditing(null); setMessage(`${editing.projectName}的模块配置已保存`);
       window.dispatchEvent(new CustomEvent('project-modules-changed', { detail: state }));
       await load();
@@ -50,7 +51,7 @@ export default function ProjectModuleSettings({ ModalFrame, PageBar, Pagination 
       const latest = await getProjectModules(editing.projectId);
       setEditing((current) => ({ ...current, ...latest }));
       setConflict(false);
-      setFormError(`当前已保存：${labels(latest.enabledBusinessModules)}。已保留您的选择，请核对后保存。`);
+      setFormError(`当前已保存：${labels(latest.enabledBusinessModules)}；待办/消息${latest.inboxEntryVisible === false ? '隐藏' : '显示'}。已保留您的选择，请核对后保存。`);
     } catch (failure) { setFormError(failure.message); }
     finally { setSaving(false); }
   };
@@ -63,15 +64,16 @@ export default function ProjectModuleSettings({ ModalFrame, PageBar, Pagination 
     </PageBar>
     {message && <div className="system-inline-notice" role="status">{message}</div>}
     {error && <div className="system-form-error" role="alert">{error}<button onClick={load}>重试</button></div>}
-    <div className="system-table-wrap"><table><thead><tr><th>项目名称</th><th>启用模块</th><th>已启用</th><th>操作</th></tr></thead>
-      <tbody>{data.records.map((row) => <tr key={row.projectId}><td><strong>{row.projectName}</strong></td><td><div className="project-module-tags">{PROJECT_MODULES.filter((module) => row.enabledBusinessModules.includes(module.code)).map((module) => <span key={module.code}>{module.label}</span>)}{!row.enabledBusinessModules.length && <span className="none">全部关闭</span>}</div></td><td>{row.enabledBusinessModules.length} / 5</td><td><div className="system-row-actions"><button onClick={() => open(row)}>配置模块</button></div></td></tr>)}
-        {!data.records.length && <tr><td colSpan={4} className="project-module-empty">{loading ? '加载中…' : '暂无匹配项目'}</td></tr>}
+    <div className="system-table-wrap"><table><thead><tr><th>项目名称</th><th>启用模块</th><th>已启用</th><th>待办/消息</th><th>操作</th></tr></thead>
+      <tbody>{data.records.map((row) => <tr key={row.projectId}><td><strong>{row.projectName}</strong></td><td><div className="project-module-tags">{PROJECT_MODULES.filter((module) => row.enabledBusinessModules.includes(module.code)).map((module) => <span key={module.code}>{module.label}</span>)}{!row.enabledBusinessModules.length && <span className="none">全部关闭</span>}</div></td><td>{row.enabledBusinessModules.length} / 5</td><td>{row.inboxEntryVisible === false ? '隐藏' : '显示'}</td><td><div className="system-row-actions"><button onClick={() => open(row)}>配置模块</button></div></td></tr>)}
+        {!data.records.length && <tr><td colSpan={5} className="project-module-empty">{loading ? '加载中…' : '暂无匹配项目'}</td></tr>}
       </tbody></table></div>
     <Pagination pageNo={page} pageSize={20} total={data.total} onPageChange={setPage} />
     {editing && <ModalFrame title={`配置模块 - ${editing.projectName}`} description="关闭后暂停该项目对应业务，历史数据与角色授权保留，重新启用后恢复。" onClose={() => { if (!saving) setEditing(null); }} footer={<><button className="plain" disabled={saving} onClick={() => setEditing(null)}>取消</button><button className="primary" disabled={saving || conflict} onClick={save}>{saving ? '处理中…' : '保存配置'}</button></>}>
       <div className="system-tree-toolbar project-module-actions"><span>已启用 {selected.length} 个业务模块</span><div><button disabled={saving} onClick={() => setSelected(PROJECT_MODULES.map((module) => module.code))}>全选</button><button disabled={saving} onClick={() => setSelected([])}>清空</button></div></div>
       <div className="project-module-options">{PROJECT_MODULES.map((module) => <label key={module.code}><input type="checkbox" disabled={saving} checked={selected.includes(module.code)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, module.code] : current.filter((code) => code !== module.code))} /><span>{module.label}</span></label>)}</div>
-      <div className="system-inline-notice">系统管理、项目信息、个人待办和“我的”保留。停用前的未完成任务按原截止时间恢复。</div>
+      <div className="project-module-options project-inbox-option"><label><input type="checkbox" disabled={saving} checked={inboxVisible} onChange={(event) => setInboxVisible(event.target.checked)} /><span>显示待办/消息</span></label></div>
+      <div className="system-inline-notice">关闭“显示待办/消息”后，两端隐藏当前项目的待办入口与角标；默认进入有权限的安委会巡检或其他可用页面，业务流程和历史通知保留。系统管理、项目信息和“我的”仍可用。</div>
       {formError && <div className="system-form-error project-module-feedback" role="alert"><span>{formError}</span>{conflict && <button disabled={saving} onClick={reviewConflict}>重新核对最新配置</button>}</div>}
     </ModalFrame>}
   </>;

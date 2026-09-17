@@ -48,6 +48,14 @@ export function previewSystemUserProjectRoleAssignments(id, data) {
   return post(`/system/users/${id}/project-role-assignments/preview`, data);
 }
 
+export function previewProjectAccessBatch(data) {
+  return post('/system/users/project-role-assignments/batch/preview', data);
+}
+
+export function confirmProjectAccessBatch(data) {
+  return post('/system/users/project-role-assignments/batch/confirm', data);
+}
+
 export function getSystemRoles(params = {}) {
   return get('/system/roles', params);
 }

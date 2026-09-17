@@ -6,7 +6,7 @@ const pageSource = readFileSync(new URL('./index.jsx', import.meta.url), 'utf8')
 const styleSource = readFileSync(new URL('./index.css', import.meta.url), 'utf8');
 
 test('document circulation opens with a task-oriented workbench and explains the complete loop', () => {
-  assert.match(pageSource, /useState\('workspace'\)/);
+  assert.match(pageSource, /useNavigationTab\('circulationTab', 'workspace',/);
   assert.match(pageSource, /\{ id: 'workspace', label: '工作台' \}/);
   assert.match(pageSource, /收到资料/);
   assert.match(pageSource, /核对版本/);

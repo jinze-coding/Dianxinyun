@@ -1,3 +1,4 @@
+import { useNavigationTab } from '../../components/BrowserNavigation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   confirmDocumentDistribution,
@@ -162,7 +163,9 @@ export default function DocumentCirculationPage({ projectId, projectList, curren
   const canView = admin || hasProjectPermission(currentUser, projectId, 'document.circulation.view');
   const canExport = admin || hasProjectPermission(currentUser, projectId, 'document.circulation.export');
   const projectName = projectList?.find((item) => Number(item.id) === Number(projectId))?.projectName || '当前项目';
-  const [tab, setTab] = useState('workspace');
+  const [tab, setTab] = useNavigationTab('circulationTab', 'workspace', [
+    ...(canView ? ['workspace', 'incoming', 'distribution', 'ledger'] : []), ...(directRecipient ? ['receipt'] : []),
+  ]);
   const [incoming, setIncoming] = useState([]);
   const [distributions, setDistributions] = useState([]);
   const [draft, setDraft] = useState(null);

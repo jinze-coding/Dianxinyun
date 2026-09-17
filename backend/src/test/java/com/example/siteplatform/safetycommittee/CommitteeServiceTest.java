@@ -78,6 +78,20 @@ class CommitteeServiceTest {
         assertThatThrownBy(()->service.edit(10L,new CommitteeRequests.Edit("其他","",List.of(),1),user)).isInstanceOf(BusinessException.class).hasMessageContaining("只能修改本人");
         verify(records,never()).updateById(any(CommitteeRecord.class));
     }
+    @Test void rotationControlsAllowAdminForCurrentMediaButKeepPendingAndHistoryPrivate(){
+        var a=new CommitteeAttachment();a.setId(1L);a.setProjectId(3L);a.setRecordId(10L);a.setUploaderId(7L);
+        a.setStatus("ACTIVE");a.setPreviewKind("IMAGE");
+        user.setId(8L);assertThat(service.canRotate(a,user)).isFalse();
+        when(permissions.isPlatformAdmin(8L)).thenReturn(true);assertThat(service.canRotate(a,user)).isTrue();
+        a.setPreviewKind("VIDEO");assertThat(service.canRotate(a,user)).isTrue();
+        a.setStatus("HISTORICAL");assertThat(service.canRotate(a,user)).isFalse();
+        a.setStatus("PENDING");a.setRecordId(null);a.setExpiresAt(CommitteeService.now().plusHours(1));
+        assertThat(service.canRotate(a,user)).isFalse();
+        user.setId(7L);assertThat(service.canRotate(a,user)).isTrue();
+        a.setRecordId(10L);a.setStatus("ACTIVE");when(permissions.hasSystemPermission(7L,3L,CommitteeService.EDIT)).thenReturn(true);
+        assertThat(service.canRotate(a,user)).isTrue();
+        a.setPreviewKind("OFFICE");assertThat(service.canRotate(a,user)).isFalse();
+    }
     @Test void pendingFilesRequireTheirOwnerAndOriginalPurpose(){
         var a=new CommitteeAttachment();a.setId(1L);a.setProjectId(3L);a.setUploaderId(7L);a.setStatus("PENDING");a.setExpiresAt(CommitteeService.now().plusHours(1));
         when(attachments.selectById(1L)).thenReturn(a);

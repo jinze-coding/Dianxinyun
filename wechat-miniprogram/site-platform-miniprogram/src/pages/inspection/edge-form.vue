@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { onLoad, onShow, onUnload } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
+import CorrectionNotice from '@/components/CorrectionNotice.vue';
 import {
   getEdgeInspectionTask,
   getEdgeInspectionUserOptions,
@@ -380,6 +381,7 @@ function goBack() {
   <view class="form-shell">
     <AppNavBar title="临边巡检" @back="goBack" />
     <scroll-view class="form-scroll" scroll-y enable-flex :style="scrollStyle">
+      <CorrectionNotice :record="task" />
       <view class="content">
         <view v-if="loading" class="state">正在加载临边巡检任务…</view>
         <view v-else-if="errorMessage" class="state error">{{ errorMessage }}</view>

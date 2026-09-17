@@ -67,6 +67,7 @@ const SYSTEM_MENU_ORDER = [
   'SYSTEM_MENU',
   'SYSTEM_WECHAT',
   'SYSTEM_AUDIT',
+  'SYSTEM_DATA_CORRECTION',
   'SYSTEM_APPROVAL',
 ];
 
@@ -80,13 +81,14 @@ const SYSTEM_PERMISSION_CODES = [
   'system.menu.manage',
   'system.wechat.manage',
   'system.audit.view',
+  'system.data.correct',
   'system.approval.view',
   'system.approval.manage',
 ];
 
 const ACTION_DEFINITIONS = [
   { key: 'safety_committee.view', label: '查看项目巡检记录和附件', group: '安委会巡检 · 巡检记录', menuCodes: ['SAFETY_COMMITTEE_RECORDS'], primaryCodes: ['safety_committee.view'], codes: ['safety_committee.view'] },
-  { key: 'safety_committee.submit', label: '上报巡检记录', group: '安委会巡检 · 巡检记录', menuCodes: ['SAFETY_COMMITTEE_RECORDS'], primaryCodes: ['safety_committee.submit'], codes: ['safety_committee.submit', 'safety_committee.view'], requiresActions: ['safety_committee.view'] },
+  { key: 'safety_committee.submit', label: '提交巡检记录', group: '安委会巡检 · 巡检记录', menuCodes: ['SAFETY_COMMITTEE_RECORDS'], primaryCodes: ['safety_committee.submit'], codes: ['safety_committee.submit', 'safety_committee.view'], requiresActions: ['safety_committee.view'] },
   { key: 'safety_committee.edit_own', label: '修改本人巡检记录', group: '安委会巡检 · 巡检记录', menuCodes: ['SAFETY_COMMITTEE_RECORDS'], primaryCodes: ['safety_committee.edit_own'], codes: ['safety_committee.edit_own', 'safety_committee.view'], requiresActions: ['safety_committee.view'] },
   { key: 'site_access.view', label: '查看完整外访信息', group: '场内管理 · 外访管理', menuCodes: ['SITE_VISITOR'], primaryCodes: ['site_access.view'], codes: ['site_access.view'] },
   { key: 'site_access.manage', label: '创建、修改、作废及生成小程序码', group: '场内管理 · 外访管理', menuCodes: ['SITE_VISITOR'], primaryCodes: ['site_access.manage'], codes: ['site_access.manage', 'site_access.view'], requiresActions: ['site_access.view'] },

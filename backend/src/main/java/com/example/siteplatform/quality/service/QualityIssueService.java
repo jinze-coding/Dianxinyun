@@ -795,6 +795,7 @@ public class QualityIssueService {
     private List<Long> attachmentIds(Long issueId, String businessType) {
         return fileMapper.selectList(new LambdaQueryWrapper<FileResource>()
                         .eq(FileResource::getBusinessType, businessType)
+                        .ne(FileResource::getStatus, "ARCHIVED")
                         .eq(FileResource::getBusinessId, issueId)
                         .orderByAsc(FileResource::getCreateTime))
                 .stream().map(FileResource::getId).toList();

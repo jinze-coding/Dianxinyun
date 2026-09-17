@@ -70,6 +70,9 @@ public class AuthService {
     @Autowired
     private SysUserWechatBindingMapper wechatBindingMapper;
 
+    @Autowired
+    private com.example.siteplatform.system.userimport.mapper.UserImportItemMapper userImportItemMapper;
+
     private static final String LEGACY_TOKEN_PREFIX = "auth:token:";
     private static final String SESSION_TOKEN_PREFIX = "auth:session:";
     private static final String USER_SESSIONS_PREFIX = "auth:user-sessions:";
@@ -122,6 +125,7 @@ public class AuthService {
         if (Integer.valueOf(1).equals(user.getPasswordResetRequired())) {
             throw BusinessException.of(403, "账号密码需要由管理员重置后才能登录");
         }
+        requireTemporaryPasswordValid(user);
         return user;
     }
 
@@ -225,7 +229,7 @@ public class AuthService {
             throw BusinessException.of(401, "登录凭证已更新，请重新登录");
         }
         if (!allowInitialPasswordSetup && requiresInitialPasswordSetup(user)) {
-            throw BusinessException.forbidden("请先在小程序完成初始密码设置");
+            throw BusinessException.forbidden("请先完成首次密码设置");
         }
 
         return user;
@@ -260,9 +264,6 @@ public class AuthService {
     public CurrentUserVO getCurrentUserInfo(String token) {
         // 快捷注册账号需要先读取该标记，客户端才能进入首次密码设置页。
         SysUser user = getCurrentUserAllowInitialPasswordSetup(token);
-        List<String> roles = userMapper.selectRoleCodesByUserId(user.getId());
-        List<UserProjectRoleVO> projectRoles = buildProjectRoles(user, roles == null ? List.of() : roles);
-
         CurrentUserVO vo = new CurrentUserVO();
         vo.setId(user.getId());
         vo.setUsername(user.getUsername());
@@ -272,6 +273,16 @@ public class AuthService {
         vo.setStatus(user.getStatus());
         vo.setPasswordLoginEnabled(user.getPasswordLoginEnabled());
         vo.setInitialPasswordSetupRequired(requiresInitialPasswordSetup(user));
+        vo.setInitialPasswordSetupReason(Integer.valueOf(1).equals(user.getMustChangePassword())
+                ? "ADMIN_IMPORT" : requiresInitialPasswordSetup(user) ? "WECHAT_QUICK" : null);
+        vo.setTemporaryPasswordExpiresAt(user.getTemporaryPasswordExpiresAt());
+        if (requiresInitialPasswordSetup(user)) {
+            vo.setRoles(List.of()); vo.setProjectRoles(List.of()); vo.setProjectContexts(List.of());
+            vo.setAccessibleProjectIds(List.of()); vo.setPermissionCodes(List.of()); vo.setMenus(List.of());
+            return vo;
+        }
+        List<String> roles = userMapper.selectRoleCodesByUserId(user.getId());
+        List<UserProjectRoleVO> projectRoles = buildProjectRoles(user, roles == null ? List.of() : roles);
         SysUserWechatBinding binding = wechatBindingMapper.selectOne(
                 new LambdaQueryWrapper<SysUserWechatBinding>()
                         .eq(SysUserWechatBinding::getUserId, user.getId())
@@ -384,26 +395,53 @@ public class AuthService {
 
     public boolean requiresInitialPasswordSetup(SysUser user) {
         return user != null
-                && Integer.valueOf(0).equals(user.getPasswordLoginEnabled())
-                && Integer.valueOf(1).equals(user.getPasswordResetRequired());
+                && (Integer.valueOf(1).equals(user.getMustChangePassword())
+                || (Integer.valueOf(0).equals(user.getPasswordLoginEnabled())
+                && Integer.valueOf(1).equals(user.getPasswordResetRequired())));
+    }
+
+    public void requireTemporaryPasswordValid(SysUser user) {
+        if (Integer.valueOf(1).equals(user.getMustChangePassword())
+                && (user.getTemporaryPasswordExpiresAt() == null
+                || !user.getTemporaryPasswordExpiresAt().isAfter(java.time.LocalDateTime.now()))) {
+            throw BusinessException.forbidden("临时密码已过期，请联系管理员重新生成");
+        }
     }
 
     @Transactional
     public LoginResponse setupInitialPassword(String token, String newPassword) {
-        SysUser user = getCurrentUserForInitialPasswordSetup(token);
+        SysUser snapshot = getCurrentUserForInitialPasswordSetup(token);
+        SysUser user = userMapper.selectByIdForUpdate(snapshot.getId());
+        if (user == null || Integer.valueOf(1).equals(user.getDeleted()) || !Integer.valueOf(1).equals(user.getStatus())
+                || !requiresInitialPasswordSetup(user)
+                || normalizedCredentialVersion(user) != normalizedCredentialVersion(snapshot)) {
+            throw BusinessException.of(409, "账号或初始密码状态已变化，请重新登录");
+        }
+        requireTemporaryPasswordValid(user);
         passwordCredentialService.validateStrength(newPassword);
+        if (Integer.valueOf(1).equals(user.getMustChangePassword())
+                && passwordCredentialService.matches(newPassword, user.getPassword())) {
+            throw new BusinessException("新密码不能与临时密码相同");
+        }
         changePassword(user, newPassword);
         String freshToken = issueToken(user);
         return new LoginResponse(freshToken, user.getId(), user.getUsername(), user.getRealName());
     }
 
     public void changePassword(SysUser user, String newPassword) {
+        boolean imported = Integer.valueOf(1).equals(user.getMustChangePassword());
         user.setPassword(hashPassword(newPassword));
         user.setCredentialVersion(normalizedCredentialVersion(user) + 1);
         user.setPasswordResetRequired(0);
         user.setPasswordLoginEnabled(1);
+        user.setMustChangePassword(0);
         if (userMapper.updateById(user) != 1) {
             throw BusinessException.of(409, "账号状态已变化，密码未更新，请刷新后重试");
+        }
+        if (imported) {
+            if (userMapper.clearTemporaryPasswordExpiry(user.getId()) != 1) throw BusinessException.of(409, "账号状态已变化");
+            userImportItemMapper.clearCredentials(user.getId());
+            user.setTemporaryPasswordExpiresAt(null);
         }
         logout(user.getId());
     }

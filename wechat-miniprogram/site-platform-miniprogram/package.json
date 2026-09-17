@@ -1,6 +1,6 @@
 {
   "name": "site-platform-miniprogram",
-  "version": "0.1.8",
+  "version": "0.1.13",
   "description": "电信云平台现场端小程序",
   "type": "module",
   "scripts": {
@@ -12,8 +12,10 @@
     "build:h5": "uni build -p h5",
     "build:mp-weixin": "uni build -p mp-weixin && npm run verify:visitor-forms",
     "build:mp-weixin:real": "uni build -p mp-weixin --mode mp-real && npm run verify:mp-weixin:real && npm run verify:visitor-forms",
+    "test:initial-password": "node scripts/test-initial-password.mjs",
     "test:project-modules": "node scripts/test-project-modules.mjs",
-    "test:safety-committee": "node scripts/test-safety-committee.mjs && node scripts/test-safety-committee-filters.mjs",
+    "test:document-access": "node scripts/test-document-entry-access.mjs",
+    "test:safety-committee": "node scripts/test-safety-committee.mjs && node scripts/test-safety-committee-filters.mjs && node scripts/test-committee-capture.mjs && node scripts/test-committee-media.mjs && node scripts/test-committee-thumbnails.mjs && node scripts/test-committee-draft-media.mjs && node scripts/test-committee-rotation.mjs",
     "type-check": "vue-tsc --noEmit",
     "test:project-location": "node --experimental-strip-types scripts/test-project-map-navigation.mjs && node --experimental-strip-types scripts/test-project-location-card.mjs",
     "test:visitor-profile": "node --experimental-strip-types scripts/test-visitor-profile-flow.mjs",
@@ -26,7 +28,8 @@
     "verify:mp-weixin:real": "node scripts/verify-mp-weixin-real.mjs",
     "test:visitor-personal-info": "node --experimental-strip-types scripts/test-visitor-personal-info.mjs",
     "test:visitor-auto-fill": "node --experimental-strip-types scripts/test-visitor-auto-fill.mjs",
-    "verify:visitor-forms": "node scripts/verify-visitor-form-build.mjs"
+    "verify:visitor-forms": "node scripts/verify-visitor-form-build.mjs",
+    "test:agreement-consent": "node scripts/test-agreement-consent.mjs"
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-alpha-5010420260626001",

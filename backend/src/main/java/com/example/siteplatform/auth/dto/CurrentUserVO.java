@@ -16,6 +16,8 @@ public class CurrentUserVO {
     private Integer passwordLoginEnabled;
     /** 微信快捷注册审批通过后，首次业务访问前必须完成初始密码设置。 */
     private Boolean initialPasswordSetupRequired;
+    private String initialPasswordSetupReason;
+    private java.time.LocalDateTime temporaryPasswordExpiresAt;
     private Boolean wechatBound;
     private String wechatBindingStatus;
     private List<String> roles;

@@ -116,6 +116,13 @@ function collectProjectMenuCodes(user: User, projectId: number): string[] {
   return Array.from(codes);
 }
 
+// Section entries use the current project's explicit menu grant, never a global/root fallback.
+function hasProjectMenu(user: User | null, projectId: number, code: string, module: string): boolean {
+  if (!user || !projectId || !isProjectModuleEnabled(user, projectId, module)) return false;
+  if (user.roles?.includes('PLATFORM_ADMIN')) return true;
+  return collectProjectMenuCodes(user, projectId).includes(code.toUpperCase());
+}
+
 function moduleForPermission(code: string): string | undefined {
   const value = String(code || '').toUpperCase();
   if (/^(DOCUMENT\.|SEAL\.)/.test(value)) return 'DOCUMENT';
@@ -156,8 +163,11 @@ function canAccessRoot(path: string, user: User | null = state.user, projectId =
   const rule = ROOT_PAGE_RULES.find((item) => item.path === path);
   if (!rule || rule.path === '/pages/profile/index') return true;
   if (!user) return false;
-  // 个人待办是所有已登录用户的基础工作台，不依赖项目业务菜单。
-  if (rule.path === PERSONAL_TODO_PAGE) return true;
+  // This is a project display preference, not a grant of business permissions.
+  if (rule.path === PERSONAL_TODO_PAGE) {
+    const context = (user.projectContexts || user.projectRoles || []).find((item) => Number(item.projectId) === Number(projectId));
+    return context?.inboxEntryVisible !== false;
+  }
   const module = ({ '/pages/documents/index': 'DOCUMENT', '/pages/inspection/index': 'INSPECTION', '/pages/quality/index': 'QUALITY', '/pages/safety-committee/index': 'SAFETY_COMMITTEE' } as Record<string, string>)[path];
   if (!isProjectModuleEnabled(user, projectId, module)) return false;
   if (user.roles?.includes('PLATFORM_ADMIN')) return true;
@@ -179,8 +189,10 @@ function canAccessRoot(path: string, user: User | null = state.user, projectId =
   });
 }
 
-function firstAuthorizedPage(user: User | null = state.user): string {
-  return ROOT_PAGE_RULES.find((item) => canAccessRoot(item.path, user))?.path || '/pages/profile/index';
+function firstAuthorizedPage(user: User | null = state.user, projectId = useProjectStore().state.currentProjectId): string {
+  if (canAccessRoot(PERSONAL_TODO_PAGE, user, projectId)) return PERSONAL_TODO_PAGE;
+  if (canAccessRoot('/pages/safety-committee/index', user, projectId)) return '/pages/safety-committee/index';
+  return ROOT_PAGE_RULES.find((item) => canAccessRoot(item.path, user, projectId))?.path || '/pages/profile/index';
 }
 
 function requiresInitialPasswordSetup(user: User | null = state.user): boolean {
@@ -272,7 +284,7 @@ export function useAuthStore() {
         return false;
       }
       if (canAccessRoot(path, state.user, projectId)) return true;
-      uni.showToast({ title: '当前账号无此功能权限', icon: 'none' });
+      if (path !== PERSONAL_TODO_PAGE) uni.showToast({ title: '当前账号无此功能权限', icon: 'none' });
       const target = firstAuthorizedPage();
       uni.switchTab({ url: target, fail: () => uni.reLaunch({ url: target }) });
       return false;
@@ -321,6 +333,8 @@ export function useAuthStore() {
     takeResumeUrl,
     ensureRootAccess,
     ensurePageAccess,
+    hasProjectMenu: (projectId: number, code: string, module: string) =>
+      hasProjectMenu(state.user, projectId, code, module),
     hasProjectPermission: (projectId: number, ...permissionCodes: string[]) =>
       hasProjectPermission(state.user, projectId, ...permissionCodes),
     ensureProjectPermission

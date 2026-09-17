@@ -1,3 +1,4 @@
+import CorrectionNotice from '../../components/CorrectionNotice';
 import React, { useEffect, useState } from 'react';
 import { getMeetingAttendanceSummary } from '../../services/siteAccess';
 import { getMaterialActivities } from '../../services/meetingMaterials';
@@ -26,7 +27,7 @@ export default function MeetingDetailPage({ invitation, projectId, currentUser, 
     return () => { current = false; };
   }, [invitation.id, tab]);
   const records = [...(invitation.auditLogs || []), ...activities].sort((a, b) => String(b.createTime).localeCompare(String(a.createTime)));
-  return <article className="meeting-detail-page">
+  return <article className="meeting-detail-page"><CorrectionNotice record={invitation} />
     <header className="meeting-detail-heading"><div><button className="secondary" onClick={onBack}>← 返回邀请列表</button><p>场内管理 / 会议邀请 · {invitation.inviteNo}</p><h1>{invitation.purpose}</h1><span className={`site-access-status ${active ? 'submitted' : 'expired'}`}>{statusLabel}</span></div>
       <div className="meeting-detail-actions">{canManage && active && <><button onClick={() => onQr(false)}>预约码</button><button onClick={() => onQr(true)}>签到码</button><button onClick={onEdit}>修改会议</button></>}<button className="primary" onClick={onScreen}>签到大屏</button></div></header>
     <section className="meeting-detail-information">{[['所属项目', invitation.projectName], ['会议时间', `${time(invitation.visitStartTime)} 至 ${time(invitation.visitEndTime)}`], ['会议地点', invitation.visitLocation], ['接待人', `${invitation.hostName || '—'} ${invitation.hostPhone || ''}`], ['内部备注', invitation.internalRemark || '—'], ...(invitation.voidReason ? [['作废原因', invitation.voidReason]] : [])].map(([label, value]) => <div key={label}><span>{label}</span><p>{value}</p></div>)}</section>

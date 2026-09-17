@@ -76,6 +76,10 @@ import java.util.stream.Collectors;
 
 @Service
 public class GuardVisitService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.example.siteplatform.system.correction.CorrectionNoticeService correctionNotices;
+    private String corrected(String text,String type,Long id) { return correctionNotices==null?(text==null?"":text):correctionNotices.append(text,type,id); }
+
     public static final String QR_ENABLED = "ENABLED";
     public static final String QR_DISABLED = "DISABLED";
     public static final String QR_ROTATED = "ROTATED";
@@ -751,7 +755,7 @@ public class GuardVisitService {
     private byte[] buildWorkbook(ProjectInfo project, List<SiteGuardVisitRegistration> registrations,
                                  Map<Long, List<SiteGuardVisitPerson>> peopleByRegistration) {
         String[] headers = {"项目", "登记编号", "单位", "人员类型", "姓名", "手机号码", "出行方式", "车牌号",
-                "登记时间", "有效截止时间", "状态"};
+                "登记时间", "有效截止时间", "状态", "管理员纠错"};
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet("门卫访客登记");
             sheet.createFreezePane(0, 1);
@@ -779,7 +783,7 @@ public class GuardVisitService {
                             nullToEmpty(person.getPersonName()), nullToEmpty(cryptoService.decrypt(person.getPhoneEncrypted())),
                             VisitorSubmissionNormalizer.TRAVEL_DRIVING.equals(registration.getTravelMode()) ? "驾车" : "非驾车",
                             nullToEmpty(registration.getVehiclePlate()), formatDateTime(registration.getRegisteredTime()),
-                            formatDateTime(registration.getValidUntil()), statusLabel(effectiveStatus(registration)));
+                            formatDateTime(registration.getValidUntil()), statusLabel(effectiveStatus(registration)),corrected("","GUARD_REGISTRATION",registration.getId()));
                     for (int index = 0; index < values.size(); index++) {
                         row.createCell(index).setCellValue(safeExcelText(values.get(index)));
                     }

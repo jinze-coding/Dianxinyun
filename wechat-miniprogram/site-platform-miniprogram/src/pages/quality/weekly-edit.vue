@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
-import { onBackPress, onLoad } from '@dcloudio/uni-app';
+import { onBackPress, onHide, onLoad } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
+import QualityAssigneeSheet from '@/components/QualityAssigneeSheet.vue';
 import {
   createOrRestoreQualityWeeklyDraft,
   discardQualityWeeklyDraft,
@@ -38,6 +39,8 @@ const projectStore = useProjectStore();
 const projectId = ref(0);
 const draft = ref<QualityWeeklyInspection>();
 const assignees = ref<QualityAssignee[]>([]);
+const assigneeItemKey = ref('');
+const assigneeItem = computed(() => items.value.find((item) => item.itemKey === assigneeItemKey.value));
 const loading = ref(true);
 const loadError = ref('');
 const saving = ref(false);
@@ -195,7 +198,7 @@ async function removeItem(index: number) {
   if (!item) return;
   const hasContent = Boolean(item.title.trim() || item.location.trim() || item.description.trim()
     || item.beforePhotoFileIds.length || item.newBeforePhotoPaths.length);
-  if (hasContent && !await confirmDialog('删除问题', `确认删除问题 ${index + 1}？保存草稿后服务器中的该问题也会移除。`)) return;
+  if (hasContent && !await confirmDialog('删除问题', `确认删除问题 ${index + 1}？点击“提交巡检问题”后服务器中的该问题也会移除。`)) return;
   items.value.splice(index, 1);
 }
 
@@ -209,13 +212,9 @@ function copyPrevious(index: number) {
   showToast('已复制上一题的等级、负责人和期限');
 }
 
-function assigneeIndex(item: EditableDraftItem) {
-  return Math.max(0, assignees.value.findIndex((assignee) => assignee.userId === item.assigneeId));
-}
-
-function setItemAssignee(index: number, event: unknown) {
-  const optionIndex = Number((event as { detail?: { value?: number | string } }).detail?.value || 0);
-  items.value[index].assigneeId = assignees.value[optionIndex]?.userId;
+function setItemAssignee(userId: number) {
+  if (isBusy.value || !assigneeItem.value || !assignees.value.some((person) => person.userId === userId)) return;
+  assigneeItem.value.assigneeId = userId;
 }
 
 function setItemDeadline(index: number, event: unknown) {
@@ -354,7 +353,7 @@ async function submitInspection() {
   if (isBusy.value || !draft.value) return;
   const validationMessage = validateForSubmit();
   if (validationMessage) { showToast(validationMessage); return; }
-  const confirmed = await confirmDialog('提交质量周检', `将一次提交 ${items.value.length} 个问题。提交后周检不可修改，各问题将独立进入整改闭环。`);
+  const confirmed = await confirmDialog('结束本周巡检', `确认结束本周巡检（${items.value.length}个问题）？结束后周检内容不可修改，各问题将独立进入整改闭环。`);
   if (!confirmed) return;
   const saved = await persistDraft(false);
   if (!saved) return;
@@ -362,11 +361,11 @@ async function submitInspection() {
   try {
     const result = await submitQualityWeeklyInspection(saved.id, saved.version);
     dirty.value = false;
-    showToast('质量周检已提交');
+    showToast('本周巡检已结束');
     setTimeout(() => uni.redirectTo({ url: `/pages/quality/weekly-detail?id=${result.id}` }), 350);
   } catch (error) {
     if (error instanceof ApiRequestError && error.statusCode === 409) showToast('草稿版本已变化，请返回后重新进入核对');
-    else showToast(error instanceof Error ? error.message : '周检提交失败');
+    else showToast(error instanceof Error ? error.message : '结束本周巡检失败');
   } finally {
     submitting.value = false;
   }
@@ -397,6 +396,7 @@ function confirmDialog(title: string, content: string): Promise<boolean> {
 }
 
 function goBack() {
+  if (assigneeItemKey.value) { assigneeItemKey.value = ''; return; }
   if (isBusy.value) { showToast('正在保存或提交，请稍候'); return; }
   if (!dirty.value) { uni.navigateBack(); return; }
   void confirmDialog('尚未保存', '当前整理内容尚未保存到共享草稿，确认离开？').then((confirmed) => {
@@ -407,10 +407,12 @@ function goBack() {
 }
 
 onBackPress(() => {
+  if (assigneeItemKey.value) { assigneeItemKey.value = ''; return true; }
   if (allowBack.value || !dirty.value) return false;
   goBack();
   return true;
 });
+onHide(() => { assigneeItemKey.value = ''; });
 </script>
 
 <template>
@@ -418,7 +420,7 @@ onBackPress(() => {
     <AppNavBar title="编辑质量周检" @back="goBack" />
     <view v-if="loading" class="state-card">正在加载共享草稿...</view>
     <view v-else-if="loadError" class="state-card error-state"><text>{{ loadError }}</text><button @tap="retryLoad">重新加载</button></view>
-    <scroll-view v-else-if="draft" class="editor-scroll" scroll-y>
+    <scroll-view v-else-if="draft" class="editor-scroll" :scroll-y="!assigneeItemKey">
       <view class="editor-content">
         <view class="project-card">
           <text>{{ currentProject?.projectName || currentProject?.shortName || '当前施工区域' }}</text>
@@ -443,7 +445,7 @@ onBackPress(() => {
           <view class="field"><text class="label">问题描述</text><textarea v-model="item.description" :disabled="isBusy" maxlength="1000" placeholder="说明现状和整改要求" /></view>
           <view class="field"><text class="label">严重程度 *</text><view class="severity-row"><button v-for="severity in ['NORMAL','WARNING','DANGER']" :key="severity" :disabled="isBusy" :class="{ active: item.severity === severity }" @tap="item.severity = severity as typeof item.severity">{{ severity === 'DANGER' ? '严重' : severity === 'WARNING' ? '重要' : '一般' }}</button></view></view>
           <view class="field-grid">
-            <view class="field"><text class="label">整改负责人 *</text><picker :disabled="isBusy" :range="assignees" range-key="displayName" :value="assigneeIndex(item)" @change="setItemAssignee(index, $event)"><view class="picker-value">{{ assignees.find((option) => option.userId === item.assigneeId)?.displayName || '请选择负责人' }}</view></picker></view>
+            <view class="field"><text class="label">整改负责人 *</text><button class="picker-value assignee-trigger" :disabled="isBusy" @tap="assigneeItemKey = item.itemKey">{{ assignees.find((option) => option.userId === item.assigneeId)?.displayName || '搜索并选择负责人' }}<text class="assignee-trigger-arrow">⌕</text></button></view>
             <view class="field"><text class="label">闭环期限 *</text><picker mode="date" :disabled="isBusy" :value="item.deadline" :start="today" @change="setItemDeadline(index, $event)"><view class="picker-value">{{ item.deadline || '请选择期限' }}</view></picker></view>
           </view>
           <view class="field"><text class="label">整改前照片 * · {{ item.beforePhotoFileIds.length + item.newBeforePhotoPaths.length }}/{{ MAX_PHOTOS }}</text><button class="photo-picker" :disabled="isBusy || item.beforePhotoFileIds.length + item.newBeforePhotoPaths.length >= MAX_PHOTOS" @tap="chooseItemPhotos(index)">+ 拍摄/选择问题照片</button><view class="photo-grid"><view v-for="(path, photoIndex) in itemPaths(item)" :key="`${path}-${photoIndex}`" class="photo"><image v-if="path" :src="path" mode="aspectFill" @tap="preview(itemPaths(item), path)" /><view v-else class="photo-failed">加载失败</view><button :disabled="isBusy" @tap.stop="removeItemPhoto(item, photoIndex)">×</button></view></view></view>
@@ -452,7 +454,9 @@ onBackPress(() => {
         <view class="danger-zone"><button :disabled="isBusy" @tap="discardDraft">放弃共享草稿</button></view>
       </view>
     </scroll-view>
-    <view v-if="draft && !loading" class="action-bar"><button class="save" :disabled="isBusy" @tap="persistDraft(true)">{{ saving ? '正在保存...' : '保存草稿' }}</button><button class="submit" :disabled="isBusy" @tap="submitInspection">{{ submitting ? '正在提交...' : `提交周检（${items.length}个问题）` }}</button></view>
+    <view v-if="draft && !loading" class="action-bar"><button class="save" :disabled="isBusy" @tap="persistDraft(true)">{{ saving ? '正在提交...' : '提交巡检问题' }}</button><button class="submit" :disabled="isBusy" @tap="submitInspection">{{ submitting ? '正在结束...' : `结束本周巡检（${items.length}个问题）` }}</button></view>
+    <QualityAssigneeSheet :visible="Boolean(assigneeItem)" :options="assignees" :selected-id="assigneeItem?.assigneeId"
+      @select="setItemAssignee" @close="assigneeItemKey = ''" />
   </view>
 </template>
 
@@ -473,6 +477,9 @@ onBackPress(() => {
 .label { display: block; margin-bottom: 9rpx; color: #58697b; font-size: 22rpx; font-weight: 700; }
 .field input,.field textarea,.picker-value { box-sizing: border-box; width: 100%; min-height: 74rpx; padding: 16rpx 18rpx; border: 1rpx solid #e1e7ec; border-radius: 12rpx; background: #f7f9fa; color: #2b3d50; font-size: 23rpx; }
 .field textarea { min-height: 128rpx; }
+.assignee-trigger { display: flex; align-items: center; justify-content: space-between; gap: 10rpx; margin: 0; text-align: left; line-height: 1.5; }
+.assignee-trigger::after { border: 0; }
+.assignee-trigger-arrow { flex-shrink: 0; color: #547a98; font-size: 30rpx; }
 .hint { display: block; margin-top: 8rpx; color: #8a98a7; font-size: 19rpx; line-height: 1.4; }
 .field-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12rpx; }
 .problem-head { display: flex; align-items: center; justify-content: space-between; gap: 18rpx; }

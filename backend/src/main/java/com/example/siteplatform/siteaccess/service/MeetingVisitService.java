@@ -69,6 +69,10 @@ import java.util.stream.Collectors;
 
 @Service
 public class MeetingVisitService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.example.siteplatform.system.correction.CorrectionNoticeService correctionNotices;
+    private String corrected(String text,String type,Long id) { return correctionNotices==null?(text==null?"":text):correctionNotices.append(text,type,id); }
+
     public static final String STATUS_REGISTERED = "REGISTERED";
     public static final String STATUS_VOIDED = "VOIDED";
     public static final String PAGE_FORM = "FORM";
@@ -656,7 +660,7 @@ public class MeetingVisitService {
                                  Map<Long, List<SiteMeetingVisitPerson>> people,
                                  Map<Long, SiteVisitInvitation> invitations) {
         String[] headers = {"项目", "会议邀请编号", "会议主题", "会议开始", "会议截止", "登记编号",
-                "单位", "人员类型", "姓名", "手机号码", "出行方式", "车牌号", "接待人", "登记时间", "状态"};
+                "单位", "人员类型", "姓名", "手机号码", "出行方式", "车牌号", "接待人", "登记时间", "状态", "管理员纠错"};
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet("会议访客登记");
             sheet.createFreezePane(0, 1);
@@ -688,7 +692,7 @@ public class MeetingVisitService {
                             VisitorSubmissionNormalizer.TRAVEL_DRIVING.equals(registration.getTravelMode()) ? "驾车" : "非驾车",
                             text(registration.getVehiclePlate()), text(invitation.getHostName()),
                             format(registration.getRegisteredTime()),
-                            STATUS_REGISTERED.equals(registration.getStatus()) ? "已登记" : "已作废");
+                            STATUS_REGISTERED.equals(registration.getStatus()) ? "已登记" : "已作废",corrected(corrected("","MEETING",invitation.getId()),"MEETING_REGISTRATION",registration.getId()));
                     for (int index = 0; index < values.size(); index++) {
                         row.createCell(index).setCellValue(safeExcelText(values.get(index)));
                     }

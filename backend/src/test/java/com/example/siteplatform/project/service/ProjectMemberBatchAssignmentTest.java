@@ -10,6 +10,7 @@ import com.example.siteplatform.project.dto.ProjectMemberBatchRequest;
 import com.example.siteplatform.project.dto.ProjectMemberVO;
 import com.example.siteplatform.project.dto.ResponsibilityImpactVO;
 import com.example.siteplatform.project.dto.UserProjectRoleBatchRequest;
+import com.example.siteplatform.project.constant.InspectionPermissionCodes;
 import com.example.siteplatform.project.entity.ProjectInfo;
 import com.example.siteplatform.project.entity.SysUserProject;
 import com.example.siteplatform.project.mapper.ProjectInfoMapper;
@@ -17,6 +18,7 @@ import com.example.siteplatform.project.mapper.SysUserProjectMapper;
 import com.example.siteplatform.project.mapper.SysUserProjectRoleMapper;
 import com.example.siteplatform.quality.service.QualityAssigneeService;
 import com.example.siteplatform.system.entity.SystemRole;
+import com.example.siteplatform.system.entity.SystemPermission;
 import com.example.siteplatform.system.mapper.SystemPermissionMapper;
 import com.example.siteplatform.system.mapper.SystemRoleBusinessModuleMapper;
 import com.example.siteplatform.system.mapper.SystemRoleMapper;
@@ -216,6 +218,124 @@ class ProjectMemberBatchAssignmentTest {
         verify(responsibilityReleaseService).releaseForCapabilityLoss(9L, 2L);
         verify(responsibilityReleaseService, never()).releaseAll(9L, 2L);
         verify(userProjectMapper, never()).deleteById(8L);
+    }
+
+    @Test
+    void addingCommitteeRoleKeepsManagerAndSealAssignmentsWithoutReleaseConfirmation() {
+        SysUserProject existing = relation(8L, 9L, 2L, "ACTIVE");
+        when(userMapper.selectById(2L)).thenReturn(user(2L, 1));
+        when(userProjectMapper.selectOne(any())).thenReturn(existing);
+        when(systemRoleMapper.selectById(40L)).thenReturn(role(40L, "PROJECT_ADMIN", 1));
+        when(systemRoleMapper.selectById(50L)).thenReturn(role(50L, "COMMITTEE", 0));
+        when(responsibilityReleaseService.impact(9L, 2L)).thenAnswer(invocation -> sealImpact());
+        UserProjectRoleBatchRequest request = userBatch(userChange(9L, "UPSERT", List.of(40L, 50L)));
+
+        assertTrue(service.previewUserProjectAssignmentImpact(2L, request, operator).isEmpty());
+
+        when(userProjectMapper.selectByProjectAndUserForUpdate(9L, 2L)).thenReturn(existing);
+        when(userProjectMapper.selectMembersByProjectId(9L)).thenReturn(List.of());
+        service.batchUpdateUserProjectAssignments(2L, request, operator);
+
+        assertFalse(request.isConfirmResponsibilityRelease());
+        verify(userProjectMapper).updateById(argThat(item -> "ACTIVE".equals(item.getStatus())
+                && "PROJECT_ADMIN".equals(item.getProjectRoleCode())));
+        verify(userProjectRoleMapper).insert(argThat(item -> Long.valueOf(40L).equals(item.getRoleId())));
+        verify(userProjectRoleMapper).insert(argThat(item -> Long.valueOf(50L).equals(item.getRoleId())));
+        verify(responsibilityReleaseService, never()).releaseAll(any(), any());
+    }
+
+    @Test
+    void roleRevocationStillReportsLostDutyButNotIndependentSealAssignments() {
+        when(userMapper.selectById(2L)).thenReturn(user(2L, 1));
+        when(userProjectMapper.selectOne(any())).thenReturn(relation(8L, 9L, 2L, "ACTIVE"));
+        when(systemRoleMapper.selectById(50L)).thenReturn(role(50L, "COMMITTEE", 0));
+        ResponsibilityImpactVO impact = sealImpact();
+        impact.setOpenRectificationCount(2);
+        when(responsibilityReleaseService.impact(9L, 2L)).thenReturn(impact);
+
+        var impacts = service.previewUserProjectAssignmentImpact(2L,
+                userBatch(userChange(9L, "UPSERT", List.of(50L))), operator);
+
+        assertEquals(1, impacts.size());
+        assertEquals(2, impacts.get(0).getTotalCount());
+        assertEquals(2, impacts.get(0).getOpenRectificationCount());
+        assertEquals(0, impacts.get(0).getPendingSealApprovalCount());
+        assertEquals(0, impacts.get(0).getSealApprovalConfigCount());
+    }
+
+    @Test
+    void removingProjectStillReportsSealAssignmentsAndRequiresConfirmation() {
+        SysUserProject existing = relation(8L, 9L, 2L, "ACTIVE");
+        when(userMapper.selectById(2L)).thenReturn(user(2L, 1));
+        when(userProjectMapper.selectOne(any())).thenReturn(existing);
+        when(responsibilityReleaseService.impact(9L, 2L)).thenAnswer(invocation -> sealImpact());
+        UserProjectRoleBatchRequest request = userBatch(userChange(9L, "REMOVE", List.of()));
+
+        var impacts = service.previewUserProjectAssignmentImpact(2L, request, operator);
+        assertEquals(2, impacts.get(0).getTotalCount());
+        assertEquals(1, impacts.get(0).getSealApprovalConfigCount());
+        assertEquals(1, impacts.get(0).getPendingSealApprovalCount());
+
+        when(userProjectMapper.selectByProjectAndUserForUpdate(9L, 2L)).thenReturn(existing);
+        when(userProjectMapper.selectMembersByProjectId(9L)).thenReturn(List.of());
+        BusinessException blocked = assertThrows(BusinessException.class,
+                () -> service.batchUpdateUserProjectAssignments(2L, request, operator));
+        assertEquals(409, blocked.getCode());
+        verify(userProjectMapper, never()).deleteById(any(Long.class));
+
+        request.setConfirmResponsibilityRelease(true);
+        service.batchUpdateUserProjectAssignments(2L, request, operator);
+        verify(responsibilityReleaseService).releaseAll(9L, 2L);
+    }
+
+    @Test
+    void roleUnionKeepsEdgeDutiesAndOnlyReportsActuallyMissingEdgePermission() {
+        when(userMapper.selectById(2L)).thenReturn(user(2L, 1));
+        when(userProjectMapper.selectOne(any())).thenReturn(relation(8L, 9L, 2L, "ACTIVE"));
+        when(systemRoleMapper.selectById(40L)).thenReturn(role(40L, "EDGE_OPERATOR", 0));
+        when(systemRoleMapper.selectById(50L)).thenReturn(role(50L, "EDGE_REVIEWER", 0));
+        when(systemRoleMapper.selectPermissionIds(40L)).thenReturn(List.of(101L, 102L));
+        when(systemRoleMapper.selectPermissionIds(50L)).thenReturn(List.of(103L));
+        when(systemPermissionMapper.selectBatchIds(any())).thenReturn(List.of(
+                permission(101L, InspectionPermissionCodes.EDGE_INSPECTION_SUBMIT),
+                permission(102L, InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY),
+                permission(103L, InspectionPermissionCodes.EDGE_INSPECTION_REVIEW)));
+        when(responsibilityReleaseService.impact(9L, 2L)).thenAnswer(invocation -> {
+            ResponsibilityImpactVO impact = sealImpact();
+            impact.setPendingGeneralInspectionTaskCount(1);
+            impact.setOpenGeneralRectificationCount(2);
+            impact.setPendingGeneralReviewCount(3);
+            return impact;
+        });
+        UserProjectRoleBatchRequest request = userBatch(userChange(9L, "UPSERT", List.of(40L, 50L)));
+        assertTrue(service.previewUserProjectAssignmentImpact(2L, request, operator).isEmpty());
+
+        when(systemRoleMapper.selectPermissionIds(50L)).thenReturn(List.of());
+        when(systemPermissionMapper.selectBatchIds(any())).thenReturn(List.of(
+                permission(101L, InspectionPermissionCodes.EDGE_INSPECTION_SUBMIT),
+                permission(102L, InspectionPermissionCodes.EDGE_INSPECTION_RECTIFY)));
+        var impacts = service.previewUserProjectAssignmentImpact(2L, request, operator);
+        assertEquals(3, impacts.get(0).getTotalCount());
+        assertEquals(3, impacts.get(0).getPendingGeneralReviewCount());
+
+        when(projectPermissionService.isPlatformAdmin(2L)).thenReturn(true);
+        assertTrue(service.previewUserProjectAssignmentImpact(2L, request, operator).isEmpty());
+    }
+
+    private ResponsibilityImpactVO sealImpact() {
+        ResponsibilityImpactVO impact = responsibilityImpact(9L, 2L, 0);
+        impact.setSealApprovalConfigCount(1);
+        impact.setPendingSealApprovalCount(1);
+        return impact;
+    }
+
+    private SystemPermission permission(Long id, String code) {
+        SystemPermission permission = new SystemPermission();
+        permission.setId(id);
+        permission.setPermissionCode(code);
+        permission.setEnabled(1);
+        permission.setDeleted(0);
+        return permission;
     }
 
     @Test

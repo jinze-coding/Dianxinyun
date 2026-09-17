@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CorrectionNotice from '@/components/CorrectionNotice.vue';
 const runtime=uni;
 import { ref } from 'vue';import { onLoad,onShow,onHide,onUnload } from '@dcloudio/uni-app';
 import CommitteeThumbnail from '@/components/CommitteeThumbnail.vue';
@@ -23,6 +24,7 @@ async function remove(){try{const impact=await request<any>('/system/deletions/p
   <view class="workspace-shell committee-page">
     <AppNavBar title="安委会巡检" @back="runtime.navigateBack({fail:()=>runtime.reLaunch({url:'/pages/safety-committee/index'})})" />
     <scroll-view class="workspace-scroll" scroll-y enable-flex :style="scrollStyle">
+    <CorrectionNotice :record="record" />
       <view class="committee-content">
         <view v-if="error" class="committee-error">{{error}}</view>
         <template v-if="record">
@@ -48,7 +50,7 @@ async function remove(){try{const impact=await request<any>('/system/deletions/p
           <view class="committee-card">
             <text class="committee-section-title">修改记录</text>
             <view v-for="log in record.logs" :key="log.id" class="committee-log">
-              <text class="committee-log-title">{{log.operatorName}} · {{log.action==='CREATE'?'上报巡检':log.action==='EDIT'?'修改巡检':'重试预览'}}</text>
+              <text class="committee-log-title">{{log.operatorName}} · {{log.action==='CREATE'?'提交巡检':log.action==='EDIT'?'修改巡检':log.action==='ATTACHMENT_ROTATE'?'调整附件角度':'重试预览'}}</text>
               <text class="committee-muted">{{committeeDate(log.createTime)}}</text>
               <button v-if="log.action==='EDIT'" class="committee-button committee-log-button" @tap="expanded=expanded===log.id?undefined:log.id">{{expanded===log.id?'收起':'查看修改内容'}}</button>
               <template v-if="expanded===log.id">
@@ -71,7 +73,7 @@ async function remove(){try{const impact=await request<any>('/system/deletions/p
         </template>
       </view>
     </scroll-view>
-    <CommitteePreview v-if="preview" :key="preview.id" :attachment="preview" :can-retry="record?.canEdit||record?.canDelete" @close="preview=undefined" />
+    <CommitteePreview v-if="preview" :key="preview.id" :attachment="preview" :can-retry="record?.canEdit||record?.canDelete" @updated="a=>{if(record)record.attachments=record.attachments.map(f=>f.id===a.id?a:f);}" @close="preview=undefined" />
   </view>
 </template>
 <style scoped src="../../styles/workspace-page.css"></style>

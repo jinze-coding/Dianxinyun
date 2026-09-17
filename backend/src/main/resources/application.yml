@@ -119,3 +119,6 @@ document:
   circulation:
     # 图纸领取码独立密钥；生产环境至少32字节。
     scene-encryption-key: ${DOCUMENT_CIRCULATION_SCENE_ENCRYPTION_KEY:}
+
+user-import:
+  credential-key: ${USER_IMPORT_CREDENTIAL_KEY:}

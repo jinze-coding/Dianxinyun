@@ -22,6 +22,7 @@ public class CommitteeController {
     private final CommitteeContentService content;
     private final CommitteePreviewService previews;
     private final AuthService auth;
+    private final CommitteeThumbnailService thumbnails;
 
     @GetMapping("/categories") public Result<List<String>> categories(@RequestParam Long projectId,@RequestHeader(value="Authorization",required=false) String authorization) {
         service.access(projectId,auth.getCurrentUser(authorization),CommitteeService.VIEW);return Result.success(CommitteeService.CATEGORIES);
@@ -58,7 +59,12 @@ public class CommitteeController {
         uploads.cancel(projectId,id,auth.getCurrentUser(authorization));return Result.success();
     }
     @GetMapping("/attachments/{id}") public Result<CommitteeService.AttachmentView> attachment(@PathVariable Long id,@RequestHeader(value="Authorization",required=false) String authorization) {
-        return Result.success(service.attachmentView(service.requireAttachment(id,auth.getCurrentUser(authorization))));
+        var user=auth.getCurrentUser(authorization);
+        return Result.success(service.attachmentView(service.requireAttachment(id,user),user));
+    }
+    @PutMapping("/attachments/{id}/rotation") public Result<CommitteeService.AttachmentView> rotate(@PathVariable Long id,
+            @Valid @RequestBody CommitteeRequests.Rotation request,@RequestHeader(value="Authorization",required=false) String authorization) {
+        return Result.success(service.rotate(id,request,auth.getCurrentUser(authorization)));
     }
     @DeleteMapping("/attachments/{id}") public Result<Void> discard(@PathVariable Long id,@RequestHeader(value="Authorization",required=false) String authorization) {
         service.discard(id,auth.getCurrentUser(authorization));return Result.success();
@@ -70,12 +76,17 @@ public class CommitteeController {
             @RequestHeader(value="Authorization",required=false) String authorization,HttpServletRequest request,HttpServletResponse response) {
         return Result.success(content.issue(id,authorization,nativePlayback,request,response));
     }
+    @PostMapping("/attachments/{id}/thumbnail") public Result<CommitteeThumbnailService.State> thumbnail(@PathVariable Long id,
+            @RequestParam(defaultValue="false") boolean retry,@RequestHeader(value="Authorization",required=false) String authorization) {
+        return Result.success(thumbnails.request(id,authorization,retry));
+    }
     @RequestMapping(value="/attachments/{id}/content",method={RequestMethod.GET,RequestMethod.HEAD})
-    public ResponseEntity<Resource> file(@PathVariable Long id,@RequestParam(defaultValue="true") boolean preview,HttpServletRequest request) {
-        return content.content(id,preview,request);
+    public ResponseEntity<Resource> file(@PathVariable Long id,@RequestParam(defaultValue="true") boolean preview,
+            @RequestParam(defaultValue="false") boolean thumbnail,HttpServletRequest request) {
+        return content.content(id,preview,thumbnail,request);
     }
     @RequestMapping(value="/media/{code}",method={RequestMethod.GET,RequestMethod.HEAD})
-    public ResponseEntity<Resource> media(@PathVariable String code,@RequestParam(defaultValue="true") boolean preview) {
-        return content.nativeContent(code,preview);
+    public ResponseEntity<Resource> media(@PathVariable String code,@RequestParam(defaultValue="true") boolean preview,@RequestParam(defaultValue="false") boolean thumbnail) {
+        return content.nativeContent(code,preview,thumbnail);
     }
 }

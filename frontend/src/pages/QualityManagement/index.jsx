@@ -1,3 +1,5 @@
+import CorrectionNotice from '../../components/CorrectionNotice';
+import { useNavigationTab } from '../../components/BrowserNavigation';
 import React, { useEffect, useRef, useState } from "react";
 import {
   assignQualityIssue,
@@ -272,7 +274,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
   const [documentsProjectKey, setDocumentsProjectKey] = useState("");
   const [documentScope, setDocumentScope] = useState("ACTIVE");
   const [members, setMembers] = useState([]);
-  const [activeTab, setActiveTab] = useState("weekly");
+  const [activeTab, setActiveTab] = useNavigationTab('qualityTab', 'weekly', ['weekly', 'issues', 'documents']);
   const [menuNotice, setMenuNotice] = useState("");
   const [status, setStatus] = useState("ALL");
   const [issueSource, setIssueSource] = useState("ALL");
@@ -1233,6 +1235,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
             projectId={projectId}
             T={T}
             canManage={canManage}
+            canReturnToDraft={isPlatformAdmin(currentUser)}
             buttonStyle={buttonStyle}
             fieldStyle={fieldStyle}
             pill={pill}
@@ -1598,7 +1601,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
                     T={T}
                     columns="1.5fr .8fr .8fr .9fr 160px"
                   >
-                    <strong>{file.fileName}</strong>
+                    <span><strong>{file.fileName}</strong><CorrectionNotice record={file} /></span>
                     <span>{file.fileType || "-"}</span>
                     {pill(
                       documentStatusLabel(file),
@@ -1690,6 +1693,7 @@ export default function QualityManagementPage({ projectId, theme: T, currentUser
       )}
       {modal === "detail" && selectedIssue && (
         <Modal T={T} title="质量问题详情" onClose={closeModal}>
+          <CorrectionNotice record={selectedIssue} />
           <IssueDetail
             T={T}
             issue={selectedIssue}

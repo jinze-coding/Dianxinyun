@@ -9,6 +9,8 @@ import {
   type RegistrationProjectOption
 } from '@/api/registration';
 import { showToast } from '@/utils/navigation';
+import AgreementConsent from '@/components/AgreementConsent.vue';
+import { requireAgreement, requestPrivacyAuthorization } from '@/utils/agreementConsent';
 import { getFreshWechatCode } from '@/utils/wechat';
 
 const STATUS_TOKEN_KEY = 'registration_status_query_token';
@@ -21,6 +23,7 @@ const form = reactive({
   reason: ''
 });
 const submitting = ref(false);
+const agreementsAccepted = ref(false);
 const returnUrl = ref('');
 const wechatSessionToken = ref('');
 const supportsWechatQuick = ref(false);
@@ -151,6 +154,7 @@ async function refreshCaptcha() {
 }
 
 async function submitApplication(phoneCode?: string) {
+  if (submitting.value || !requireAgreement(agreementsAccepted.value)) return;
   if (!validateApplicantInfo()) return;
   if (quickMode.value && !phoneCode) {
     showToast('请先授权微信手机号');
@@ -160,6 +164,7 @@ async function submitApplication(phoneCode?: string) {
 
   submitting.value = true;
   try {
+    await requestPrivacyAuthorization();
     const isQuick = quickMode.value;
     let wechatCode: string | undefined;
     // #ifdef MP-WEIXIN
@@ -200,6 +205,7 @@ async function submitApplication(phoneCode?: string) {
 }
 
 function getPhone(event: { detail?: { code?: string } }) {
+  if (!requireAgreement(agreementsAccepted.value)) return;
   if (!event.detail?.code) {
     showToast('未取得微信手机号，可改用手工手机号注册');
     return;
@@ -289,8 +295,9 @@ function removeProject(projectId: number) {
           <label><text>申请说明</text><textarea v-model="form.reason" maxlength="300" placeholder="可填写岗位、所属单位及申请原因" /></label>
         </view>
 
+        <AgreementConsent v-model="agreementsAccepted" :disabled="submitting" />
         <template v-if="quickMode">
-          <button class="wechat-submit" open-type="getPhoneNumber" :disabled="submitting || !selectedProjects.length" @getphonenumber="getPhone">
+          <button class="wechat-submit" :open-type="agreementsAccepted ? 'getPhoneNumber' : ''" :disabled="submitting || !agreementsAccepted || !selectedProjects.length" @getphonenumber="getPhone">
             {{ submitting ? '正在提交…' : '微信快捷注册' }}
           </button>
           <button class="manual-submit" :disabled="submitting" @tap="switchMode">使用手工手机号注册</button>

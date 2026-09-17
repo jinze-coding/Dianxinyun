@@ -78,6 +78,10 @@ import java.util.stream.Collectors;
 
 @Service
 public class SiteAccessService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.example.siteplatform.system.correction.CorrectionNoticeService correctionNotices;
+    private String corrected(String text,String type,Long id) { return correctionNotices==null?(text==null?"":text):correctionNotices.append(text,type,id); }
+
     public static final String STATUS_PENDING = "PENDING";
     public static final String STATUS_SUBMITTED = "SUBMITTED";
     public static final String STATUS_OPEN = "OPEN";
@@ -890,7 +894,7 @@ public class SiteAccessService {
                                  Map<Long, List<SiteVisitPerson>> peopleByInvitation) {
         String[] headers = {"项目", "邀请编号", "计划到场", "计划离场", "来访事由", "到访地点",
                 "单位", "人员类型", "姓名", "手机号码", "出行方式", "车牌号",
-                "接待人", "接待人手机号码", "状态", "提交时间"};
+                "接待人", "接待人手机号码", "状态", "提交时间", "管理员纠错"};
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet("外访人员");
             sheet.createFreezePane(0, 1);
@@ -932,7 +936,7 @@ public class SiteAccessService {
                             nullToEmpty(invitation.getHostName()),
                             nullToEmpty(cryptoService.decrypt(invitation.getHostPhoneEncrypted())),
                             statusLabel(effectiveStatus(invitation)),
-                            formatDateTime(invitation.getSubmittedTime()));
+                            formatDateTime(invitation.getSubmittedTime()), corrected("","SINGLE_VISIT",invitation.getId()));
                     for (int index = 0; index < values.size(); index++) {
                         row.createCell(index).setCellValue(safeExcelText(values.get(index)));
                     }

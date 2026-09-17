@@ -1,6 +1,9 @@
 import { createSSRApp } from 'vue';
 import App from './App.vue';
 import { canAccessRoot } from '@/stores/auth';
+// #ifdef MP-WEIXIN
+import { appSharing } from '@/utils/appSharing';
+// #endif
 
 const ROUTE_PERMISSION_RULES: Array<[string, string]> = [
   ['/pages/documents/', '/pages/documents/index'],
@@ -30,6 +33,9 @@ function installPermissionNavigationGuards() {
 export function createApp() {
   installPermissionNavigationGuards();
   const app = createSSRApp(App);
+  // #ifdef MP-WEIXIN
+  app.mixin(appSharing);
+  // #endif
   return {
     app
   };

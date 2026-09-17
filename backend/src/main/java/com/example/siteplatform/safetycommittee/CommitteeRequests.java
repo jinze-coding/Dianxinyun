@@ -5,6 +5,8 @@ import java.util.List;
 
 public final class CommitteeRequests {
     private CommitteeRequests() {}
+    public record Rotation(@NotNull @Min(0) @Max(270) Integer rotationDegrees,
+            @NotNull @Min(1) Integer expectedVersion) {}
     public record Create(@NotNull @Positive Long projectId,
             @NotBlank String category, @Size(max=2000) String conclusion,
             @Size(max=30) List<@NotNull @Positive Long> attachmentIds,

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CorrectionNotice from '@/components/CorrectionNotice.vue';
 import { computed, reactive, ref } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
 import AppNavBar from '@/components/AppNavBar.vue';
@@ -306,6 +307,7 @@ async function confirmArchive() {
   <view class="detail-page">
     <AppNavBar title="用印详情" @back="goBack" />
     <scroll-view class="detail-scroll" scroll-y>
+    <CorrectionNotice :record="detail" />
       <view class="detail-content">
         <view v-if="loading" class="state-card">正在加载用印申请…</view>
         <view v-else-if="errorMessage" class="state-card error"><text>{{ errorMessage }}</text><button @tap="loadDetail">重新加载</button></view>

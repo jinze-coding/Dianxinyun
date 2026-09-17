@@ -90,6 +90,10 @@ import java.util.stream.Collectors;
 
 @Service
 public class InspectionService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.example.siteplatform.system.correction.CorrectionNoticeService correctionNotices;
+    private String corrected(String text,String type,Long id) { return correctionNotices==null?(text==null?"":text):correctionNotices.append(text,type,id); }
+
 
     public static final String TEMPLATE_ELECTRIC_BOX_DAILY = "ELECTRIC_BOX_DAILY";
     public static final String SOURCE_ELECTRICIAN_DAILY = "ELECTRICIAN_DAILY";
@@ -1468,7 +1472,7 @@ public class InspectionService {
                         ? "：" + item.getDescription()
                         : ""))
                 .forEach(remarks::add);
-        return String.join("；", remarks);
+        return corrected(String.join("；", remarks),"ELECTRIC_INSPECTION",record.getId());
     }
 
     private void applyReviewFilters(LambdaQueryWrapper<InspectionRecord> wrapper, String reviewScope,

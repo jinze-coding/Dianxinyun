@@ -88,6 +88,7 @@ export interface ProjectModuleState {
   projectId: number;
   enabledBusinessModules: string[];
   moduleConfigVersion: number;
+  inboxEntryVisible?: boolean;
 }
 export function getProjectModules(projectId: number): Promise<ProjectModuleState> {
   return request<ProjectModuleState>(`/projects/${projectId}/business-modules`);
